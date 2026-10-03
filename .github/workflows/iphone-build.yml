@@ -1,0 +1,40 @@
+name: Build SanPlan iPhone
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: sanplan-iphone
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Compile device app and run simulator tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          xcodebuild -version | tee artifacts/xcode-version.txt
+          xcodebuild -showsdks > artifacts/sdks.txt
+          printf '%s\n' "$GITHUB_SHA" > artifacts/source-commit.txt
+          xcodebuild -project SanPlan.xcodeproj -scheme SanPlan -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build > artifacts/device-build.log 2>&1 || { tail -n 100 artifacts/device-build.log; exit 1; }
+          mkdir -p build/package/Payload
+          cp -R build/device/Build/Products/Release-iphoneos/SanPlan.app build/package/Payload/
+          (cd build/package && zip -qr ../../artifacts/SanPlan-unsigned.ipa Payload)
+          shasum -a 256 artifacts/SanPlan-unsigned.ipa > artifacts/SHA256.txt
+          xcrun simctl list devices available --json > artifacts/devices.json
+          simulator=$(python3 -c 'import json; d=json.load(open("artifacts/devices.json")); candidates=[v["udid"] for k,vs in d["devices"].items() if "iOS-26" in k for v in vs if v.get("isAvailable") and v["name"].startswith("iPhone")]; assert candidates, "No iOS 26 iPhone simulator installed"; print(candidates[0])')
+          xcodebuild -project SanPlan.xcodeproj -scheme SanPlan -destination "platform=iOS Simulator,id=$simulator" -derivedDataPath build/simulator -resultBundlePath artifacts/tests.xcresult CODE_SIGNING_ALLOWED=NO test > artifacts/tests.log 2>&1 || { tail -n 100 artifacts/tests.log; exit 1; }
+          xcrun xcresulttool get test-results summary --path artifacts/tests.xcresult --format json > artifacts/test-summary.json
+          printf 'Device build and XCTest passed. IPA unsigned; Windows sideload signing required.\n' > artifacts/RESULT.txt
+      - name: Upload IPA and diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SanPlan-iPhone
+          path: artifacts/
+          retention-days: 1
+          if-no-files-found: error
