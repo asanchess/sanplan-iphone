@@ -97,7 +97,7 @@
 
 
 ## 6. Проверка сборки на Mac
-3 октября 2026 реальная ARM64 Release-сборка для iPhone прошла в GitHub Actions на Xcode 26.6; 16 XCTest прошли на iOS 26.4.1 Simulator. [Успешный запуск и журналы](https://github.com/asanchess/sanplan-iphone/actions/runs/37118019973). Подпись, установка и звук на физическом iPhone ещё НЕ проверены. Аппаратные инструкции выше — ожидаемое поведение для проверки. Основной путь с Windows и SHA256 IPA описаны в [WINDOWS.md](WINDOWS.md). Не скрывайте SanPlan и не включайте для него требование Face ID: Apple предупреждает, что такие приложения несовместимы с AlarmKit.
+3 октября 2026 реальная ARM64 Release-сборка для iPhone прошла в GitHub Actions на Xcode 26.6; 16 XCTest прошли на iOS 26.4.1 Simulator. [Успешный запуск и журналы](https://github.com/asanchess/sanplan-iphone/actions/runs/37118019973). Подписанный владельцем SanPlan 1.0.0 (build 1) найден на физическом iPhone отдельным USB-запросом списка установленных приложений. Запуск после включения Developer Mode и звук пока НЕ проверены. Аппаратные инструкции выше — ожидаемое поведение для проверки. Основной путь с Windows и SHA256 IPA описаны в [WINDOWS.md](WINDOWS.md). Не скрывайте SanPlan и не включайте для него требование Face ID: Apple предупреждает, что такие приложения несовместимы с AlarmKit.
 
 В папке native/ios на Mac:
 
