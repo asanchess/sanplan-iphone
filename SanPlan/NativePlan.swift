@@ -10,7 +10,14 @@ public struct NativeSchedule: Codable, Equatable, Hashable {
     public let reminderMinutes: Int?
     public let reminderOffsets: [Int]?
 
-    public init(date: String? = nil, time: String? = nil, dateTime: String? = nil, timeZone: String? = nil, reminderMinutes: Int? = nil, reminderOffsets: [Int]? = nil) {
+    public init(
+        date: String? = nil,
+        time: String? = nil,
+        dateTime: String? = nil,
+        timeZone: String? = nil,
+        reminderMinutes: Int? = nil,
+        reminderOffsets: [Int]? = nil
+    ) {
         self.date = date
         self.time = time
         self.dateTime = dateTime
@@ -187,14 +194,24 @@ public struct PlannedAlarm: Identifiable, Equatable {
     public let eventDate: Date
     public let alarmDate: Date
     public let offsetMinutes: Int
+    public let timeZone: String?
 
-    public init(id: UUID, planId: String, planTitle: String, eventDate: Date, alarmDate: Date, offsetMinutes: Int) {
+    public init(
+        id: UUID,
+        planId: String,
+        planTitle: String,
+        eventDate: Date,
+        alarmDate: Date,
+        offsetMinutes: Int,
+        timeZone: String? = nil
+    ) {
         self.id = id
         self.planId = planId
         self.planTitle = planTitle
         self.eventDate = eventDate
         self.alarmDate = alarmDate
         self.offsetMinutes = offsetMinutes
+        self.timeZone = timeZone
     }
 }
 
@@ -232,6 +249,7 @@ public enum NativePlanPlanner {
                 continue
             }
 
+            let planTz = plan.googleSchedule?.timeZone ?? plan.timeZone
             let offsets = plan.resolvedReminderOffsets()
             for offset in offsets {
                 let alarmTimestamp = eventDate.addingTimeInterval(-Double(offset * 60))
@@ -247,7 +265,8 @@ public enum NativePlanPlanner {
                         planTitle: plan.title,
                         eventDate: eventDate,
                         alarmDate: alarmTimestamp,
-                        offsetMinutes: offset
+                        offsetMinutes: offset,
+                        timeZone: planTz
                     ))
                 }
             }

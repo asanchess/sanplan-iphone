@@ -24,18 +24,36 @@ private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unche
     }
 }
 
+private final class NativeMessageProxy: NSObject, WKScriptMessageHandler {
+    weak var gateway: PlanGateway?
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        gateway?.receiveNativeMessage(message)
+    }
+}
+
 @MainActor
 final class PlanGateway: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     static let origin = URL(string: "https://sanplan-asanchess.vercel.app")!
     let webView: WKWebView
     private let redirectDelegate = NoRedirectDelegate()
+    private let messageProxy = NativeMessageProxy()
+    var onPlansChanged: (() -> Void)?
+    var onAlarmTabRequested: (() -> Void)?
+    private var requestedWebTab = "record"
+    @Published private(set) var isLoadingPlans = false
+    private var pendingLoads = 0
 
     override init() {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
+        configuration.userContentController.add(messageProxy, name: "sanplan")
+        configuration.userContentController.addUserScript(WKUserScript(
+            source: "if (location.origin === 'https://sanplan-asanchess.vercel.app') { window.SanPlanNative = true; document.addEventListener('DOMContentLoaded', () => document.documentElement.classList.add('native-shell')); }",
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
+        messageProxy.gateway = self
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.isOpaque = false
@@ -43,7 +61,38 @@ final class PlanGateway: NSObject, ObservableObject, WKNavigationDelegate, WKUID
         webView.load(URLRequest(url: Self.origin))
     }
 
+    // Web messages only request an authenticated re-fetch. They never supply plans or credentials.
+    fileprivate func receiveNativeMessage(_ message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "https",
+              origin.host == Self.origin.host, origin.port == 0 || origin.port == 443,
+              let body = message.body as? [String: String] else { return }
+        if body["type"] == "plansChanged" { onPlansChanged?() }
+        if body["type"] == "openAlarms" { onAlarmTabRequested?() }
+    }
+
+    func navigate(to tab: String) {
+        guard ["calendar", "record", "settings"].contains(tab) else { return }
+        requestedWebTab = tab
+        applyRequestedTab()
+    }
+
+    private func applyRequestedTab() {
+        guard webView.url?.scheme == "https", webView.url?.host == Self.origin.host else { return }
+        webView.evaluateJavaScript("if (window.location.hash !== '#\(requestedWebTab)') { window.location.hash = '\(requestedWebTab)'; }")
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        applyRequestedTab()
+    }
+
     func loadPlans() async throws -> [NativePlan] {
+        pendingLoads += 1
+        isLoadingPlans = true
+        defer {
+            pendingLoads -= 1
+            isLoadingPlans = pendingLoads > 0
+        }
         let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies {
                 continuation.resume(returning: $0)
