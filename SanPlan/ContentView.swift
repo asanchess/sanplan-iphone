@@ -545,7 +545,7 @@ struct AlarmsScreenView: View {
         VStack(spacing: 12) {
             Image(systemName: "alarm")
                 .font(.system(size: 40))
-                .foregroundColor(inactiveSlate)
+                .foregroundColor(.secondary)
                 .padding(.top, 12)
 
             Text("Нет запланированных будильников")
