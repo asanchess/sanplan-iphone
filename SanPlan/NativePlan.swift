@@ -40,6 +40,8 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
     public let timeZone: String?
     public let completed: Bool?
     public let googleSchedule: NativeSchedule?
+    public let alarmSchedule: NativeSchedule?
+    public let alarmDeleted: Bool?
 
     public init(
         id: String,
@@ -52,7 +54,9 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
         reminderOffsets: [Int]? = nil,
         timeZone: String? = nil,
         completed: Bool? = nil,
-        googleSchedule: NativeSchedule? = nil
+        googleSchedule: NativeSchedule? = nil,
+        alarmSchedule: NativeSchedule? = nil,
+        alarmDeleted: Bool? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -65,7 +69,11 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
         self.timeZone = timeZone
         self.completed = completed
         self.googleSchedule = googleSchedule
+        self.alarmSchedule = alarmSchedule
+        self.alarmDeleted = alarmDeleted
     }
+
+    public var effectiveAlarmSchedule: NativeSchedule? { alarmSchedule ?? googleSchedule }
 
     /// Вычисляет актуальные смещения напоминаний (в минутах до события).
     /// Правила:
@@ -75,7 +83,11 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
     /// - Ограничение: максимум 5 валидных смещений.
     /// - Если `reminderOffsets == nil` — выполняется fallback на скалярное значение `reminderMinutes`.
     public func resolvedReminderOffsets() -> [Int] {
-        if let explicitOffsets = googleSchedule?.reminderOffsets ?? reminderOffsets {
+        if alarmDeleted == true { return [] }
+        let schedule = effectiveAlarmSchedule
+        // An explicit alarm override owns its reminders; never inherit the original plan's signals.
+        let offsets = alarmSchedule != nil ? schedule?.reminderOffsets : schedule?.reminderOffsets ?? reminderOffsets
+        if let explicitOffsets = offsets {
             if explicitOffsets.isEmpty {
                 return []
             }
@@ -90,7 +102,8 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
             return Array(uniqueValidOffsets.prefix(5))
         }
 
-        if let scalar = googleSchedule?.reminderMinutes ?? reminderMinutes {
+        let scalar = alarmSchedule != nil ? schedule?.reminderMinutes : schedule?.reminderMinutes ?? reminderMinutes
+        if let scalar {
             if scalar >= 0 && scalar <= 40320 {
                 return [scalar]
             }
@@ -102,21 +115,22 @@ public struct NativePlan: Codable, Identifiable, Equatable, Hashable {
 
     /// Строго парсит дату и время события с учетом приоритета `googleSchedule` и валидации таймзоны.
     public func resolveEventDate() -> Date? {
+        let schedule = effectiveAlarmSchedule
         // Приоритет: googleSchedule.dateTime (ISO8601)
-        if let schedule = googleSchedule, let dtString = schedule.dateTime, !dtString.isEmpty {
+        if let schedule, let dtString = schedule.dateTime, !dtString.isEmpty {
             if let date = Self.parseISO8601(dtString) {
                 return date
             }
         }
 
         // Вторичный приоритет: комбинация date + time
-        let datePart = googleSchedule?.date ?? date
+        let datePart = schedule?.date ?? date
         guard let validDatePart = datePart, !validDatePart.isEmpty else {
             return nil
         }
 
-        guard let timePart = googleSchedule?.time ?? time, !timePart.isEmpty else { return nil }
-        let tzIdentifier = googleSchedule?.timeZone ?? timeZone
+        guard let timePart = schedule?.time ?? time, !timePart.isEmpty else { return nil }
+        let tzIdentifier = schedule?.timeZone ?? timeZone
 
         guard let tzIdentifier, !tzIdentifier.isEmpty else { return nil }
         var timeZoneToUse: TimeZone = .current
@@ -240,7 +254,7 @@ public enum NativePlanPlanner {
 
         for plan in plans {
             // Завершенные задачи исключаются из расписания
-            if plan.completed == true {
+            if plan.completed == true || plan.alarmDeleted == true {
                 continue
             }
 
@@ -249,7 +263,7 @@ public enum NativePlanPlanner {
                 continue
             }
 
-            let planTz = plan.googleSchedule?.timeZone ?? plan.timeZone
+            let planTz = plan.effectiveAlarmSchedule?.timeZone ?? plan.timeZone
             let offsets = plan.resolvedReminderOffsets()
             for offset in offsets {
                 let alarmTimestamp = eventDate.addingTimeInterval(-Double(offset * 60))

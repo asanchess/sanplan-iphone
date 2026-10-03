@@ -40,9 +40,9 @@ jobs:
           if [[ "$state" != "Booted" ]]; then xcrun simctl boot "$simulator"; fi
           xcrun simctl bootstatus "$simulator" -b
           xcrun simctl install "$simulator" build/simulator/Build/Products/Debug-iphonesimulator/SanPlan.app
-          xcrun simctl ui "$simulator" appearance light
+          xcrun simctl ui "$simulator" appearance dark
           xcrun simctl status_bar "$simulator" override --time '9:41' --batteryState charged --batteryLevel 100
-          xcrun simctl launch "$simulator" com.sanplan.companion --show-alarms
+          xcrun simctl launch "$simulator" com.sanplan.companion --show-system-alarms
           sleep 3
           xcrun simctl io "$simulator" screenshot artifacts/alarms-screen-simulator.png
       - name: Upload IPA and diagnostic logs

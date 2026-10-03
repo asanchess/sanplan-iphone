@@ -502,7 +502,65 @@ final class AlarmCoordinatorReconciliationTests: XCTestCase {
         XCTAssertEqual(coordinator.activeAlarmCount, 1)
     }
 
-    // 8. Проверка форматирования системного названия с названием, датой и смещением
+    func testLongAlarmTitleIsNeverShortened() {
+        let text = String(repeating: "Важная подробная задача с полным описанием и договорённостями. ", count: 12)
+        let date = Date(timeIntervalSince1970: 1792065600)
+        let alarm = PlannedAlarm(id: UUID(), planId: "long", planTitle: text, eventDate: date, alarmDate: date, offsetMinutes: 0, timeZone: "UTC")
+        XCTAssertEqual(AlarmCoordinator.formatSystemAlarmTitle(alarm: alarm), text)
+    }
+
+    func testAlarmOverrideDecodesAndPreservesOriginalPlan() throws {
+        let json = #"{"id":"override","title":"Встреча","date":"2026-10-15","time":"12:00","timeZone":"UTC","reminderOffsets":[60],"googleSchedule":{"date":"2026-10-16","time":"13:00","timeZone":"UTC","reminderOffsets":[10]},"alarmSchedule":{"date":"2026-10-20","time":"09:00","timeZone":"Asia/Qyzylorda","reminderOffsets":[15,0]},"alarmDeleted":false}"#
+        let plan = try JSONDecoder().decode(NativePlan.self, from: Data(json.utf8))
+        XCTAssertEqual(plan.date, "2026-10-15")
+        XCTAssertEqual(plan.googleSchedule?.date, "2026-10-16")
+        XCTAssertEqual(plan.resolvedReminderOffsets(), [15, 0])
+        XCTAssertEqual(plan.resolveEventDate(), ISO8601DateFormatter().date(from: "2026-10-20T04:00:00Z"))
+        let result = NativePlanPlanner.planAlarms(plans: [plan], referenceDate: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(result.scheduledAlarms.count, 2)
+        XCTAssertTrue(result.scheduledAlarms.allSatisfy { $0.timeZone == "Asia/Qyzylorda" })
+    }
+
+    func testDisabledAlarmOverrideNeverInheritsOriginalReminders() {
+        let plan = NativePlan(id: "off", title: "Выключено", date: "2026-10-20", time: "12:00", reminderOffsets: [60], timeZone: "UTC", alarmSchedule: NativeSchedule(reminderOffsets: []))
+        XCTAssertEqual(plan.resolvedReminderOffsets(), [])
+        let unspecified = NativePlan(id: "unset", title: "Не выбрано", reminderOffsets: [60], alarmSchedule: NativeSchedule(date: "2026-10-20", time: "12:00", timeZone: "UTC"))
+        XCTAssertEqual(unspecified.resolvedReminderOffsets(), [])
+    }
+
+    func testDeletedAlarmOverrideCancelsInstalledSignalWithoutDeletingParent() async {
+        let (defaults, suite) = createTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FakeAlarmService()
+        let coordinator = AlarmCoordinator(service: service, userDefaults: defaults)
+        let base = makeFuturePlan(id: "linked-delete", title: "Исходная встреча", secondsFromNow: 7200)
+        let schedule = NativeSchedule(date: base.date, time: base.time, timeZone: "UTC", reminderOffsets: [0])
+        let active = NativePlan(id: base.id, title: base.title, date: base.date, time: base.time, reminderOffsets: [60], timeZone: "UTC", alarmSchedule: schedule)
+        await coordinator.syncAlarms(plans: [active])
+        XCTAssertEqual(coordinator.activeAlarmCount, 1)
+        let deleted = NativePlan(id: base.id, title: base.title, date: base.date, time: base.time, reminderOffsets: [60], timeZone: "UTC", alarmSchedule: schedule, alarmDeleted: true)
+        await coordinator.syncAlarms(plans: [deleted])
+        XCTAssertEqual(coordinator.activeAlarmCount, 0)
+        XCTAssertEqual(service.systemIDs.count, 0)
+        XCTAssertEqual(deleted.title, base.title)
+    }
+
+    func testDeleteAllOwnAlarmsPersistsSchedulingOptOut() async {
+        let (defaults, suite) = createTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FakeAlarmService()
+        let coordinator = AlarmCoordinator(service: service, userDefaults: defaults)
+        coordinator.hasUserOptedIn = true
+        await coordinator.syncAlarms(plans: [makeFuturePlan(id: "remove", title: "Полный текст", secondsFromNow: 3600)])
+        XCTAssertEqual(coordinator.activeAlarmCount, 1)
+        await coordinator.deleteAllOwnAlarms()
+        XCTAssertEqual(coordinator.activeAlarmCount, 0)
+        XCTAssertFalse(coordinator.hasUserOptedIn)
+        let reloaded = AlarmCoordinator(service: service, userDefaults: defaults)
+        XCTAssertFalse(reloaded.hasUserOptedIn)
+    }
+
+    // Keep the full user's title separate from schedule details.
     func testFormatSystemAlarmTitle() {
         let eventDate = Date(timeIntervalSince1970: 1792065600) // 2026-10-15 12:00:00 UTC
         let alarmDate = eventDate.addingTimeInterval(-900)
@@ -517,9 +575,8 @@ final class AlarmCoordinatorReconciliationTests: XCTestCase {
         )
 
         let formattedTitle = AlarmCoordinator.formatSystemAlarmTitle(alarm: planned)
-        XCTAssertTrue(formattedTitle.contains("Командный синк"))
-        XCTAssertTrue(formattedTitle.contains("15"))
-        XCTAssertTrue(formattedTitle.contains("15 мин"))
+        XCTAssertEqual(formattedTitle, "Командный синк")
+        XCTAssertTrue(AlarmCoordinator.formatAlarmScheduleDescription(alarm: planned).contains("15 мин"))
     }
 
     func testDayHourAndEventOffsetsScheduleThreeExactSignalsAndCompleteTogether() async {

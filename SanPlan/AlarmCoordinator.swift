@@ -2,6 +2,23 @@ import Foundation
 import Combine
 import SwiftUI
 import AlarmKit
+import AppIntents
+
+/// The system title cannot promise unlimited lines. Keep the full text available offline in the app.
+struct ReadFullAlarmIntent: LiveActivityIntent {
+    static var title: LocalizedStringResource = "Прочитать план"
+    static var openAppWhenRun = true
+    @Parameter(title: "Текст плана") var planTitle: String
+    init() { planTitle = "" }
+    init(planTitle: String) { self.planTitle = planTitle }
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            UserDefaults.standard.set(planTitle, forKey: "SanPlan_AlarmDetailText")
+            NotificationCenter.default.post(name: Notification.Name("SanPlan_ReadFullAlarm"), object: nil)
+        }
+        return .result()
+    }
+}
 
 /// Метаданные будильника SanPlan, сохраняемые системой AlarmKit.
 public struct SanPlanAlarmMetadata: AlarmMetadata, Hashable {
@@ -495,6 +512,10 @@ public final class AlarmCoordinator: ObservableObject {
         updatePublishedState(from: registry)
 
         if failedList.isEmpty {
+            // A queued/background refresh must not recreate alarms the user just removed.
+            hasUserOptedIn = false
+            needsResync = false
+            queuedPlans = nil
             statusMessage = "Все будильники SanPlan успешно удалены."
             syncErrors.removeAll()
         } else {
@@ -519,6 +540,11 @@ public final class AlarmCoordinator: ObservableObject {
 
     /// Форматирует системное название будильника, включая название плана, дату/время события и смещение.
     public static func formatSystemAlarmTitle(alarm: PlannedAlarm) -> String {
+        // Preserve every character of the user's title; date/offset remain in metadata and app details.
+        return alarm.planTitle
+    }
+
+    public static func formatAlarmScheduleDescription(alarm: PlannedAlarm) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ru_RU")
         if let tzId = alarm.timeZone, let tz = TimeZone(identifier: tzId) {
@@ -544,7 +570,7 @@ public final class AlarmCoordinator: ObservableObject {
             offsetStr = "за \(alarm.offsetMinutes) мин."
         }
 
-        return "\(alarm.planTitle) — \(dateStr) (\(offsetStr))"
+        return "\(dateStr) (\(offsetStr))"
     }
 
     private func scheduleAlarmKitEntry(alarm: PlannedAlarm) async throws {
@@ -552,7 +578,9 @@ public final class AlarmCoordinator: ObservableObject {
 
         let alertPresentation = AlarmPresentation.Alert(
             title: LocalizedStringResource(stringLiteral: systemTitle),
-            stopButton: AlarmButton(text: "Закрыть", textColor: .white, systemImageName: "stop.circle")
+            stopButton: AlarmButton(text: "Закрыть", textColor: .white, systemImageName: "stop.circle"),
+            secondaryButton: AlarmButton(text: "Прочитать", textColor: .white, systemImageName: "text.alignleft"),
+            secondaryButtonBehavior: .custom
         )
         let metadata = SanPlanAlarmMetadata(
             planId: alarm.planId,
@@ -568,6 +596,7 @@ public final class AlarmCoordinator: ObservableObject {
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(alarm.alarmDate),
             attributes: attributes,
+            secondaryIntent: ReadFullAlarmIntent(planTitle: alarm.planTitle),
             sound: .default
         )
         try await service.schedule(id: alarm.id, configuration: configuration)

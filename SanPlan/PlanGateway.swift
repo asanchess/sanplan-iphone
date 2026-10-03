@@ -39,9 +39,10 @@ final class PlanGateway: NSObject, ObservableObject, WKNavigationDelegate, WKUID
     private let messageProxy = NativeMessageProxy()
     var onPlansChanged: (() -> Void)?
     var onAlarmTabRequested: (() -> Void)?
+    var onSystemAlarmsRequested: (() -> Void)?
     private var requestedWebTab = "record"
     @Published private(set) var isLoadingPlans = false
-    @Published private(set) var themePreference = "system"
+    @Published private(set) var themePreference = "dark"
     private var pendingLoads = 0
 
     override init() {
@@ -58,8 +59,9 @@ final class PlanGateway: NSObject, ObservableObject, WKNavigationDelegate, WKUID
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
-        webView.scrollView.backgroundColor = .systemBackground
+        let graphite = UIColor(red: 23/255, green: 22/255, blue: 30/255, alpha: 1)
+        webView.backgroundColor = graphite
+        webView.scrollView.backgroundColor = graphite
         webView.load(URLRequest(url: Self.origin))
     }
 
@@ -71,13 +73,14 @@ final class PlanGateway: NSObject, ObservableObject, WKNavigationDelegate, WKUID
               let body = message.body as? [String: String] else { return }
         if body["type"] == "plansChanged" { onPlansChanged?() }
         if body["type"] == "openAlarms" { onAlarmTabRequested?() }
+        if body["type"] == "openSystemAlarms" { onSystemAlarmsRequested?() }
         if body["type"] == "themeChanged", let value = body["value"], ["light", "dark", "system"].contains(value) {
             themePreference = value
         }
     }
 
     func navigate(to tab: String) {
-        guard ["calendar", "record", "settings"].contains(tab) else { return }
+        guard ["calendar", "record", "alarms", "settings"].contains(tab) else { return }
         requestedWebTab = tab
         applyRequestedTab()
     }

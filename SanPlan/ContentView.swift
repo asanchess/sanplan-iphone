@@ -34,9 +34,9 @@ enum SanPlanTab: String, CaseIterable {
     var iconName: String {
         switch self {
         case .calendar: return "calendar"
-        case .record: return "mic.fill"
-        case .alarms: return "alarm.fill"
-        case .settings: return "gearshape.fill"
+        case .record: return "mic"
+        case .alarms: return "bell"
+        case .settings: return "slider.horizontal.3"
         }
     }
 }
@@ -50,38 +50,24 @@ struct ContentView: View {
 
     @State private var selectedTab: SanPlanTab = ProcessInfo.processInfo.arguments.contains("--show-alarms") ? .alarms : .record
     @State private var showingReportSheet: Bool = false
+    @State private var showingFullAlarmText = false
+    @State private var showingSystemAlarms = ProcessInfo.processInfo.arguments.contains("--show-system-alarms")
+    @State private var fullAlarmText = ""
     @State private var showingDeleteConfirmation: Bool = false
     @State private var fetchInProgress = false
     @State private var fetchRequested = false
 
-    // Палитра концепта: глубокий синий акцент, графитовый текст, сдержанные разделители
-    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.50, green: 0.69, blue: 0.99) : Color(red: 0.10, green: 0.28, blue: 0.60) }
+    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.73, green: 0.61, blue: 0.97) : Color(red: 0.46, green: 0.20, blue: 0.86) }
     private let inactiveSlate = Color(red: 0.45, green: 0.48, blue: 0.53)
-    private let canvasBackground = Color(UIColor.systemGroupedBackground)
+    private var canvasBackground: Color { colorScheme == .dark ? Color(red: 23/255, green: 22/255, blue: 30/255) : Color(UIColor.systemGroupedBackground) }
 
     var body: some View {
         VStack(spacing: 0) {
             // Центральная контентная область
             ZStack {
-                // ЕДИНСТВЕННЫЙ постоянно смонтированный WKWebView для вкладок calendar / record / settings
+                // All four approved web screens share one permanently mounted capture/session.
                 PlanWebViewContainer(webView: gateway.webView)
-                    .opacity(selectedTab == .alarms ? 0 : 1)
-                    .allowsHitTesting(selectedTab != .alarms)
-                    .accessibilityHidden(selectedTab == .alarms)
                     .ignoresSafeArea(.keyboard, edges: .bottom)
-
-                // Изолированный нативный экран будильников
-                if selectedTab == .alarms {
-                    AlarmsScreenView(
-                        coordinator: coordinator,
-                        isLoading: gateway.isLoadingPlans,
-                        onRefresh: { await syncFromGateway() },
-                        onShowReport: { showingReportSheet = true },
-                        onConfirmDelete: { showingDeleteConfirmation = true }
-                    )
-                    .background(canvasBackground)
-                    .transition(.opacity)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -90,28 +76,51 @@ struct ContentView: View {
         }
         .background(canvasBackground)
         .preferredColorScheme(gateway.themePreference == "dark" ? .dark : gateway.themePreference == "light" ? .light : nil)
-        .confirmationDialog(
-            "Удалить только будильники SanPlan?",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Удалить будильники SanPlan", role: .destructive) {
-                Task {
-                    await coordinator.deleteAllOwnAlarms()
+        .tint(accentBlue)
+        .sheet(isPresented: $showingSystemAlarms) {
+            AlarmsScreenView(
+                coordinator: coordinator,
+                isLoading: gateway.isLoadingPlans,
+                onRefresh: { await syncFromGateway() },
+                onShowReport: { showingReportSheet = true },
+                onConfirmDelete: { showingDeleteConfirmation = true }
+            )
+            .preferredColorScheme(gateway.themePreference == "dark" ? .dark : gateway.themePreference == "light" ? .light : nil)
+            .sheet(isPresented: $showingReportSheet) {
+                WarningsReportSheet(warnings: coordinator.syncWarnings, errors: coordinator.syncErrors, activeCount: coordinator.activeAlarmCount)
+            }
+            .confirmationDialog("Удалить только будильники SanPlan?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
+                Button("Удалить будильники SanPlan", role: .destructive) { Task { await coordinator.deleteAllOwnAlarms() } }
+                Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("Будут отменены только будильники SanPlan. Сохранённые планы и личные будильники устройства останутся.")
+            }
+        }
+        .sheet(isPresented: $showingFullAlarmText) {
+            NavigationStack {
+                ScrollView {
+                    Text(fullAlarmText)
+                        .font(.body)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(24)
+                }
+                .navigationTitle("План")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Готово") { showingFullAlarmText = false }
+                    }
                 }
             }
-            Button("Отмена", role: .cancel) {}
-        } message: {
-            Text("Будут отменены только будильники, созданные приложением SanPlan. Личные будильники устройства затронуты не будут.")
         }
-        .sheet(isPresented: $showingReportSheet) {
-            WarningsReportSheet(
-                warnings: coordinator.syncWarnings,
-                errors: coordinator.syncErrors,
-                activeCount: coordinator.activeAlarmCount
-            )
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SanPlan_ReadFullAlarm"))) { _ in
+            openPendingAlarmText()
         }
         .onAppear {
+            openPendingAlarmText()
             setupBridgeCallbacks()
             if coordinator.hasUserOptedIn && coordinator.isAuthorized {
                 Task { await syncFromGateway() }
@@ -121,6 +130,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { newPhase in
             if newPhase == .active {
+                openPendingAlarmText()
                 Task {
                     if coordinator.hasUserOptedIn && coordinator.isAuthorized {
                         await syncFromGateway()
@@ -145,25 +155,35 @@ struct ContentView: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: tab.iconName)
-                            .font(.system(size: 20, weight: selectedTab == tab ? .semibold : .regular))
+                        .font(.system(size: 20, weight: .regular))
                         Text(tab.title)
                             .font(.system(size: 11, weight: selectedTab == tab ? .medium : .regular))
                     }
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 58)
+                    .background(selectedTab == tab ? accentBlue.opacity(0.12) : .clear, in: Capsule())
                     .contentShape(Rectangle())
                     .foregroundColor(selectedTab == tab ? accentBlue : inactiveSlate)
                 }
                 .accessibilityLabel(Text(tab.title))
             }
         }
-        .padding(.top, 6)
-        .padding(.bottom, 2)
-        .background(Color(UIColor.secondarySystemGroupedBackground))
-        .overlay(Divider(), alignment: .top)
+        .padding(5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(accentBlue.opacity(0.2), lineWidth: 1))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private func openPendingAlarmText() {
+        guard let text = UserDefaults.standard.string(forKey: "SanPlan_AlarmDetailText"), !text.isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: "SanPlan_AlarmDetailText")
+        fullAlarmText = text
+        showingFullAlarmText = true
     }
 
     private func handleTabSelection(_ tab: SanPlanTab) {
-        selectedTab = tab
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { selectedTab = tab }
+        gateway.navigate(to: tab.rawValue)
         if tab == .alarms {
             Task {
                 if coordinator.hasUserOptedIn && coordinator.isAuthorized {
@@ -172,8 +192,6 @@ struct ContentView: View {
                     await coordinator.reconcileWithSystem()
                 }
             }
-        } else {
-            gateway.navigate(to: tab.rawValue)
         }
     }
 
@@ -182,6 +200,7 @@ struct ContentView: View {
 
         gateway.onAlarmTabRequested = {
             selectedTab = .alarms
+            gateway.navigate(to: "alarms")
             Task {
                 if coordinator.hasUserOptedIn && coordinator.isAuthorized {
                     await syncFromGateway()
@@ -189,6 +208,10 @@ struct ContentView: View {
                     await coordinator.reconcileWithSystem()
                 }
             }
+        }
+        gateway.onSystemAlarmsRequested = {
+            showingSystemAlarms = true
+            Task { await syncFromGateway() }
         }
     }
 
@@ -201,7 +224,9 @@ struct ContentView: View {
             await coordinator.reconcileWithSystem()
             do {
                 let plans = try await gateway.loadPlans()
-                await coordinator.syncAlarms(plans: plans)
+                if coordinator.hasUserOptedIn {
+                    await coordinator.syncAlarms(plans: plans)
+                }
             } catch {
                 coordinator.reportFetchError(error.localizedDescription)
             }
@@ -220,15 +245,15 @@ struct AlarmsScreenView: View {
 
     @State private var isDiagnosticsExpanded: Bool = false
 
-    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.50, green: 0.69, blue: 0.99) : Color(red: 0.10, green: 0.28, blue: 0.60) }
-    private let cardBackground = Color(UIColor.secondarySystemGroupedBackground)
+    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.73, green: 0.61, blue: 0.97) : Color(red: 0.46, green: 0.20, blue: 0.86) }
+    private var cardBackground: Color { colorScheme == .dark ? Color(red: 36/255, green: 34/255, blue: 46/255) : Color(UIColor.secondarySystemGroupedBackground) }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     // Баннер авторизации AlarmKit при необходимости
-                    if !coordinator.isAuthorized {
+                    if !coordinator.isAuthorized || !coordinator.hasUserOptedIn {
                         authorizationCard
                     }
 
@@ -273,7 +298,7 @@ struct AlarmsScreenView: View {
             .refreshable {
                 await onRefresh()
             }
-            .navigationTitle("Будильники")
+            .navigationTitle("Сигналы iPhone")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -342,9 +367,12 @@ struct AlarmsScreenView: View {
             }
 
             Button {
-                Task { await coordinator.requestAuthorization() }
+                Task {
+                    await coordinator.requestAuthorization()
+                    if coordinator.isAuthorized { await onRefresh() }
+                }
             } label: {
-                Text("Разрешить доступ")
+                Text(coordinator.isAuthorized ? "Включить будильники" : "Разрешить доступ")
                     .font(.subheadline)
                     .bold()
                     .frame(maxWidth: .infinity, minHeight: 44)
