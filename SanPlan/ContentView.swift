@@ -46,6 +46,7 @@ struct ContentView: View {
     @ObservedObject var gateway: PlanGateway
     @ObservedObject var coordinator: AlarmCoordinator
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var selectedTab: SanPlanTab = ProcessInfo.processInfo.arguments.contains("--show-alarms") ? .alarms : .record
     @State private var showingReportSheet: Bool = false
@@ -54,7 +55,7 @@ struct ContentView: View {
     @State private var fetchRequested = false
 
     // Палитра концепта: глубокий синий акцент, графитовый текст, сдержанные разделители
-    private let accentBlue = Color(red: 0.10, green: 0.28, blue: 0.60)
+    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.50, green: 0.69, blue: 0.99) : Color(red: 0.10, green: 0.28, blue: 0.60) }
     private let inactiveSlate = Color(red: 0.45, green: 0.48, blue: 0.53)
     private let canvasBackground = Color(UIColor.systemGroupedBackground)
 
@@ -88,6 +89,7 @@ struct ContentView: View {
             nativeBottomDock
         }
         .background(canvasBackground)
+        .preferredColorScheme(gateway.themePreference == "dark" ? .dark : gateway.themePreference == "light" ? .light : nil)
         .confirmationDialog(
             "Удалить только будильники SanPlan?",
             isPresented: $showingDeleteConfirmation,
@@ -210,6 +212,7 @@ struct ContentView: View {
 /// Выделенный нативный экран будильников с визуальной иерархией концепта.
 struct AlarmsScreenView: View {
     @ObservedObject var coordinator: AlarmCoordinator
+    @Environment(\.colorScheme) private var colorScheme
     let isLoading: Bool
     let onRefresh: () async -> Void
     let onShowReport: () -> Void
@@ -217,7 +220,7 @@ struct AlarmsScreenView: View {
 
     @State private var isDiagnosticsExpanded: Bool = false
 
-    private let accentBlue = Color(red: 0.10, green: 0.28, blue: 0.60)
+    private var accentBlue: Color { colorScheme == .dark ? Color(red: 0.50, green: 0.69, blue: 0.99) : Color(red: 0.10, green: 0.28, blue: 0.60) }
     private let cardBackground = Color(UIColor.secondarySystemGroupedBackground)
 
     var body: some View {
@@ -427,6 +430,11 @@ struct AlarmsScreenView: View {
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Text(formatClock(record.fireDate, timeZoneId: record.timeZone))
+                .font(.largeTitle.weight(.semibold))
+                .monospacedDigit()
+                .foregroundColor(accentBlue)
+
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Срабатывание")
@@ -617,6 +625,14 @@ struct AlarmsScreenView: View {
             formatter.timeZone = .current
         }
         formatter.dateFormat = "d MMM, HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func formatClock(_ date: Date, timeZoneId: String?) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.timeZone = timeZoneId.flatMap { TimeZone(identifier: $0) } ?? .current
+        formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
 

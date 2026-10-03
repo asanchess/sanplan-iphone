@@ -13,7 +13,6 @@
 		1A0000012B00000100000004 /* AlarmCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000006 /* AlarmCoordinator.swift */; };
 		1A0000012B00000100000005 /* PlanGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000007 /* PlanGateway.swift */; };
 		1A0000012B00000100000006 /* NativePlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000009 /* NativePlanTests.swift */; };
-		1A0000012B00000100000007 /* NativePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000005 /* NativePlan.swift */; };
 		1A0000012B00000100000008 /* AlarmKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000010 /* AlarmKit.framework */; };
 		1A0000012B00000100000009 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000011 /* WebKit.framework */; };
 1A0000012B00000100000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000020; };
@@ -225,7 +224,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000012B00000100000006 /* NativePlanTests.swift in Sources */,
-				1A0000012B00000100000007 /* NativePlan.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
