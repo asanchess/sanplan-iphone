@@ -356,7 +356,7 @@ final class AlarmCoordinatorReconciliationTests: XCTestCase {
         let alarmID = fakeService.systemIDs.first!
 
         // Имитируем, что демон системы удалил будильник после звонка
-        fakeService.removeOnCancelError.insert(alarmID)
+        fakeService.systemIDs.remove(alarmID)
 
         // Запуск сверки с системой должен очистить реестр без ошибок
         await coordinator.reconcileWithSystem()
@@ -404,7 +404,7 @@ final class AlarmCoordinatorReconciliationTests: XCTestCase {
         let alarmID = fakeService.systemIDs.first!
         // Имитируем ошибку "будильник не найден" от демона, и в системе его уже нет
         fakeService.cancelErrorForID[alarmID] = NSError(domain: "AlarmKit", code: 404, userInfo: [NSLocalizedDescriptionKey: "Alarm not found"])
-        fakeService.systemIDs.remove(alarmID)
+        fakeService.removeOnCancelError.insert(alarmID)
 
         await coordinator.syncAlarms(plans: [])
 
