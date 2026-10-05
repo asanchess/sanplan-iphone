@@ -390,26 +390,27 @@ struct AlarmsScreenView: View {
     }
 
     private var syncStatusSummaryCard: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Circle()
+                    .fill(coordinator.syncErrors.isEmpty && coordinator.isAuthorized ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+
+                Text(coordinator.statusMessage)
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(coordinator.isAuthorized ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-
-                    Text(coordinator.statusMessage)
-                        .font(.caption)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
                 if let syncDate = coordinator.lastSyncDate {
                     Text("Синхр: \(syncDate.formatted(date: .omitted, time: .standard))")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
+
+                Spacer()
 
                 Text("Активно: \(coordinator.activeAlarmCount)")
                     .font(.caption2)
