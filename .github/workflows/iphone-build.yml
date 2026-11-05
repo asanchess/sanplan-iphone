@@ -42,9 +42,15 @@ jobs:
           xcrun simctl install "$simulator" build/simulator/Build/Products/Debug-iphonesimulator/SanPlan.app
           xcrun simctl ui "$simulator" appearance dark
           xcrun simctl status_bar "$simulator" override --time '9:41' --batteryState charged --batteryLevel 100
-          xcrun simctl launch "$simulator" com.sanplan.companion --show-system-alarms
-          sleep 3
-          xcrun simctl io "$simulator" screenshot artifacts/alarms-screen-simulator.png
+          for scheme in dark light; do
+            xcrun simctl ui "$simulator" appearance "$scheme"
+            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion
+            sleep 3
+            xcrun simctl io "$simulator" screenshot "artifacts/login-$scheme.png"
+            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in
+            sleep 3
+            xcrun simctl io "$simulator" screenshot "artifacts/home-$scheme.png"
+          done
       - name: Upload IPA and diagnostic logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

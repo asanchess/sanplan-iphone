@@ -3,19 +3,11 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		1A0000012B00000100000001 /* SanPlanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000003 /* SanPlanApp.swift */; };
-		1A0000012B00000100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000004 /* ContentView.swift */; };
-		1A0000012B00000100000003 /* NativePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000005 /* NativePlan.swift */; };
-		1A0000012B00000100000004 /* AlarmCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000006 /* AlarmCoordinator.swift */; };
-		1A0000012B00000100000005 /* PlanGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000007 /* PlanGateway.swift */; };
-		1A0000012B00000100000006 /* NativePlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000009 /* NativePlanTests.swift */; };
 		1A0000012B00000100000008 /* AlarmKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000010 /* AlarmKit.framework */; };
-		1A0000012B00000100000009 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000011 /* WebKit.framework */; };
-1A0000012B00000100000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000020; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,17 +23,34 @@
 /* Begin PBXFileReference section */
 		1A0000022B00000200000001 /* SanPlan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SanPlan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000022B00000200000002 /* SanPlanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SanPlanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A0000022B00000200000003 /* SanPlanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SanPlanApp.swift; sourceTree = "<group>"; };
-		1A0000022B00000200000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		1A0000022B00000200000005 /* NativePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlan.swift; sourceTree = "<group>"; };
-		1A0000022B00000200000006 /* AlarmCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmCoordinator.swift; sourceTree = "<group>"; };
-		1A0000022B00000200000007 /* PlanGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanGateway.swift; sourceTree = "<group>"; };
-		1A0000022B00000200000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		1A0000022B00000200000009 /* NativePlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlanTests.swift; sourceTree = "<group>"; };
 		1A0000022B00000200000010 /* AlarmKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AlarmKit.framework; path = System/Library/Frameworks/AlarmKit.framework; sourceTree = SDKROOT; };
-		1A0000022B00000200000011 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
-1A0000022B00000200000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1A00000E2B00000E00000001 /* Exceptions for "SanPlan" folder in "SanPlan" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 1A0000042B00000400000001 /* SanPlan */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1A00000D2B00000D00000001 /* SanPlan */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1A00000E2B00000E00000001 /* Exceptions for "SanPlan" folder in "SanPlan" target */,
+			);
+			path = SanPlan;
+			sourceTree = "<group>";
+		};
+		1A00000D2B00000D00000002 /* SanPlanTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SanPlanTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		1A0000062B00000600000001 /* Frameworks */ = {
@@ -49,7 +58,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000012B00000100000008 /* AlarmKit.framework in Frameworks */,
-				1A0000012B00000100000009 /* WebKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,40 +74,17 @@
 		1A0000032B00000300000001 = {
 			isa = PBXGroup;
 			children = (
-				1A0000032B00000300000002 /* SanPlan */,
-				1A0000032B00000300000003 /* SanPlanTests */,
+				1A00000D2B00000D00000001 /* SanPlan */,
+				1A00000D2B00000D00000002 /* SanPlanTests */,
 				1A0000032B00000300000004 /* Frameworks */,
 				1A0000032B00000300000005 /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		1A0000032B00000300000002 /* SanPlan */ = {
-			isa = PBXGroup;
-			children = (
-				1A0000022B00000200000003 /* SanPlanApp.swift */,
-				1A0000022B00000200000004 /* ContentView.swift */,
-				1A0000022B00000200000005 /* NativePlan.swift */,
-				1A0000022B00000200000006 /* AlarmCoordinator.swift */,
-				1A0000022B00000200000007 /* PlanGateway.swift */,
-1A0000022B00000200000020 /* Assets.xcassets */,
-				1A0000022B00000200000008 /* Info.plist */,
-			);
-			path = SanPlan;
-			sourceTree = "<group>";
-		};
-		1A0000032B00000300000003 /* SanPlanTests */ = {
-			isa = PBXGroup;
-			children = (
-				1A0000022B00000200000009 /* NativePlanTests.swift */,
-			);
-			path = SanPlanTests;
 			sourceTree = "<group>";
 		};
 		1A0000032B00000300000004 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				1A0000022B00000200000010 /* AlarmKit.framework */,
-				1A0000022B00000200000011 /* WebKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -158,8 +143,8 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					1A0000042B00000400000001 = {
 						CreatedOnToolsVersion = 16.0;
@@ -171,7 +156,7 @@
 				};
 			};
 			buildConfigurationList = 1A00000B2B00000B00000001 /* Build configuration list for PBXProject "SanPlan" */;
-			compatibilityVersion = "Xcode 14.0";
+			compatibilityVersion = "Xcode 16.0";
 			developmentRegion = ru;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -194,7 +179,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			 1A0000012B00000100000020 /* Assets.xcassets in Resources */, );
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A0000072B00000700000002 /* Resources */ = {
@@ -211,11 +196,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000012B00000100000001 /* SanPlanApp.swift in Sources */,
-				1A0000012B00000100000002 /* ContentView.swift in Sources */,
-				1A0000012B00000100000003 /* NativePlan.swift in Sources */,
-				1A0000012B00000100000004 /* AlarmCoordinator.swift in Sources */,
-				1A0000012B00000100000005 /* PlanGateway.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -223,7 +203,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A0000012B00000100000006 /* NativePlanTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,7 +286,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SanPlan/Info.plist;
@@ -315,11 +294,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -328,7 +307,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SanPlan/Info.plist;
@@ -336,11 +315,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 2.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -357,7 +336,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion.SanPlanTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SanPlan.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SanPlan";
 			};
 			name = Debug;
@@ -375,7 +354,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion.SanPlanTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SanPlan.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SanPlan";
 			};
 			name = Release;

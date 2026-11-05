@@ -1,4 +1,4 @@
-build/
+﻿build/
 artifacts/
 *.xcuserstate
 xcuserdata/
