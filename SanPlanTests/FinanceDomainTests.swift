@@ -64,9 +64,12 @@ final class FinanceDomainTests: XCTestCase {
 
     func testCommitDraftsAndIdempotency() throws {
         let initial = emptyFinance()
+        // A spend named together with a balance must say whether the balance already includes it.
+        var expense = FinanceDraft(kind: "expense", title: "Проезд", amountMinor: 15000, date: "2026-05-01", category: "Транспорт")
+        expense.balanceRelation = "after"
         let drafts = [
             FinanceDraft(kind: "balance", title: "Остаток", amountMinor: 10000000, date: "2026-05-01"),
-            FinanceDraft(kind: "expense", title: "Проезд", amountMinor: 15000, date: "2026-05-01", category: "Транспорт")
+            expense
         ]
 
         let updated = try commitFinance(state: initial, drafts: drafts, batchId: "batch1", nowDate: "2026-05-01")

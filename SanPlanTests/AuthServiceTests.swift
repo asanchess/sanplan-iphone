@@ -184,7 +184,19 @@ final class AuthServiceTests: XCTestCase {
         var observedContentType: String?
 
         MockURLProtocol.requestHandler = { request in
-            observedBodyData = request.httpBody
+            // URLSession hands a protocol the body as a stream, not as httpBody.
+            observedBodyData = request.httpBody ?? request.httpBodyStream.map { stream in
+                stream.open()
+                defer { stream.close() }
+                var data = Data()
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&buffer, maxLength: buffer.count)
+                    if count <= 0 { break }
+                    data.append(buffer, count: count)
+                }
+                return data
+            }
             observedContentType = request.value(forHTTPHeaderField: "Content-Type")
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -199,10 +211,10 @@ final class AuthServiceTests: XCTestCase {
         let payload = TestPayload(password: "secret123")
         let _: EmptyResponse = try await client.post(path: "/api/login", body: payload)
 
-        XCTAssertNotNil(observedBodyData)
         XCTAssertTrue(observedContentType?.contains("application/json") == true)
 
-        let decoded = try JSONDecoder().decode([String: String].self, from: observedBodyData!)
+        let body = try XCTUnwrap(observedBodyData)
+        let decoded = try JSONDecoder().decode([String: String].self, from: body)
         XCTAssertEqual(decoded["password"], "secret123")
     }
 }
