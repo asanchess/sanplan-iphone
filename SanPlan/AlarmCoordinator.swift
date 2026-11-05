@@ -416,7 +416,7 @@ public final class AlarmCoordinator: ObservableObject {
         syncErrors = currentErrors
 
         if currentErrors.isEmpty {
-            statusMessage = "Синхронизация завершена: активно \(activeAlarmCount) будильников SanPlan."
+            statusMessage = "Синхронизация завершена: активно \(activeAlarmCount) будильников ARNA."
         } else {
             statusMessage = "Синхронизация завершена с замечаниями (\(currentErrors.count)). Проверьте отчет."
         }
@@ -437,13 +437,13 @@ public final class AlarmCoordinator: ObservableObject {
         let testId = UUID()
         let metadata = SanPlanAlarmMetadata(
             planId: "sanplan-test-single",
-            title: "Тестовый будильник SanPlan",
+            title: "Тестовый будильник ARNA",
             targetDate: fireDate,
             offsetMinutes: 0
         )
 
         let alertPresentation = AlarmPresentation.Alert(
-            title: LocalizedStringResource(stringLiteral: "Тестовый будильник SanPlan — проверка экрана блокировки"),
+            title: LocalizedStringResource(stringLiteral: "Тестовый будильник ARNA — проверка экрана блокировки"),
             stopButton: AlarmButton(text: "Закрыть", textColor: .white, systemImageName: "stop.circle")
         )
         let attributes = AlarmAttributes(
@@ -463,7 +463,7 @@ public final class AlarmCoordinator: ObservableObject {
             registry.records[testId.uuidString] = RegisteredAlarmRecord(
                 uuidString: testId.uuidString,
                 planId: "sanplan-test-single",
-                title: "Тестовый будильник SanPlan",
+                title: "Тестовый будильник ARNA",
                 fireDate: fireDate,
                 offsetMinutes: 0,
                 createdAt: Date(),
@@ -516,7 +516,7 @@ public final class AlarmCoordinator: ObservableObject {
             hasUserOptedIn = false
             needsResync = false
             queuedPlans = nil
-            statusMessage = "Все будильники SanPlan успешно удалены."
+            statusMessage = "Все будильники ARNA успешно удалены."
             syncErrors.removeAll()
         } else {
             statusMessage = "Не удалось отменить: \(failedList.joined(separator: ", ")). Они будут повторены при следующей очистке."

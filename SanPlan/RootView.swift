@@ -27,102 +27,29 @@ public enum MainTab: Int, CaseIterable, Identifiable {
     }
 }
 
-public struct TodayView: View {
-    @Binding var showSettings: Bool
-
-    public var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas.ignoresSafeArea()
-                EmptyState(
-                    title: "Сегодня",
-                    message: "Сводка планов, финансов и тренировок появится здесь.",
-                    icon: "sun.max"
-                )
-            }
-            .navigationTitle("Сегодня")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "person.crop.circle",
-                        accessibilityLabel: "Настройки"
-                    ) {
-                        showSettings = true
-                    }
-                }
-            }
-        }
-    }
-}
-
-public struct MoneyView: View {
-    @Binding var showSettings: Bool
-
-    public var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas.ignoresSafeArea()
-                EmptyState(
-                    title: "Деньги",
-                    message: "Локальный сейф расходов и доходов.",
-                    icon: "creditcard"
-                )
-            }
-            .navigationTitle("Деньги")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "person.crop.circle",
-                        accessibilityLabel: "Настройки"
-                    ) {
-                        showSettings = true
-                    }
-                }
-            }
-        }
-    }
-}
-
-public struct PlansView: View {
-    @Binding var showSettings: Bool
-
-    public var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas.ignoresSafeArea()
-                EmptyState(
-                    title: "Планы",
-                    message: "Расписание событий, задачи и напоминания.",
-                    icon: "calendar"
-                )
-            }
-            .navigationTitle("Планы")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "person.crop.circle",
-                        accessibilityLabel: "Настройки"
-                    ) {
-                        showSettings = true
-                    }
-                }
-            }
-        }
-    }
-}
-
 public struct RootView: View {
+    @ObservedObject var model: AppModel
     @EnvironmentObject private var authService: AuthService
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .today
     @State private var showSettingsSheet: Bool = false
-
-    public init() {}
+    @State private var fullAlarmText: String? = nil
 
     private var isScreenshotSignedInMode: Bool {
         #if DEBUG
         return ProcessInfo.processInfo.arguments.contains("--screenshot-signed-in")
         #else
         return false
+        #endif
+    }
+
+    private var screenshotTab: MainTab? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--screenshot-tab"), index + 1 < arguments.count else { return nil }
+        return Int(arguments[index + 1]).flatMap(MainTab.init(rawValue:))
+        #else
+        return nil
         #endif
     }
 
@@ -148,37 +75,66 @@ public struct RootView: View {
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView()
         }
+        .alert("Будильник", isPresented: Binding(
+            get: { fullAlarmText != nil },
+            set: { if !$0 { fullAlarmText = nil } }
+        )) {
+            Button("Закрыть", role: .cancel) {}
+        } message: {
+            Text(fullAlarmText ?? "")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("SanPlan_ReadFullAlarm"))) { _ in
+            openPendingAlarmText()
+        }
         .task {
+            if let tab = screenshotTab { selectedTab = tab }
+            openPendingAlarmText()
             if !isScreenshotSignedInMode {
                 await authService.loadStatus()
+                await model.launched()
             }
         }
+        .onChange(of: authService.phase) { _, phase in
+            if phase == .signedOut && !isScreenshotSignedInMode {
+                showSettingsSheet = false
+                selectedTab = .today
+                model.clearAccountData()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && !isScreenshotSignedInMode { model.becameActive() }
+        }
+    }
+
+    /// A long plan title does not fit on the alarm screen, so the alarm's button opens it here.
+    private func openPendingAlarmText() {
+        guard let text = UserDefaults.standard.string(forKey: "SanPlan_AlarmDetailText"), !text.isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: "SanPlan_AlarmDetailText")
+        fullAlarmText = text
     }
 
     private var mainTabsView: some View {
         TabView(selection: $selectedTab) {
-            TodayView(showSettings: $showSettingsSheet)
-                .tabItem {
-                    Label(MainTab.today.title, systemImage: MainTab.today.icon)
-                }
-                .tag(MainTab.today)
+            TodayScreen(
+                plans: model.plans,
+                finance: model.finance,
+                workouts: model.workouts,
+                selectedTab: $selectedTab,
+                showSettings: $showSettingsSheet
+            )
+            .tabItem { Label(MainTab.today.title, systemImage: MainTab.today.icon) }
+            .tag(MainTab.today)
 
-            MoneyView(showSettings: $showSettingsSheet)
-                .tabItem {
-                    Label(MainTab.money.title, systemImage: MainTab.money.icon)
-                }
+            FinanceScreen(store: model.finance, showSettings: $showSettingsSheet)
+                .tabItem { Label(MainTab.money.title, systemImage: MainTab.money.icon) }
                 .tag(MainTab.money)
 
-            PlansView(showSettings: $showSettingsSheet)
-                .tabItem {
-                    Label(MainTab.plans.title, systemImage: MainTab.plans.icon)
-                }
+            PlanScreen(store: model.plans, recorder: model.recorder, showSettings: $showSettingsSheet)
+                .tabItem { Label(MainTab.plans.title, systemImage: MainTab.plans.icon) }
                 .tag(MainTab.plans)
 
-            WorkoutScreen(showSettings: $showSettingsSheet)
-                .tabItem {
-                    Label(MainTab.workout.title, systemImage: MainTab.workout.icon)
-                }
+            WorkoutScreen(store: model.workouts, showSettings: $showSettingsSheet)
+                .tabItem { Label(MainTab.workout.title, systemImage: MainTab.workout.icon) }
                 .tag(MainTab.workout)
         }
         .tint(DS.Colors.accent)

@@ -2,20 +2,13 @@ import SwiftUI
 
 @main
 struct ARNAApp: App {
-    @StateObject private var authService: AuthService
-    @StateObject private var alarmCoordinator: AlarmCoordinator
-
-    init() {
-        let client = APIClient()
-        _authService = StateObject(wrappedValue: AuthService(client: client))
-        _alarmCoordinator = StateObject(wrappedValue: AlarmCoordinator())
-    }
+    @StateObject private var model = AppModel()
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(authService)
-                .environmentObject(alarmCoordinator)
+            RootView(model: model)
+                .environmentObject(model.auth)
+                .environmentObject(model.alarms)
         }
     }
 }

@@ -164,6 +164,11 @@ public struct SettingsView: View {
                 Button("Выйти", role: .destructive) {
                     Task {
                         await authService.signOut()
+                        // Plan titles must not keep ringing after the owner signed out on purpose.
+                        // A session that merely expired keeps its alarms: a missed alarm is the worse failure.
+                        if authService.phase == .signedOut {
+                            await alarmCoordinator.deleteAllOwnAlarms()
+                        }
                         dismiss()
                     }
                 }

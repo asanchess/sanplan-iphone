@@ -32,8 +32,13 @@ public final class WorkoutStore: ObservableObject {
             return
         }
 
+        // Unreadable before the first unlock after a restart: not corruption, so keep the file.
+        guard let data = try? Data(contentsOf: url) else {
+            self.errorMessage = "Тренировка недоступна, пока телефон не разблокирован."
+            return
+        }
+
         do {
-            let data = try Data(contentsOf: url)
             let decoded = try JSONDecoder().decode(WorkoutTrainingPlan.self, from: data)
             if let session = decoded.session {
                 try WorkoutDomain.validateState(session)

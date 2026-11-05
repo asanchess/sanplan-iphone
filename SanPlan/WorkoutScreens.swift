@@ -2,14 +2,15 @@ import SwiftUI
 
 public struct WorkoutScreen: View {
     @Binding var showSettings: Bool
-    @StateObject private var store = WorkoutStore()
+    @ObservedObject private var store: WorkoutStore
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var planInputText: String = ""
     @State private var isEditingPlan: Bool = false
     @State private var parseError: String?
 
-    public init(showSettings: Binding<Bool>) {
+    public init(store: WorkoutStore, showSettings: Binding<Bool>) {
+        self.store = store
         self._showSettings = showSettings
     }
 

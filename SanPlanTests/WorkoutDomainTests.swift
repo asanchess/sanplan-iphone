@@ -307,7 +307,9 @@ final class WorkoutDomainTests: XCTestCase {
         XCTAssertEqual(scheduledCount, 1)
         XCTAssertEqual(fake.scheduledNames.first, "Приседания · 12")
 
+        // Scheduling clears the previous alarm first, because the id is fixed.
+        let cancelsBefore = fake.cancelCallCount
         await coordinator.cancel()
-        XCTAssertEqual(fake.cancelCallCount, 1)
+        XCTAssertEqual(fake.cancelCallCount, cancelsBefore + 1)
     }
 }
