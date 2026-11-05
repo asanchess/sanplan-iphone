@@ -100,6 +100,9 @@
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				1A00000D2B00000D00000001 /* SanPlan */,
+			);
 			name = SanPlan;
 			productName = SanPlan;
 			productReference = 1A0000022B00000200000001 /* SanPlan.app */;
@@ -117,6 +120,9 @@
 			);
 			dependencies = (
 				1A0000082B00000800000001 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1A00000D2B00000D00000002 /* SanPlanTests */,
 			);
 			name = SanPlanTests;
 			productName = SanPlanTests;

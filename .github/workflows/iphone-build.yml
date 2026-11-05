@@ -21,6 +21,9 @@ jobs:
           xcodebuild -showsdks > artifacts/sdks.txt
           printf '%s\n' "$GITHUB_SHA" > artifacts/source-commit.txt
           xcodebuild -project SanPlan.xcodeproj -scheme SanPlan -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/device CODE_SIGNING_ALLOWED=NO build > artifacts/device-build.log 2>&1 || { tail -n 100 artifacts/device-build.log; exit 1; }
+          # An app with no compiled code still "builds"; refuse it.
+          size=$(wc -c < build/device/Build/Products/Release-iphoneos/SanPlan.app/SanPlan)
+          if [[ "$size" -lt 200000 ]]; then echo "App binary suspiciously small: $size bytes"; exit 1; fi
           mkdir -p build/package/Payload
           cp -R build/device/Build/Products/Release-iphoneos/SanPlan.app build/package/Payload/
           (cd build/package && zip -qr ../../artifacts/SanPlan-unsigned.ipa Payload)
