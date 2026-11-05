@@ -111,34 +111,6 @@ public struct PlansView: View {
     }
 }
 
-public struct WorkoutView: View {
-    @Binding var showSettings: Bool
-
-    public var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas.ignoresSafeArea()
-                EmptyState(
-                    title: "Тренировка",
-                    message: "Таймер подходов, периоды отдыха и упражнения.",
-                    icon: "figure.run"
-                )
-            }
-            .navigationTitle("Тренировка")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "person.crop.circle",
-                        accessibilityLabel: "Настройки"
-                    ) {
-                        showSettings = true
-                    }
-                }
-            }
-        }
-    }
-}
-
 public struct RootView: View {
     @EnvironmentObject private var authService: AuthService
     @State private var selectedTab: MainTab = .today
@@ -203,7 +175,7 @@ public struct RootView: View {
                 }
                 .tag(MainTab.plans)
 
-            WorkoutView(showSettings: $showSettingsSheet)
+            WorkoutScreen(showSettings: $showSettingsSheet)
                 .tabItem {
                     Label(MainTab.workout.title, systemImage: MainTab.workout.icon)
                 }
