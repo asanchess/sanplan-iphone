@@ -26,22 +26,9 @@
 		1A0000022B00000200000010 /* AlarmKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AlarmKit.framework; path = System/Library/Frameworks/AlarmKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1A00000E2B00000E00000001 /* Exceptions for "SanPlan" folder in "SanPlan" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 1A0000042B00000400000001 /* SanPlan */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1A00000D2B00000D00000001 /* SanPlan */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				1A00000E2B00000E00000001 /* Exceptions for "SanPlan" folder in "SanPlan" target */,
-			);
 			path = SanPlan;
 			sourceTree = "<group>";
 		};
@@ -289,7 +276,7 @@
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SanPlan/Info.plist;
+				INFOPLIST_FILE = SanPlanSupport/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -310,7 +297,7 @@
 				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = SanPlan/Info.plist;
+				INFOPLIST_FILE = SanPlanSupport/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
