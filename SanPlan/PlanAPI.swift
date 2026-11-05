@@ -182,27 +182,17 @@ public enum PlanAPI {
     }
 
     public static func getCalendarDate(client: APIClient, date: String, timeZone: String) async throws -> [PlanItem] {
-        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: [
-            URLQueryItem(name: "date", value: date),
-            URLQueryItem(name: "timeZone", value: timeZone)
-        ])
+        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: ["date": date, "timeZone": timeZone])
         return resp.events ?? []
     }
 
     public static func getCalendarRange(client: APIClient, start: String, end: String, timeZone: String) async throws -> [PlanItem] {
-        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: [
-            URLQueryItem(name: "start", value: start),
-            URLQueryItem(name: "end", value: end),
-            URLQueryItem(name: "timeZone", value: timeZone)
-        ])
+        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: ["start": start, "end": end, "timeZone": timeZone])
         return resp.events ?? []
     }
 
     public static func getUpcoming(client: APIClient, timeZone: String) async throws -> [PlanItem] {
-        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: [
-            URLQueryItem(name: "view", value: "upcoming"),
-            URLQueryItem(name: "timeZone", value: timeZone)
-        ])
+        let resp: CalendarQueryResponse = try await client.get(path: "/api/calendar", query: ["view": "upcoming", "timeZone": timeZone])
         return resp.events ?? []
     }
 

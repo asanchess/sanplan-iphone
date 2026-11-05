@@ -41,7 +41,7 @@ public final class AppModel: ObservableObject {
     public func becameActive() {
         finance.reloadIfUnavailable()
         workouts.reconcileClock()
-        if auth.phase == .signedIn {
+        if case .signedIn = auth.phase {
             Task { await plans.reload() }
         }
     }
