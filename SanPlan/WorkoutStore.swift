@@ -12,8 +12,8 @@ public final class WorkoutStore: ObservableObject {
     private let fileManager = FileManager.default
     private var alarmWork: Task<Void, Never>?
 
-    public init(restAlarm: RestAlarmCoordinator = RestAlarmCoordinator()) {
-        self.restAlarm = restAlarm
+    public init(restAlarm: RestAlarmCoordinator? = nil) {
+        self.restAlarm = restAlarm ?? RestAlarmCoordinator()
         loadFromDisk()
     }
 
