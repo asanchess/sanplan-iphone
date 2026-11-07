@@ -57,9 +57,11 @@ jobs:
               xcrun simctl io "$simulator" screenshot "artifacts/$name-$scheme.png"
               tab=$((tab + 1))
             done
-            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-tab 3 --screenshot-active-workout
-            sleep 3
-            xcrun simctl io "$simulator" screenshot "artifacts/workout-active-$scheme.png"
+            for phase in preparing working alerting last; do
+              xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-tab 3 --screenshot-active-workout "$phase"
+              sleep 3
+              xcrun simctl io "$simulator" screenshot "artifacts/workout-$phase-$scheme.png"
+            done
           done
       - name: Upload IPA and diagnostic logs
         if: always()

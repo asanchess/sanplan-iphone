@@ -413,6 +413,7 @@ public struct KeyboardDismissBar: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .scrollDismissesKeyboard(.interactively)
+            .onAppear { KeyboardTapDismisser.shared.install() }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isKeyboardVisible {
                     HStack {
@@ -434,6 +435,43 @@ public struct KeyboardDismissBar: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
                 isKeyboardVisible = false
             }
+    }
+}
+
+/// One window-level tap recogniser: a tap outside any text field or text view ends editing.
+/// It never cancels the tap, so buttons and rows under the finger still work.
+@MainActor
+final class KeyboardTapDismisser: NSObject, UIGestureRecognizerDelegate {
+    static let shared = KeyboardTapDismisser()
+    private weak var installedWindow: UIWindow?
+
+    func install() {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first
+        guard let window, window !== installedWindow else { return }
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        window.addGestureRecognizer(tap)
+        installedWindow = window
+    }
+
+    @objc private func tapped() {
+        hideKeyboard()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var view = touch.view
+        while let current = view {
+            if current is UITextField || current is UITextView { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 

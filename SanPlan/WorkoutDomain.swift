@@ -634,6 +634,11 @@ public enum WorkoutDomain {
     }
 
     /// The set after the current one, or nil when the current set is the last of the workout.
+    /// True when no set follows the current one, so the screen offers to finish instead of a rest or a set that will not happen.
+    public static func isLastSet(_ state: WorkoutSessionState) -> Bool {
+        nextSet(state) == nil
+    }
+
     static func nextSet(_ state: WorkoutSessionState) -> (exercise: Int, set: Int)? {
         if state.setIndex + 1 < state.exercises[state.exerciseIndex].rests.count {
             return (state.exerciseIndex, state.setIndex + 1)

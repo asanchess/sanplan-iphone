@@ -298,6 +298,7 @@ public struct AlarmsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Готово") { dismiss() }
+                        .tint(DS.Colors.controlTint)
                 }
             }
             .sheet(item: $editor) { target in

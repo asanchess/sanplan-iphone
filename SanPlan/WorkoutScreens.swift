@@ -298,13 +298,21 @@ public struct WorkoutScreen: View {
                 PillButton("Начать сейчас", icon: "play.fill") {
                     store.dispatch(command: .startNow(), now: now)
                 }
-                PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
-                    store.dispatch(command: .startRest(), now: now)
+                if WorkoutDomain.isLastSet(session) {
+                    finishButton(style: .secondary, now: now)
+                } else {
+                    PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
+                        store.dispatch(command: .startRest(), now: now)
+                    }
                 }
             }
         case .working:
-            PillButton("Начать отдых", icon: "bed.double.fill") {
-                store.dispatch(command: .startRest(), now: now)
+            if WorkoutDomain.isLastSet(session) {
+                finishButton(style: .primary, now: now)
+            } else {
+                PillButton("Начать отдых", icon: "bed.double.fill") {
+                    store.dispatch(command: .startRest(), now: now)
+                }
             }
         case .resting:
             PillButton("Пропустить отдых", icon: "forward.fill", style: .secondary) {
@@ -315,13 +323,17 @@ public struct WorkoutScreen: View {
                 store.dispatch(command: .resume(), now: now)
             }
         case .alerting:
-            VStack(spacing: DS.Metrics.spacing12) {
-                PillButton("Начать подход", icon: "play.fill", style: .primary) {
-                    store.dispatch(command: .acknowledge(), now: now)
-                }
-                // For a set already done while the alert was showing.
-                PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
-                    store.dispatch(command: .startRest(), now: now)
+            if WorkoutDomain.isLastSet(session) {
+                finishButton(style: .primary, now: now)
+            } else {
+                VStack(spacing: DS.Metrics.spacing12) {
+                    PillButton("Начать подход", icon: "play.fill", style: .primary) {
+                        store.dispatch(command: .acknowledge(), now: now)
+                    }
+                    // For a set already done while the alert was showing.
+                    PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
+                        store.dispatch(command: .startRest(), now: now)
+                    }
                 }
             }
         case .complete:
@@ -413,10 +425,27 @@ public struct WorkoutScreen: View {
         }
     }
 
-    /// "Подход 2 из 4" with − / + to change the number of sets of the current exercise.
+    /// The last set of the workout: no rest or next set follows, so the button says what happens.
+    private func finishButton(style: PillButton.Style, now: Int64) -> some View {
+        PillButton("Завершить тренировку", icon: "checkmark", style: style) {
+            store.dispatch(command: .finish(), now: now)
+        }
+    }
+
+    /// "Подход 2 из 4" above a separate «Всего подходов» stepper, so − / + reads as a count, not as moving between sets.
     @ViewBuilder
     private func setsStepper(session: WorkoutSessionState, now: Int64) -> some View {
         let total = session.exercises[session.exerciseIndex].rests.count
+        VStack(spacing: DS.Metrics.spacing4) {
+            Text("Подход \(session.setIndex + 1) из \(total)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundColor(DS.Colors.textSecondary)
+                .contentTransition(.numericText())
+            setsCountStepper(session: session, total: total, now: now)
+        }
+    }
+
+    private func setsCountStepper(session: WorkoutSessionState, total: Int, now: Int64) -> some View {
         HStack(spacing: DS.Metrics.spacing12) {
             Button {
                 store.dispatch(command: .setSets(total - 1), now: now)
@@ -427,10 +456,11 @@ public struct WorkoutScreen: View {
             .disabled(total - 1 < session.setIndex + 1 || session.phase == .complete)
             .accessibilityLabel("Убрать подход")
 
-            Text("Подход \(session.setIndex + 1) из \(total)")
-                .font(.subheadline.monospacedDigit())
+            Text("Всего подходов: \(total)")
+                .font(.footnote.monospacedDigit())
                 .foregroundColor(DS.Colors.textSecondary)
                 .contentTransition(.numericText())
+                .accessibilityLabel("Всего подходов: \(total)")
 
             Button {
                 store.dispatch(command: .setSets(total + 1), now: now)

@@ -183,6 +183,20 @@ final class WorkoutDomainTests: XCTestCase {
         XCTAssertThrowsError(try WorkoutDomain.validateState(complete))
     }
 
+    func testLastSetIsKnownSoTheScreenOffersToFinish() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        XCTAssertFalse(WorkoutDomain.isLastSet(state))
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .skipRest(), now: 1_002_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_003_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .skipRest(), now: 1_004_000)
+        XCTAssertEqual(state.exerciseIndex, 1)
+        XCTAssertTrue(WorkoutDomain.isLastSet(state))
+        state = try WorkoutDomain.workoutCommand(state: state, command: .finish(), now: 1_005_000)
+        XCTAssertEqual(state.phase, .complete)
+        XCTAssertNil(state.workStartedAt)
+    }
+
     func testSetsStepperWorksDuringARestAndRejectsAReusedId() throws {
         var state = try twoExerciseWorkout(now: 1_000_000)
         state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)

@@ -107,7 +107,7 @@ public struct RootView: View {
         }
     }
 
-    /// Debug screenshots only: an in-memory workout 47 s into its first set. Never written to disk.
+    /// Debug screenshots only: an in-memory workout in the phase named after the flag. Never written to disk.
     private func seedScreenshotWorkout() {
         #if DEBUG
         guard isScreenshotSignedInMode, ProcessInfo.processInfo.arguments.contains("--screenshot-active-workout") else { return }
@@ -116,10 +116,27 @@ public struct RootView: View {
             SessionExercise(name: "Жим лёжа", rests: [90, 90, 90, 90]),
             SessionExercise(name: "Тяга в наклоне", rests: [90, 90, 90])
         ]
-        guard let created = try? WorkoutDomain.createWorkout(exercises: exercises, now: now - 60_000),
-              let working = try? WorkoutDomain.workoutCommand(state: created, command: .startNow(), now: now - 47_000)
-        else { return }
-        model.workouts.activeSession = working
+        let arguments = ProcessInfo.processInfo.arguments
+        let flag = arguments.firstIndex(of: "--screenshot-active-workout")!
+        let phase = flag + 1 < arguments.count ? arguments[flag + 1] : "working"
+        guard let created = try? WorkoutDomain.createWorkout(exercises: exercises, now: now - 10_000) else { return }
+        var session: WorkoutSessionState? = created
+        switch phase {
+        case "preparing":
+            break
+        case "alerting":
+            // A 90 s rest that ran out 5 s ago.
+            session = (try? WorkoutDomain.createWorkout(exercises: exercises, now: now - 100_000))
+                .flatMap { try? WorkoutDomain.workoutCommand(state: $0, command: .startRest(), now: now - 95_000) }
+                .flatMap { try? WorkoutDomain.workoutCommand(state: $0, command: .tick(), now: now) }
+        case "last":
+            // The only set of a one-exercise workout: nothing follows it.
+            session = (try? WorkoutDomain.createWorkout(exercises: [SessionExercise(name: "Тяга в наклоне", rests: [90])], now: now - 10_000))
+                .flatMap { try? WorkoutDomain.workoutCommand(state: $0, command: .startNow(), now: now - 9_000) }
+        default:
+            session = try? WorkoutDomain.workoutCommand(state: created, command: .startNow(), now: now - 9_000)
+        }
+        model.workouts.activeSession = session
         #endif
     }
 
@@ -157,6 +174,6 @@ public struct RootView: View {
                 .tabItem { Label(MainTab.workout.title, systemImage: MainTab.workout.icon) }
                 .tag(MainTab.workout)
         }
-        .tint(DS.Colors.controlTint)
+        .tint(DS.Colors.accent)
     }
 }
