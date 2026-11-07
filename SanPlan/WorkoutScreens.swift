@@ -298,9 +298,8 @@ public struct WorkoutScreen: View {
                 PillButton("Начать сейчас", icon: "play.fill") {
                     store.dispatch(command: .startNow(), now: now)
                 }
-                if WorkoutDomain.isLastSet(session) {
-                    finishButton(style: .secondary, now: now)
-                } else {
+                // A one-set workout has no rest after the warm-up; finishing it stays behind «Завершить досрочно».
+                if !WorkoutDomain.isLastSet(session) {
                     PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
                         store.dispatch(command: .startRest(), now: now)
                     }

@@ -107,7 +107,7 @@ public struct RootView: View {
         }
     }
 
-    /// Debug screenshots only: an in-memory workout in the phase named after the flag. Never written to disk.
+    /// Debug screenshots only: an in-memory workout in the phase named after the flag. Saved only if a later command runs.
     private func seedScreenshotWorkout() {
         #if DEBUG
         guard isScreenshotSignedInMode, ProcessInfo.processInfo.arguments.contains("--screenshot-active-workout") else { return }

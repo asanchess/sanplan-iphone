@@ -464,7 +464,10 @@ final class KeyboardTapDismisser: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         var view = touch.view
         while let current = view {
+            // Text inputs, and the edit menu (Вставить, Скопировать) that sits over them: a tap there must reach its action.
             if current is UITextField || current is UITextView { return false }
+            let name = String(describing: type(of: current))
+            if name.contains("Menu") || name.contains("Callout") { return false }
             view = current.superview
         }
         return true
