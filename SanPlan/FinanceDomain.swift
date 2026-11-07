@@ -105,8 +105,13 @@ public struct FinanceImport: Codable, Equatable, Identifiable {
     public var periodEnd: String?
     public var importedAt: String
     public var count: Int
+    /// The account balance at the end of the statement, so several accounts add up to one checkpoint.
+    public var closingMinor: Int64?
+    public var closingDate: String?
+    /// Last four characters of the account number; a newer statement of the same account replaces its balance.
+    public var account: String?
 
-    public init(id: String, bank: String, fileName: String, periodStart: String?, periodEnd: String?, importedAt: String, count: Int) {
+    public init(id: String, bank: String, fileName: String, periodStart: String?, periodEnd: String?, importedAt: String, count: Int, closingMinor: Int64? = nil, closingDate: String? = nil, account: String? = nil) {
         self.id = id
         self.bank = bank
         self.fileName = fileName
@@ -114,6 +119,9 @@ public struct FinanceImport: Codable, Equatable, Identifiable {
         self.periodEnd = periodEnd
         self.importedAt = importedAt
         self.count = count
+        self.closingMinor = closingMinor
+        self.closingDate = closingDate
+        self.account = account
     }
 }
 
@@ -770,7 +778,7 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
 
 // MARK: - Date and Calendar Math
 
-private func parseYmd(_ ymd: String) -> (year: Int, month: Int, day: Int)? {
+func parseYmd(_ ymd: String) -> (year: Int, month: Int, day: Int)? {
     let parts = ymd.split(separator: "-").compactMap { Int($0) }
     guard parts.count == 3 else { return nil }
     return (parts[0], parts[1], parts[2])

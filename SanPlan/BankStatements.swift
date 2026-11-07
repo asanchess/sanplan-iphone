@@ -29,12 +29,17 @@ public struct ParsedStatement: Equatable {
     public var periodEnd: String?
     public var closingBalance: (date: String, amountMinor: Int64)?
     public var transactions: [Transaction]
+    /// The last four characters of the account number, to tell two accounts at one bank apart.
+    public var account: String? = nil
+    /// The owner's first name from the header; the bank shows transfers from the owner's other accounts with it.
+    /// Kept in memory for the import only, never saved.
+    public var ownerFirstName: String? = nil
 
     public static func == (lhs: ParsedStatement, rhs: ParsedStatement) -> Bool {
         lhs.bank == rhs.bank && lhs.periodStart == rhs.periodStart && lhs.periodEnd == rhs.periodEnd
             && lhs.closingBalance?.date == rhs.closingBalance?.date
             && lhs.closingBalance?.amountMinor == rhs.closingBalance?.amountMinor
-            && lhs.transactions == rhs.transactions
+            && lhs.transactions == rhs.transactions && lhs.account == rhs.account
     }
 }
 
@@ -72,14 +77,20 @@ public enum BankStatementParser {
     /// PDF text extraction can return lookalike glyphs (Latin «ĸ» for Cyrillic «к») and odd spaces; parse a clean copy.
     static func normalise(_ text: String) -> String {
         var result = text.precomposedStringWithCompatibilityMapping
-        for (from, to) in [("ĸ", "к"), ("\u{00A0}", " "), ("\u{202F}", " "), ("\u{2007}", " "), ("\u{2009}", " "), ("\u{2212}", "-")] {
+        for (from, to) in [("ĸ", "к"), ("\u{00A0}", " "), ("\u{202F}", " "), ("\u{2007}", " "), ("\u{2009}", " "), ("\u{2212}", "-"), ("\u{2013}", "-")] {
             result = result.replacingOccurrences(of: from, with: to)
         }
         return result
     }
 
+    /// Every line joined with single spaces. The PDFs put each table cell on its own line (or a whole row on one),
+    /// and either way a row reads the same once flattened.
+    static func flat(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     public static func parse(_ raw: String) throws -> ParsedStatement {
-        let text = normalise(raw)
+        let text = flat(normalise(raw))
         // The bank named first is the header; later mentions are counterparties, e.g. a Halyk transfer to a Kaspi card.
         let lower = text.lowercased()
         func firstIndex(_ words: [String]) -> String.Index? {
@@ -98,57 +109,100 @@ public enum BankStatementParser {
         return statement
     }
 
+    /// «2 500,00», «1 234 567,89».
+    static let number = #"\d{1,3}(?: \d{3})*[.,]\d{2}"#
+    static let date = #"\d{2}\.\d{2}\.\d{2,4}"#
+
     // MARK: - Kaspi Gold
-    // Rows look like «05.11.25 - 2 500,00 ₸ Покупка MAGNUM» and «06.11.25 + 50 000,00 ₸ Пополнение С Kaspi Депозита».
-    // The header has «за период с 01.11.25 по 30.11.25» and «Доступно на 30.11.25 123 456,78 ₸».
+    // Cells: «07.11.26» «- 500,00 ₸» «Покупка      Beeline». Two-line operations put the details between their halves:
+    // «Поступление со      С Kaspi Депозита» «своего счета». Header: «за период с 01.11.25 по 30.11.25», «Доступно на 30.11.25: + 10 000,00 ₸».
+
+    static let kaspiNoise = [
+        #"АО «Kaspi Bank», БИК CASPKZKA, www\.kaspi\.kz"#,
+        #"Приложение к Справке (?:№|No)\s?\d+ от \d{1,2} \S+ \d{4}"#,
+        #"Дата Сумма Операция Детали"#,
+        #"\(\s?[+\-]\s?\d[\d ]*[.,]\d{2} [A-Z]{3}\)"#,
+        #"-? ?Сумма заблокирована\. Банк ожидает подтверждения от платежной системы\."#,
+        #"Раздел «Краткое содержание операций по карте».*$"#,
+    ]
 
     static func parseKaspi(_ text: String) -> ParsedStatement {
-        let operations = ["Покупка", "Пополнение", "Перевод", "Снятие", "Разное", "Платеж", "Платёж", "Оплата"]
-        let opPattern = operations.joined(separator: "|")
-        let row = regex(#"^(\d{2}\.\d{2}\.\d{2,4})\s+([+\-−–])\s*([\d\s ]+[.,]\d{2})\s*(?:₸|KZT|т)?\s+("# + opPattern + #")\s*(.*)$"#)
-        var transactions: [ParsedStatement.Transaction] = []
-        for line in lines(text) {
-            guard let m = match(row, line), let date = isoDate(m[1]), let amount = minor(m[3]) else { continue }
-            let sign: Int64 = m[2] == "+" ? 1 : -1
-            transactions.append(.init(date: date, amountMinor: sign * amount, operation: m[4] == "Платёж" ? "Платеж" : m[4], details: clean(m[5])))
+        var body = text
+        for pattern in kaspiNoise {
+            body = regex(pattern).stringByReplacingMatches(in: body, range: NSRange(body.startIndex..., in: body), withTemplate: " ")
         }
-        let period = match(regex(#"(?:период|period)\D{0,12}(\d{2}\.\d{2}\.\d{2,4})\D{1,8}(\d{2}\.\d{2}\.\d{2,4})"#), text)
+        body = flat(body)
+        // «Доступно на 07.11.25 + 3 756,34 ₸» in the summary is not an operation.
+        let row = regex(#"(?<!Доступно на )(\d{2}\.\d{2}\.\d{2,4}) ([+\-]) ?("# + number + #") ?(?:₸|KZT|тг|т)(?![\p{L}]) ?(.*?)(?= \d{2}\.\d{2}\.\d{2,4} [+\-] ?\d|$)"#)
+        var transactions: [ParsedStatement.Transaction] = []
+        for m in matches(row, body) {
+            guard let date = isoDate(m[1]), let amount = minor(m[3]), amount > 0 else { continue }
+            let (operation, details) = splitKaspiBody(m[4].trimmingCharacters(in: .whitespaces))
+            transactions.append(.init(date: date, amountMinor: m[2] == "+" ? amount : -amount, operation: operation, details: details))
+        }
+        let period = match(regex(#"(?:период|period)\D{0,30}("# + date + #")\D{1,8}("# + date + #")"#), text)
         var closing: (String, Int64)?
-        if let m = match(regex(#"Доступно на\s+(\d{2}\.\d{2}\.\d{2,4})\D{0,6}?([+\-−–]?\s*[\d\s ]+[.,]\d{2})"#), text),
-           let date = isoDate(m[1]), let amount = signedMinor(m[2]) {
-            closing = (date, amount)
+        if let m = match(regex(#"Доступно на ("# + date + #"):? ?([+\-]?) ?("# + number + #")"#), text),
+           let date = isoDate(m[1]), let amount = minor(m[3]) {
+            closing = (date, m[2] == "-" ? -amount : amount)
         }
         return ParsedStatement(
             bank: .kaspi,
             periodStart: period.flatMap { isoDate($0[1]) },
             periodEnd: period.flatMap { isoDate($0[2]) },
             closingBalance: closing.map { (date: $0.0, amountMinor: $0.1) },
-            transactions: transactions
+            transactions: transactions,
+            account: accountSuffix(text),
+            ownerFirstName: match(regex(#"подтверждает, что (\p{L}+) (\p{L}+)"#), text)?[2]
         )
     }
 
+    static func splitKaspiBody(_ body: String) -> (String, String) {
+        for (head, tail) in [("Поступление со", "своего счета"), ("Перевод на свой", "счет")] where body == head || body.hasPrefix(head + " ") {
+            var rest = String(body.dropFirst(head.count)).trimmingCharacters(in: .whitespaces)
+            if rest.hasPrefix(tail) {
+                rest = String(rest.dropFirst(tail.count))
+            } else if rest.hasSuffix(" " + tail) || rest == tail {
+                rest = String(rest.dropLast(tail.count))
+            }
+            return (head + " " + tail, rest.trimmingCharacters(in: .whitespaces))
+        }
+        for op in ["Покупка", "Пополнение", "Перевод", "Снятие", "Разное", "Платеж", "Платёж", "Оплата"] where body.hasPrefix(op) {
+            return (op == "Платёж" ? "Платеж" : op, body.dropFirst(op.count).trimmingCharacters(in: .whitespaces))
+        }
+        return ("Операция", body)
+    }
+
     // MARK: - Halyk
-    // Rows start with the operation date, optionally the posting date, then the description and the amount in the
-    // account currency with its sign: «05.11.2025 06.11.2025 Покупка MAGNUM ALMATY -2 500,00 KZT».
-    // The end balance is «Остаток на конец периода» or «Исходящий остаток».
+    // Cells: operation date, processing date, description (several lines), amount, currency, then in the account
+    // currency credit, debit (with minus), fee, and the card or account. «Closing balance: 195 400,00». English or Russian.
 
     static func parseHalyk(_ text: String) -> ParsedStatement {
-        let row = regex(#"^(\d{2}\.\d{2}\.\d{4})\s+(?:\d{2}\.\d{2}\.\d{4}\s+)?(?:\d{2}:\d{2}(?::\d{2})?\s+)?(.+?)\s+([+\-−–]?\s?[\d\s ]+[.,]\d{2})\s*(?:KZT|₸|тг)?(.*)$"#)
+        let currency = #"(?:KZT|USD|EUR|RUB|GBP|CNY|TRY|AED|UZS|KGS|HKD|₸|тг)(?![\p{L}])"#
+        let signed = #"[+\-]? ?"# + number
+        let row = regex(
+            #"(\d{2}\.\d{2}\.\d{4}) \d{2}\.\d{2}\.\d{4} (?:\d{2}:\d{2}(?::\d{2})? )?((?:(?!\d{2}\.\d{2}\.\d{4} ).){1,240}?) ("#
+                + signed + #") ?"# + currency + #"(?: ("# + signed + #") ("# + signed + #") ("# + signed + #")(?![\d,]))?"#
+        )
         var transactions: [ParsedStatement.Transaction] = []
-        for line in lines(text) {
-            guard let m = match(row, line), let date = isoDate(m[1]), let amount = signedMinor(m[3]) else { continue }
-            let description = clean(m[2])
-            let (operation, details) = splitHalykDescription(description)
-            var signed = amount
-            // Some statements print expenses without a minus but name them; incoming words flip it back.
-            if !m[3].contains(where: { "+-−–".contains($0) }) {
-                signed = isHalykIncome(operation) ? abs(amount) : -abs(amount)
+        for m in matches(row, text) {
+            guard let date = isoDate(m[1]), let amount = signedMinor(m[3]) else { continue }
+            let (operation, details, incoming) = splitHalykDescription(m[2].trimmingCharacters(in: .whitespaces))
+            var value: Int64
+            if let credit = signedMinor(m[4]), let debit = signedMinor(m[5]), let fee = signedMinor(m[6]) {
+                // Account-currency columns: the debit already includes conversion; the fee is charged on top.
+                value = credit - abs(debit) - abs(fee)
+            } else if m[3].contains(where: { "+-".contains($0) }) {
+                value = amount
+            } else {
+                value = incoming ? abs(amount) : -abs(amount)
             }
-            transactions.append(.init(date: date, amountMinor: signed, operation: operation, details: details))
+            guard value != 0 else { continue }
+            transactions.append(.init(date: date, amountMinor: value, operation: operation, details: details))
         }
-        let period = match(regex(#"(?:период|period)\D{0,12}(\d{2}\.\d{2}\.\d{4})\D{1,8}(\d{2}\.\d{2}\.\d{4})"#), text)
+        let period = match(regex(#"(?:период|period)\D{0,30}(\d{2}\.\d{2}\.\d{4})\D{1,8}(\d{2}\.\d{2}\.\d{4})"#), text)
         var closing: (String, Int64)?
-        if let m = match(regex(#"(?:Остаток на конец периода|Исходящий остаток|Доступный остаток)[^\d\-+−–]{0,40}([+\-−–]?\s*[\d\s ]+[.,]\d{2})"#), text),
+        if let m = match(regex(#"(?:Closing balance|Остаток на конец периода|Исходящий остаток|Доступный остаток)[^\d\-+]{0,40}("# + signed + #")"#), text),
            let amount = signedMinor(m[1]),
            let end = period.flatMap({ isoDate($0[2]) }) ?? transactions.map(\.date).max() {
             closing = (end, amount)
@@ -158,30 +212,53 @@ public enum BankStatementParser {
             periodStart: period.flatMap { isoDate($0[1]) },
             periodEnd: period.flatMap { isoDate($0[2]) },
             closingBalance: closing.map { (date: $0.0, amountMinor: $0.1) },
-            transactions: transactions
+            transactions: transactions,
+            account: accountSuffix(text),
+            ownerFirstName: match(regex(#"Name: (\p{L}+) \p{L}+"#), text)?[1]
         )
     }
 
-    private static let halykOperations = ["Покупка", "Оплата", "Перевод", "Пополнение", "Снятие наличных", "Снятие", "Зачисление", "Возврат", "Комиссия", "Платеж", "Платёж"]
+    /// Details Halyk gives to transfers between cards, which carry no counterparty.
+    public static let halykTransferDetails: Set<String> = ["Входящий перевод", "Перевод на другую карту", "Перевод со счёта"]
 
-    private static func splitHalykDescription(_ text: String) -> (String, String) {
-        for op in halykOperations where text.lowercased().hasPrefix(op.lowercased()) {
-            let rest = text.dropFirst(op.count).trimmingCharacters(in: CharacterSet(charactersIn: " :-—"))
-            return (op, rest.isEmpty ? op : rest)
+    /// Prefix, operation, details when the bank gives none, and whether money comes in (used only without columns).
+    private static let halykOperations: [(String, String, String, Bool)] = [
+        ("Merchant payment transaction", "Покупка", "Покупка", false),
+        ("Merchant payment", "Покупка", "Покупка", false),
+        ("Receipt of transfer", "Перевод", "Входящий перевод", true),
+        ("Transfer to another card", "Перевод", "Перевод на другую карту", false),
+        ("OpenAPI перевод со счёта", "Перевод", "Перевод со счёта", false),
+        ("Receipt to the account", "Пополнение", "Зачисление на счёт", true),
+        ("Recharge card account through payment terminal", "Пополнение", "Пополнение через терминал", true),
+        ("Cash withdrawal", "Снятие наличных", "Снятие наличных", false),
+        ("Снятие наличных", "Снятие наличных", "Снятие наличных", false),
+        ("Покупка", "Покупка", "Покупка", false),
+        ("Оплата", "Оплата", "Оплата", false),
+        ("Перевод", "Перевод", "Перевод", false),
+        ("Пополнение", "Пополнение", "Пополнение", true),
+        ("Снятие", "Снятие наличных", "Снятие наличных", false),
+        ("Зачисление", "Зачисление", "Зачисление", true),
+        ("Возврат", "Возврат", "Возврат", true),
+        ("Комиссия", "Комиссия", "Комиссия", false),
+        ("Платеж", "Платеж", "Платеж", false),
+        ("Платёж", "Платеж", "Платеж", false),
+    ]
+
+    private static func splitHalykDescription(_ text: String) -> (String, String, Bool) {
+        for (prefix, op, fallback, incoming) in halykOperations where text.lowercased().hasPrefix(prefix.lowercased()) {
+            let rest = text.dropFirst(prefix.count).trimmingCharacters(in: CharacterSet(charactersIn: " :-—"))
+            // A bare terminal number says nothing to the owner.
+            let useful = rest.contains(where: \.isLetter) ? rest : ""
+            return (op, useful.isEmpty ? fallback : useful, incoming)
         }
-        return ("Операция", text)
-    }
-
-    private static func isHalykIncome(_ operation: String) -> Bool {
-        ["Пополнение", "Зачисление", "Возврат"].contains(operation)
+        return ("Операция", text, false)
     }
 
     // MARK: - Helpers
 
-    static func lines(_ text: String) -> [String] {
-        text.components(separatedBy: .newlines)
-            .map { $0.replacingOccurrences(of: "\u{00A0}", with: " ").trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+    /// «Номер счета: KZ00…0001» or «Account number KZT: KZ00…0002» → «0001».
+    static func accountSuffix(_ text: String) -> String? {
+        match(regex(#"(?:Номер счета|Номер счёта|Account number)[^:]{0,8}: ?(KZ[0-9A-Z]{18})"#), text).map { String($0[1].suffix(4)) }
     }
 
     /// «2 500,00» → 250000.
@@ -208,21 +285,23 @@ public enum BankStatementParser {
         return isValidDateString(value) ? value : nil
     }
 
-    private static func clean(_ text: String) -> String {
-        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-    }
-
     private static func regex(_ pattern: String) -> NSRegularExpression {
         // The patterns are constants; a typo is a programming error caught by the tests.
-        try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .anchorsMatchLines])
+        try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }
+
+    private static func groups(_ m: NSTextCheckingResult, _ text: String) -> [String] {
+        (0..<m.numberOfRanges).map { i in
+            Range(m.range(at: i), in: text).map { String(text[$0]) } ?? ""
+        }
     }
 
     private static func match(_ regex: NSRegularExpression, _ text: String) -> [String]? {
-        let range = NSRange(text.startIndex..., in: text)
-        guard let m = regex.firstMatch(in: text, range: range) else { return nil }
-        return (0..<m.numberOfRanges).map { i in
-            Range(m.range(at: i), in: text).map { String(text[$0]) } ?? ""
-        }
+        regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)).map { groups($0, text) }
+    }
+
+    private static func matches(_ regex: NSRegularExpression, _ text: String) -> [[String]] {
+        regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).map { groups($0, text) }
     }
 }
 
@@ -240,6 +319,9 @@ public enum StatementImport {
         public let excludedCount: Int
     }
 
+    /// The one balance checkpoint built from every statement's closing balance.
+    public static let balanceRecordId = "statement-balance"
+
     /// Words in the details of a transfer between the owner's own accounts and cards.
     static let ownTransferMarkers = [
         "между своими счетами", "со своего счета", "со своего счёта", "на свой счет", "на свой счёт",
@@ -247,12 +329,19 @@ public enum StatementImport {
         "собственных средств", "своих средств", "own account", "между своими картами", "с kaspi gold", "на kaspi gold",
     ]
 
-    public static func isOwnTransfer(_ t: ParsedStatement.Transaction) -> Bool {
+    public static func isOwnTransfer(_ t: ParsedStatement.Transaction, ownerFirstName: String? = nil) -> Bool {
         let text = (t.operation + " " + t.details).lowercased()
-        return ownTransferMarkers.contains { text.contains($0) }
+        return ownTransferMarkers.contains { text.contains($0) } || isFromOwnOtherBank(t.details, ownerFirstName: ownerFirstName)
     }
 
-    /// Records for a statement. Own-card transfers come in excluded from totals; the closing balance becomes the checkpoint.
+    /// «АРМАН Т., Halyk Bank»: the owner's name with another bank is money moving between the owner's own accounts.
+    static func isFromOwnOtherBank(_ details: String, ownerFirstName: String?) -> Bool {
+        guard let name = ownerFirstName?.lowercased(), name.count > 1 else { return false }
+        let lower = details.lowercased()
+        return lower.hasPrefix(name + " ") && lower.contains(",")
+    }
+
+    /// Records for a statement. Own-account transfers come in excluded from totals.
     public static func preview(_ statement: ParsedStatement, importId: String, rules: [String: String]?) -> Preview {
         var records: [FinanceRecord] = []
         var excluded = 0
@@ -268,23 +357,14 @@ public enum StatementImport {
             )
             record.importId = importId
             record.merchant = String(merchant.prefix(FinanceConstants.maxTitleLen))
-            if isOwnTransfer(t) {
+            if isOwnTransfer(t, ownerFirstName: statement.ownerFirstName) {
                 record.excluded = true
                 excluded += 1
+                if isFromOwnOtherBank(t.details, ownerFirstName: statement.ownerFirstName) {
+                    record.note = ownTransferNote
+                }
             }
             records.append(record)
-        }
-        // After the transactions, so ones on the same day are already inside the checkpoint.
-        if let closing = statement.closingBalance, closing.amountMinor >= 0 {
-            var balance = FinanceRecord(
-                id: "\(importId)-balance",
-                kind: "balance",
-                title: "Остаток \(statement.bank.rawValue)",
-                amountMinor: closing.amountMinor,
-                date: closing.date
-            )
-            balance.importId = importId
-            records.append(balance)
         }
         return Preview(statement: statement, records: records, excludedCount: excluded)
     }
@@ -294,6 +374,7 @@ public enum StatementImport {
         guard !(next.imports ?? []).contains(where: { $0.id == importId }) else { return next }
         next.records.append(contentsOf: preview.records)
         var imports = next.imports ?? []
+        let closing = preview.statement.closingBalance
         imports.append(FinanceImport(
             id: importId,
             bank: preview.statement.bank.rawValue,
@@ -301,10 +382,64 @@ public enum StatementImport {
             periodStart: preview.statement.periodStart,
             periodEnd: preview.statement.periodEnd,
             importedAt: today,
-            count: preview.records.filter { $0.kind != "balance" }.count
+            count: preview.records.count,
+            closingMinor: closing.flatMap { $0.amountMinor >= 0 ? $0.amountMinor : nil },
+            closingDate: closing?.date,
+            account: preview.statement.account
         ))
         next.imports = imports
+        pairTransfersBetweenStatements(&next, importId: importId)
+        rebuildBalance(&next)
         return try validateFinance(next)
+    }
+
+    static let ownTransferNote = "Перевод между своими счетами"
+
+    /// Money that leaves one of the owner's statements and arrives in another on the same or next day is a transfer
+    /// between own accounts: both sides stay in the list but leave the totals.
+    static func pairTransfersBetweenStatements(_ state: inout FinanceState, importId: String) {
+        // Only sides that name no stranger: a Halyk card-to-card line, or a line the bank marked with the owner's name.
+        func candidate(_ r: FinanceRecord) -> Bool {
+            guard ["income", "expense"].contains(r.kind) else { return false }
+            return BankStatementParser.halykTransferDetails.contains(r.merchant ?? "") || r.note == ownTransferNote
+        }
+        func day(_ ymd: String?) -> Int? {
+            guard let ymd, let (y, m, d) = parseYmd(ymd) else { return nil }
+            return daysSinceEpoch(year: y, month: m, day: d)
+        }
+        var paired = Set<Int>()
+        for i in state.records.indices where state.records[i].importId == importId {
+            let record = state.records[i]
+            guard candidate(record), let recordDay = day(record.date) else { continue }
+            let match = state.records.indices.first { j in
+                let other = state.records[j]
+                guard !paired.contains(j), let otherImport = other.importId, otherImport != importId,
+                      other.kind != record.kind, candidate(other),
+                      other.amountMinor == record.amountMinor, let otherDay = day(other.date) else { return false }
+                return abs(otherDay - recordDay) <= 1
+            }
+            if let j = match {
+                paired.insert(j)
+                paired.insert(i)
+                state.records[i].excluded = true
+                state.records[j].excluded = true
+                if state.records[i].note == nil { state.records[i].note = ownTransferNote }
+                if state.records[j].note == nil { state.records[j].note = ownTransferNote }
+            }
+        }
+    }
+
+    /// One checkpoint: the sum of each statement's latest closing balance, dated at the latest of them, placed after
+    /// the imported operations so ones on that day are already inside it.
+    static func rebuildBalance(_ state: inout FinanceState) {
+        state.records.removeAll { $0.id == balanceRecordId }
+        let latestPerAccount = Dictionary(grouping: (state.imports ?? []).filter { $0.closingMinor != nil && $0.closingDate != nil }) {
+            "\($0.bank)|\($0.account ?? $0.id)"
+        }.compactMap { $0.value.max { ($0.closingDate ?? "") < ($1.closingDate ?? "") } }
+        guard !latestPerAccount.isEmpty else { return }
+        let total = latestPerAccount.reduce(Int64(0)) { $0 + ($1.closingMinor ?? 0) }
+        let date = latestPerAccount.compactMap(\.closingDate).max() ?? ""
+        state.records.append(FinanceRecord(id: balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: total, date: date))
     }
 
     /// Hand-entered records that look like the same operation as an imported one: same kind, date and amount.
@@ -340,11 +475,12 @@ public enum StatementImport {
         return try validateFinance(next)
     }
 
-    /// Removes one import and only its records.
+    /// Removes one import and only its records; the combined balance is rebuilt from the statements left.
     public static func deleteImport(_ importId: String, from state: FinanceState) throws -> FinanceState {
         var next = try validateFinance(state)
         next.records.removeAll { $0.importId == importId }
         next.imports?.removeAll { $0.id == importId }
+        rebuildBalance(&next)
         return try validateFinance(next)
     }
 
@@ -407,19 +543,21 @@ public enum StatementImport {
 public enum MerchantCategories {
     public static let all = [
         "Продукты", "Кафе и рестораны", "Доставка еды", "Транспорт", "Покупки", "Здоровье", "Связь и интернет",
-        "Коммунальные", "Развлечения", "Наличные", "Переводы", "Пополнения", "Зарплата", "Без категории",
+        "Подписки", "Коммунальные", "Развлечения", "Учёба", "Наличные", "Переводы", "Пополнения", "Зарплата", "Без категории",
     ]
 
     private static let keywords: [(String, [String])] = [
-        ("Продукты", ["magnum", "small", "galmart", "anvar", "арбуз", "arbuz", "toimart", "дешевле", "fix price", "metro", "супермаркет", "market", "маркет", "продукт"]),
+        ("Подписки", ["openai", "chatgpt", "anthropic", "claude", "netflix", "spotify", "apple.com", "youtube", "google", "yandex plus", "яндекс плюс"]),
+        ("Продукты", ["magnum", "small", "galmart", "anvar", "арбуз", "arbuz", "toimart", "дешевле", "fix price", "metro", "супермаркет", "market", "маркет", "продукт", "minimarket", "khleb", "хлеб", "gaumart"]),
         ("Доставка еды", ["wolt", "glovo", "yandex eda", "яндекс еда", "chocofood", "доставка"]),
-        ("Кафе и рестораны", ["kfc", "burger", "mcdonald", "starbucks", "coffee", "кофе", "cafe", "кафе", "ресторан", "restaurant", "pizza", "пицц", "doner", "донер", "bar "]),
-        ("Транспорт", ["yandex go", "яндекс go", "uber", "indrive", "индрайв", "taxi", "такси", "onay", "азс", "helios", "qazaq oil", "sinooil", "kazmunaygas", "gas", "парков"]),
-        ("Здоровье", ["аптек", "pharm", "europharma", "клиник", "clinic", "стомат", "med"]),
-        ("Связь и интернет", ["beeline", "kcell", "activ", "tele2", "altel", "kazakhtelecom", "казахтелеком", "izi"]),
+        ("Кафе и рестораны", ["kfc", "burger", "mcdonald", "starbucks", "coffee", "кофе", "cafe", "кафе", "kafe", "ресторан", "restaura", "pizza", "пицц", "doner", "донер", "bar ", "fast food", "popeyes", "bahandi", "cafeteria", "kurochka", "dastarkhan", "дастархан"]),
+        ("Транспорт", ["yandex go", "яндекс go", "uber", "indrive", "индрайв", "taxi", "такси", "onay", "азс", "helios", "qazaq oil", "sinooil", "kazmunaygas", "парков", "транспорт"]),
+        ("Здоровье", ["аптек", "apteka", "pharm", "drug store", "europharma", "клиник", "clinic", "стомат"]),
+        ("Связь и интернет", ["beeline", "kcell", "activ", "tele2", "altel", "kazakhtelecom", "казахтелеком", "izi", "связ"]),
         ("Коммунальные", ["алсеко", "alseco", "энерго", "водоканал", "коммунал", "ерц"]),
-        ("Развлечения", ["kinopark", "кино", "chaplin", "netflix", "spotify", "apple.com", "steam", "playstation", "youtube"]),
-        ("Покупки", ["wildberries", "ozon", "kaspi магазин", "kaspi.kz магазин", "lamoda", "technodom", "sulpak", "mechta", "ikea", "zara", "lc waikiki"]),
+        ("Учёба", ["образоват", "школ", "курсы", "univer", "университет", "satpayev", "сатпаев"]),
+        ("Развлечения", ["kinopark", "кино", "chaplin", "steam", "playstation"]),
+        ("Покупки", ["wildberries", "ozon", "kaspi магазин", "kaspi.kz магазин", "lamoda", "technodom", "sulpak", "mechta", "ikea", "zara", "lc waikiki", "shop"]),
     ]
 
     public static func key(_ merchant: String) -> String {
@@ -433,11 +571,12 @@ public enum MerchantCategories {
             if text.contains("зарплат") || text.contains("salary") { return "Зарплата" }
             return operation.lowercased().contains("перевод") ? "Переводы" : "Пополнения"
         }
-        if operation.lowercased().hasPrefix("снятие") { return "Наличные" }
+        let op = operation.lowercased()
+        if op.hasPrefix("снятие") { return "Наличные" }
+        if op.hasPrefix("перевод") { return "Переводы" }
         for (category, words) in keywords where words.contains(where: { text.contains($0) }) {
             return category
         }
-        if operation.lowercased().hasPrefix("перевод") { return "Переводы" }
-        return operation.lowercased().hasPrefix("покупка") || operation.lowercased().hasPrefix("оплата") ? "Покупки" : "Без категории"
+        return op.hasPrefix("покупка") || op.hasPrefix("оплата") ? "Покупки" : "Без категории"
     }
 }
