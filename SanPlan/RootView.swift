@@ -88,6 +88,7 @@ public struct RootView: View {
         }
         .task {
             if let tab = screenshotTab { selectedTab = tab }
+            seedScreenshotWorkout()
             openPendingAlarmText()
             if !isScreenshotSignedInMode {
                 await authService.loadStatus()
@@ -104,6 +105,22 @@ public struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !isScreenshotSignedInMode { model.becameActive() }
         }
+    }
+
+    /// Debug screenshots only: an in-memory workout 47 s into its first set. Never written to disk.
+    private func seedScreenshotWorkout() {
+        #if DEBUG
+        guard isScreenshotSignedInMode, ProcessInfo.processInfo.arguments.contains("--screenshot-active-workout") else { return }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let exercises = [
+            SessionExercise(name: "Жим лёжа", rests: [90, 90, 90, 90]),
+            SessionExercise(name: "Тяга в наклоне", rests: [90, 90, 90])
+        ]
+        guard let created = try? WorkoutDomain.createWorkout(exercises: exercises, now: now - 60_000),
+              let working = try? WorkoutDomain.workoutCommand(state: created, command: .startNow(), now: now - 47_000)
+        else { return }
+        model.workouts.activeSession = working
+        #endif
     }
 
     /// A long plan title does not fit on the alarm screen, so the alarm's button opens it here.
