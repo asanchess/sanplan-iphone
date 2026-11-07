@@ -14,6 +14,11 @@ public struct TodayScreen: View {
                 DS.Colors.canvas.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+                        ScreenHeader("Сегодня") {
+                            CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") {
+                                showSettings = true
+                            }
+                        }
                         workoutCard
                         plansCard
                         moneyCard
@@ -23,14 +28,7 @@ public struct TodayScreen: View {
                 }
                 .refreshable { await plans.reload() }
             }
-            .navigationTitle("Сегодня")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") {
-                        showSettings = true
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .task {
             finance.refreshSummary(today: PlanDomain.today())

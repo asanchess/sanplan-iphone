@@ -248,6 +248,28 @@ public struct Card<Content: View>: View {
     }
 }
 
+/// The one top bar every tab uses: a light large title with round actions on the same line.
+public struct ScreenHeader<Actions: View>: View {
+    private let title: String
+    private let actions: Actions
+
+    public init(_ title: String, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.actions = actions()
+    }
+
+    public var body: some View {
+        HStack(spacing: DS.Metrics.spacing8) {
+            Text(title)
+                .font(.largeTitle.weight(.light))
+                .foregroundColor(DS.Colors.textPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            actions
+        }
+    }
+}
+
 public struct SectionHeader: View {
     private let title: String
 

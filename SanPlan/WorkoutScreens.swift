@@ -19,29 +19,32 @@ public struct WorkoutScreen: View {
             ZStack {
                 DS.Colors.canvas.ignoresSafeArea()
 
-                if let session = store.activeSession {
-                    if session.phase == .complete {
-                        workoutSummaryView(session: session)
+                VStack(spacing: 0) {
+                    ScreenHeader("Тренировка") {
+                        CircleIconButton(
+                            icon: "person.crop.circle",
+                            accessibilityLabel: "Настройки"
+                        ) {
+                            showSettings = true
+                        }
+                    }
+                    .padding(.horizontal, DS.Metrics.screenGutter)
+                    .padding(.top, DS.Metrics.spacing16)
+
+                    if let session = store.activeSession {
+                        if session.phase == .complete {
+                            workoutSummaryView(session: session)
+                        } else {
+                            activeWorkoutSessionView(session: session)
+                        }
+                    } else if let training = store.training, !training.days.isEmpty, !isEditingPlan {
+                        savedPlanOverview(training: training)
                     } else {
-                        activeWorkoutSessionView(session: session)
-                    }
-                } else if let training = store.training, !training.days.isEmpty, !isEditingPlan {
-                    savedPlanOverview(training: training)
-                } else {
-                    planEditorView
-                }
-            }
-            .navigationTitle("Тренировка")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "person.crop.circle",
-                        accessibilityLabel: "Настройки"
-                    ) {
-                        showSettings = true
+                        planEditorView
                     }
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
                     let now = Int64(Date().timeIntervalSince1970 * 1000)
@@ -68,6 +71,7 @@ public struct WorkoutScreen: View {
                         .foregroundColor(DS.Colors.textSecondary)
 
                     TextEditor(text: $planInputText)
+                        .scrollContentBackground(.hidden)
                         .frame(minHeight: 180)
                         .padding(DS.Metrics.spacing8)
                         .background(DS.Colors.surfaceRaised)

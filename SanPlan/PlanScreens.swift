@@ -107,13 +107,7 @@ public struct PlanScreen: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: DS.Metrics.spacing8) {
-            Text("Планы")
-                .font(.largeTitle.weight(.light))
-                .foregroundColor(DS.Colors.textPrimary)
-
-            Spacer()
-
+        ScreenHeader("Планы") {
             CircleIconButton(icon: "alarm", accessibilityLabel: "Будильники") {
                 isShowingAlarms = true
             }

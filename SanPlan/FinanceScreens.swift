@@ -182,13 +182,7 @@ public struct FinanceScreen: View {
     // MARK: - Header Bar
 
     private var headerBar: some View {
-        HStack {
-            Text("Деньги")
-                .font(.largeTitle.weight(.light))
-                .foregroundColor(DS.Colors.textPrimary)
-
-            Spacer()
-
+        ScreenHeader("Деньги") {
             CircleIconButton(
                 icon: "person.crop.circle",
                 accessibilityLabel: "Настройки"
