@@ -3,6 +3,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum MoneyFormat {
+    /// «1 операция», «3 операции», «5 операций».
+    static func operations(_ count: Int) -> String {
+        let tens = count % 100, ones = count % 10
+        let word = (11...14).contains(tens) ? "операций" : ones == 1 ? "операция" : (2...4).contains(ones) ? "операции" : "операций"
+        return "\(count) \(word)"
+    }
+
     static func kzt(_ minor: Int64) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
@@ -61,7 +68,7 @@ struct StatementsSection: View {
                 ForEach(store.state.imports ?? []) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(item.bank) · \(item.count) операций")
+                            Text("\(item.bank) · \(MoneyFormat.operations(item.count))")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundColor(DS.Colors.textPrimary)
                             Text(periodText(item))
@@ -154,7 +161,10 @@ struct StatementsSection: View {
             let next = try StatementImport.apply(pending.preview, to: store.state, importId: pending.id, fileName: pending.fileName, today: today)
             try store.replaceState(with: next, today: today)
             suggestions = StatementImport.mergeSuggestions(in: store.state, importId: pending.id)
-            statusMessage = "Импортировано операций: \(pending.preview.records.filter { $0.kind != "balance" }.count)."
+            let added = store.state.records.filter { $0.importId == pending.id }.count
+            let skipped = pending.preview.records.count - added
+            statusMessage = "Добавлено: \(MoneyFormat.operations(added))."
+                + (skipped > 0 ? " Уже были загружены раньше: \(skipped)." : "")
         } catch {
             errorMessage = error.localizedDescription
         }

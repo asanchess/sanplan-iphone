@@ -37,6 +37,8 @@ public final class AppModel: ObservableObject {
     /// Workouts and money are local to the phone, never tied to the account, so they stay.
     public func clearAccountData() {
         recorder.cancel()
+        if dictation.isListening(to: .plans) { dictation.stop() }
+        inputs.clear(.plans)
         plans.resetForSignOut()
     }
 

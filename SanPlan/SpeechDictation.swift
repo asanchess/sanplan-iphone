@@ -3,7 +3,7 @@ import Foundation
 import Speech
 
 /// Live speech-to-text with Apple Speech (ru-RU, on the phone when the model is installed).
-/// The words stream into `InputDrafts`; nothing is sent to ARNA's server.
+/// The words stream into `InputDrafts`; nothing is sent to ARNA's server. Money is recognised only on the phone.
 @MainActor
 public final class SpeechDictation: ObservableObject {
     @Published public private(set) var target: InputDrafts.Target?
@@ -36,6 +36,11 @@ public final class SpeechDictation: ObservableObject {
             errorMessage = "Распознавание речи сейчас недоступно."
             return false
         }
+        // Amounts and merchants are private: they never go to Apple's servers either.
+        if target == .money && !recognizer.supportsOnDeviceRecognition {
+            errorMessage = "Голос в «Деньгах» распознаётся только на самом iPhone, а модели русской речи на нём пока нет. Сумму можно ввести с клавиатуры."
+            return false
+        }
         guard await Self.requestSpeechPermission() else {
             errorMessage = "Разреши распознавание речи в Настройках iPhone."
             return false
@@ -48,7 +53,7 @@ public final class SpeechDictation: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
-        if recognizer.supportsOnDeviceRecognition {
+        if recognizer.supportsOnDeviceRecognition || target == .money {
             request.requiresOnDeviceRecognition = true
         }
 

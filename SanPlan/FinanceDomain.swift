@@ -70,6 +70,9 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     public var note: String?
     /// Kept in the list but left out of every total, e.g. a transfer between the owner's own cards.
     public var excluded: Bool?
+    /// The other side of a transfer between the owner's statements, set only on a side that the pairing took out
+    /// of the totals, so deleting the other statement puts it back.
+    public var pairedWith: String?
 
     public init(
         id: String,
@@ -110,6 +113,8 @@ public struct FinanceImport: Codable, Equatable, Identifiable {
     public var closingDate: String?
     /// Last four characters of the account number; a newer statement of the same account replaces its balance.
     public var account: String?
+    /// Hand-entered records merged into this statement's operations, given back if the statement is deleted.
+    public var mergedManual: [FinanceRecord]?
 
     public init(id: String, bank: String, fileName: String, periodStart: String?, periodEnd: String?, importedAt: String, count: Int, closingMinor: Int64? = nil, closingDate: String? = nil, account: String? = nil) {
         self.id = id
@@ -376,6 +381,7 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
         clean.merchant = rec.merchant.flatMap { $0.isEmpty ? nil : String($0.prefix(FinanceConstants.maxTitleLen)) }
         clean.note = rec.note.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
         clean.excluded = rec.excluded == true ? true : nil
+        clean.pairedWith = rec.pairedWith.flatMap { $0.isEmpty || $0.count > FinanceConstants.maxIdLen ? nil : $0 }
 
         switch rec.kind {
         case "balance":

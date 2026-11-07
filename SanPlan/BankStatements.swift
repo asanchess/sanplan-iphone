@@ -47,12 +47,14 @@ public enum StatementError: LocalizedError, Equatable {
     case unreadable
     case unknownBank
     case noTransactions
+    case alreadyImported
 
     public var errorDescription: String? {
         switch self {
         case .unreadable: return "Не удалось прочитать PDF. Нужна выписка в виде текста, а не скан."
         case .unknownBank: return "Это не похоже на выписку Kaspi или Halyk."
         case .noTransactions: return "В выписке не нашлось операций."
+        case .alreadyImported: return "Эта выписка уже загружена: все её операции уже есть."
         }
     }
 }
@@ -372,7 +374,9 @@ public enum StatementImport {
     public static func apply(_ preview: Preview, to state: FinanceState, importId: String, fileName: String, today: String) throws -> FinanceState {
         var next = try validateFinance(state)
         guard !(next.imports ?? []).contains(where: { $0.id == importId }) else { return next }
-        next.records.append(contentsOf: preview.records)
+        let fresh = newRecords(preview, in: next)
+        guard !fresh.isEmpty else { throw StatementError.alreadyImported }
+        next.records.append(contentsOf: fresh)
         var imports = next.imports ?? []
         let closing = preview.statement.closingBalance
         imports.append(FinanceImport(
@@ -382,8 +386,8 @@ public enum StatementImport {
             periodStart: preview.statement.periodStart,
             periodEnd: preview.statement.periodEnd,
             importedAt: today,
-            count: preview.records.count,
-            closingMinor: closing.flatMap { $0.amountMinor >= 0 ? $0.amountMinor : nil },
+            count: fresh.count,
+            closingMinor: closing?.amountMinor,
             closingDate: closing?.date,
             account: preview.statement.account
         ))
@@ -391,6 +395,28 @@ public enum StatementImport {
         pairTransfersBetweenStatements(&next, importId: importId)
         rebuildBalance(&next)
         return try validateFinance(next)
+    }
+
+    /// Operations of the same account that an earlier statement already brought in (the same file again, or an
+    /// overlapping period) are left out. Repeats are counted, so two equal purchases on one day both stay.
+    static func newRecords(_ preview: Preview, in state: FinanceState) -> [FinanceRecord] {
+        let bank = preview.statement.bank.rawValue
+        let account = preview.statement.account
+        let sameAccount = Set((state.imports ?? []).filter { $0.bank == bank && $0.account == account }.map(\.id))
+        var seen: [String: Int] = [:]
+        for record in state.records where record.importId.map({ sameAccount.contains($0) }) == true {
+            seen[duplicateKey(record), default: 0] += 1
+        }
+        return preview.records.filter { record in
+            let key = duplicateKey(record)
+            guard let count = seen[key], count > 0 else { return true }
+            seen[key] = count - 1
+            return false
+        }
+    }
+
+    private static func duplicateKey(_ r: FinanceRecord) -> String {
+        "\(r.date ?? "")|\(r.kind)|\(r.amountMinor ?? 0)|\((r.merchant ?? r.title).lowercased())"
     }
 
     static let ownTransferNote = "Перевод между своими счетами"
@@ -407,26 +433,33 @@ public enum StatementImport {
             guard let ymd, let (y, m, d) = parseYmd(ymd) else { return nil }
             return daysSinceEpoch(year: y, month: m, day: d)
         }
-        var paired = Set<Int>()
+        var taken = Set(state.records.compactMap(\.pairedWith))
+        taken.formUnion(state.records.filter { $0.pairedWith != nil }.map(\.id))
         for i in state.records.indices where state.records[i].importId == importId {
             let record = state.records[i]
-            guard candidate(record), let recordDay = day(record.date) else { continue }
+            guard !taken.contains(record.id), candidate(record), let recordDay = day(record.date) else { continue }
             let match = state.records.indices.first { j in
                 let other = state.records[j]
-                guard !paired.contains(j), let otherImport = other.importId, otherImport != importId,
+                guard !taken.contains(other.id), let otherImport = other.importId, otherImport != importId,
                       other.kind != record.kind, candidate(other),
                       other.amountMinor == record.amountMinor, let otherDay = day(other.date) else { return false }
                 return abs(otherDay - recordDay) <= 1
             }
             if let j = match {
-                paired.insert(j)
-                paired.insert(i)
-                state.records[i].excluded = true
-                state.records[j].excluded = true
-                if state.records[i].note == nil { state.records[i].note = ownTransferNote }
-                if state.records[j].note == nil { state.records[j].note = ownTransferNote }
+                taken.insert(record.id)
+                taken.insert(state.records[j].id)
+                link(&state.records[i], to: state.records[j].id)
+                link(&state.records[j], to: record.id)
             }
         }
+    }
+
+    /// A side the bank already marked as the owner's stays out of the totals on its own and keeps no partner.
+    private static func link(_ record: inout FinanceRecord, to partner: String) {
+        guard record.excluded != true else { return }
+        record.excluded = true
+        record.pairedWith = partner
+        if record.note == nil { record.note = ownTransferNote }
     }
 
     /// One checkpoint: the sum of each statement's latest closing balance, dated at the latest of them, placed after
@@ -434,10 +467,12 @@ public enum StatementImport {
     static func rebuildBalance(_ state: inout FinanceState) {
         state.records.removeAll { $0.id == balanceRecordId }
         let latestPerAccount = Dictionary(grouping: (state.imports ?? []).filter { $0.closingMinor != nil && $0.closingDate != nil }) {
-            "\($0.bank)|\($0.account ?? $0.id)"
+            "\($0.bank)|\($0.account ?? "")"
         }.compactMap { $0.value.max { ($0.closingDate ?? "") < ($1.closingDate ?? "") } }
         guard !latestPerAccount.isEmpty else { return }
+        // An overdrawn account lowers the sum. A balance below zero has no checkpoint in the money model, so none is set.
         let total = latestPerAccount.reduce(Int64(0)) { $0 + ($1.closingMinor ?? 0) }
+        guard total >= 0 else { return }
         let date = latestPerAccount.compactMap(\.closingDate).max() ?? ""
         state.records.append(FinanceRecord(id: balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: total, date: date))
     }
@@ -471,15 +506,33 @@ public enum StatementImport {
         if let category = manual.category, category != "Без категории" {
             next.records[importedIndex].category = category
         }
+        if let importId = next.records[importedIndex].importId,
+           let item = next.imports?.firstIndex(where: { $0.id == importId }) {
+            next.imports?[item].mergedManual = (next.imports?[item].mergedManual ?? []) + [manual]
+        }
         next.records.remove(at: manualIndex)
         return try validateFinance(next)
     }
 
-    /// Removes one import and only its records; the combined balance is rebuilt from the statements left.
+    /// Removes one import and only its records. Hand-entered records merged into it come back, the other side of
+    /// its transfers counts again unless it pairs with another statement, and the balance is rebuilt.
     public static func deleteImport(_ importId: String, from state: FinanceState) throws -> FinanceState {
         var next = try validateFinance(state)
+        let removed = Set(next.records.filter { $0.importId == importId }.map(\.id))
+        let restored = next.imports?.first { $0.id == importId }?.mergedManual ?? []
         next.records.removeAll { $0.importId == importId }
         next.imports?.removeAll { $0.id == importId }
+        for i in next.records.indices {
+            guard let partner = next.records[i].pairedWith, removed.contains(partner) else { continue }
+            next.records[i].pairedWith = nil
+            next.records[i].excluded = nil
+            if next.records[i].note == ownTransferNote { next.records[i].note = nil }
+        }
+        let ids = Set(next.records.map(\.id))
+        next.records.append(contentsOf: restored.filter { !ids.contains($0.id) })
+        for item in next.imports ?? [] {
+            pairTransfersBetweenStatements(&next, importId: item.id)
+        }
         rebuildBalance(&next)
         return try validateFinance(next)
     }
@@ -522,6 +575,7 @@ public enum StatementImport {
         let note = edit.note.trimmingCharacters(in: .whitespacesAndNewlines)
         next.records[index].note = note.isEmpty ? nil : note
         next.records[index].excluded = edit.excluded ? true : nil
+        if !edit.excluded { next.records[index].pairedWith = nil }
         if !category.isEmpty, ["income", "expense"].contains(next.records[index].kind) {
             next.records[index].category = category
             if edit.applyCategoryToMerchant, let merchant = next.records[index].merchant {

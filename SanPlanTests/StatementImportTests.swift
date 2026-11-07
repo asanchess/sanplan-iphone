@@ -396,6 +396,70 @@ final class StatementImportTests: XCTestCase {
         XCTAssertEqual(balances.first?.date, "2025-12-31")
     }
 
+    func testTheSameStatementAgainIsRejectedAndAnOverlapAddsOnlyNewOperations() throws {
+        var state = try importing(Self.kaspiText, id: "k1", into: FinanceState())
+        XCTAssertThrowsError(try importing(Self.kaspiText, id: "k2", into: state)) {
+            XCTAssertEqual($0 as? StatementError, .alreadyImported)
+        }
+
+        let longer = Self.kaspiText.replacingOccurrences(of: "    - Сумма заблокирована", with: """
+        12.11.25
+        - 2 500,00 ₸
+        Покупка      MAGNUM CASH&CARRY
+            - Сумма заблокирована
+        """)
+        state = try importing(longer, id: "k2", into: state)
+        XCTAssertEqual(state.records.filter { $0.importId == "k2" }.map(\.date), ["2025-11-12"], "Only the day the first statement did not have")
+        XCTAssertEqual(state.imports?.first { $0.id == "k2" }?.count, 1)
+        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.map(\.amountMinor), [35_754_950], "One account counts once")
+    }
+
+    func testOverdrawnAccountLowersTheCombinedBalance() throws {
+        var state = try importing(Self.kaspiText, id: "k", into: FinanceState())
+        let overdrawn = Self.halykText.replacingOccurrences(of: "Closing balance: 195 400,00", with: "Closing balance: -5 000,00")
+        state = try importing(overdrawn, id: "h", into: state)
+        XCTAssertEqual(state.imports?.first { $0.id == "h" }?.closingMinor, -500_000)
+        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.map(\.amountMinor), [35_754_950 - 500_000])
+    }
+
+    func testDeletingOneSideOfAnOwnTransferCountsTheOtherAgain() throws {
+        var state = try importing(Self.kaspiText, id: "k", into: FinanceState())
+        state = try importing(Self.halykText, id: "h", into: state)
+        XCTAssertEqual(state.records.first { $0.id == "h-3" }?.pairedWith, "k-8")
+        XCTAssertNil(state.records.first { $0.id == "k-8" }?.pairedWith, "Already the owner's by name, so nothing to undo")
+
+        state = try StatementImport.deleteImport("k", from: state)
+        let transfer = try XCTUnwrap(state.records.first { $0.id == "h-3" })
+        XCTAssertNil(transfer.excluded)
+        XCTAssertNil(transfer.note)
+        XCTAssertNil(transfer.pairedWith)
+
+        var both = try importing(Self.kaspiText, id: "k", into: FinanceState())
+        both = try importing(Self.halykText, id: "h", into: both)
+        both = try StatementImport.deleteImport("h", from: both)
+        XCTAssertEqual(both.records.first { $0.id == "k-8" }?.excluded, true, "The Kaspi side stays the owner's own transfer")
+    }
+
+    func testDeletingAStatementGivesBackTheMergedManualRecord() throws {
+        let manual = FinanceRecord(id: "m1", kind: "expense", title: "магазин у дома", amountMinor: 250_000, date: "2025-11-03", category: "Продукты")
+        var state = try importing(Self.kaspiText, id: "k", into: FinanceState(records: [manual]))
+        state = try StatementImport.merge(.init(manualId: "m1", importedId: "k-0"), in: state)
+        XCTAssertNil(state.records.first { $0.id == "m1" })
+
+        let decoded = try JSONDecoder().decode(FinanceState.self, from: JSONEncoder().encode(state))
+        let restored = try StatementImport.deleteImport("k", from: decoded)
+        XCTAssertEqual(restored.records, [manual])
+        XCTAssertNil(restored.imports)
+    }
+
+    func testOperationCountWording() {
+        XCTAssertEqual(MoneyFormat.operations(1), "1 операция")
+        XCTAssertEqual(MoneyFormat.operations(3), "3 операции")
+        XCTAssertEqual(MoneyFormat.operations(5), "5 операций")
+        XCTAssertEqual(MoneyFormat.operations(11), "11 операций")
+        XCTAssertEqual(MoneyFormat.operations(22), "22 операции")
+    }
+
     func testImportingTwiceWithSameIdIsIgnoredAndSurvivesCoding() throws {
         var state = try importing(Self.halykText, id: "h", into: FinanceState())
         let count = state.records.count
