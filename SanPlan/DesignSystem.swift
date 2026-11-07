@@ -53,8 +53,16 @@ public enum DS {
                 : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
         })
 
-        /// One violet that reads on both the light and dark system alarm surfaces.
-        public static let alarmTint = Color(red: 142/255, green: 108/255, blue: 240/255)
+        /// System alarm buttons draw white text on this tint, so it stays deep enough for 5.6:1.
+        public static let alarmTint = Color(red: 107/255, green: 79/255, blue: 216/255)
+
+        /// Tint for system controls that draw white over it (date pickers, prominent toolbar buttons):
+        /// #7438DF in dark (6.2:1 with white), the light accent in light.
+        public static let controlTint = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 116/255, green: 56/255, blue: 223/255, alpha: 1.0)
+                : UIColor(red: 107/255, green: 79/255, blue: 216/255, alpha: 1.0)
+        })
 
         public static let accentGradientStart = Color(UIColor { trait in
             trait.userInterfaceStyle == .dark

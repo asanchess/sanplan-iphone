@@ -140,6 +140,6 @@ public struct RootView: View {
                 .tabItem { Label(MainTab.workout.title, systemImage: MainTab.workout.icon) }
                 .tag(MainTab.workout)
         }
-        .tint(DS.Colors.accent)
+        .tint(DS.Colors.controlTint)
     }
 }

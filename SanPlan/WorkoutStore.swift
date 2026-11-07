@@ -94,11 +94,12 @@ public final class WorkoutStore: ObservableObject {
 
     public func dispatch(command: WorkoutCommand, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) {
         guard let current = activeSession else { return }
+        let at = command.type == "recoverClock" ? now : WorkoutDomain.userCommandTime(now, state: current)
         do {
-            let next = try WorkoutDomain.workoutCommand(state: current, command: command, now: now)
+            let next = try WorkoutDomain.workoutCommand(state: current, command: command, now: at)
             self.activeSession = next
             saveToDisk()
-            syncRestAlarm(now: now)
+            syncRestAlarm(now: at)
         } catch {
             self.errorMessage = error.localizedDescription
         }

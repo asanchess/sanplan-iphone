@@ -512,7 +512,7 @@ public struct PlanScreen: View {
             )
             .font(.subheadline)
             .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.accent)
+            .tint(DS.Colors.controlTint)
             .environment(\.timeZone, TimeZone(identifier: plan.timeZone) ?? .current)
             .environment(\.locale, Locale(identifier: "ru_RU"))
 

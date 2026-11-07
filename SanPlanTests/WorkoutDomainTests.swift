@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 import AlarmKit
 @testable import SanPlan
 
@@ -87,14 +88,126 @@ final class WorkoutDomainTests: XCTestCase {
         XCTAssertEqual(skipped.workStartedAt, 2_004_000)
     }
 
-    func testSessionSavedBefore21StillLoads() throws {
-        let state = try twoExerciseWorkout(now: 1_000_000)
+    private func withoutSetStart(_ state: WorkoutSessionState) throws -> WorkoutSessionState {
         var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as! [String: Any]
         json.removeValue(forKey: "workStartedAt")
-        let legacy = try JSONDecoder().decode(WorkoutSessionState.self, from: JSONSerialization.data(withJSONObject: json))
-        try WorkoutDomain.validateState(legacy)
-        let working = try WorkoutDomain.workoutCommand(state: legacy, command: .tick(), now: 1_030_000)
-        XCTAssertEqual(working.workStartedAt, 1_030_000)
+        return try JSONDecoder().decode(WorkoutSessionState.self, from: JSONSerialization.data(withJSONObject: json))
+    }
+
+    /// Working and alerting sessions saved by 2.0 have no set start; they must load and keep working.
+    func testSessionSavedBefore21StillLoads() throws {
+        var working = try twoExerciseWorkout(now: 1_000_000)
+        working = try WorkoutDomain.workoutCommand(state: working, command: .startNow(), now: 1_001_000)
+        let legacyWorking = try withoutSetStart(working)
+        XCTAssertNil(legacyWorking.workStartedAt)
+        try WorkoutDomain.validateState(legacyWorking)
+        XCTAssertNil(WorkoutDomain.elapsedWorkSeconds(state: legacyWorking, now: 1_010_000))
+        let rested = try WorkoutDomain.workoutCommand(state: legacyWorking, command: .startRest(), now: 1_020_000)
+        XCTAssertEqual(rested.phase, .resting)
+
+        let alerting = try WorkoutDomain.workoutCommand(state: rested, command: .tick(), now: 1_090_000)
+        let legacyAlerting = try withoutSetStart(alerting)
+        try WorkoutDomain.validateState(legacyAlerting)
+        let next = try WorkoutDomain.workoutCommand(state: legacyAlerting, command: .acknowledge(), now: 1_095_000)
+        XCTAssertEqual(next.phase, .working)
+        XCTAssertEqual(next.workStartedAt, 1_095_000)
+    }
+
+    func testTapFromAnEarlierFrameStillCounts() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_200_000)
+        XCTAssertEqual(state.phase, .alerting)
+
+        let frameTime: Int64 = 1_199_600
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .acknowledge(), now: frameTime))
+        let at = WorkoutDomain.userCommandTime(frameTime, state: state)
+        XCTAssertEqual(at, 1_200_000)
+        XCTAssertNoThrow(try WorkoutDomain.workoutCommand(state: state, command: .acknowledge(), now: at))
+        XCTAssertNoThrow(try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: at))
+        XCTAssertNoThrow(try WorkoutDomain.workoutCommand(state: state, command: .setSets(3), now: at))
+        // A real clock jump back is left for recoverClock, not hidden.
+        XCTAssertEqual(WorkoutDomain.userCommandTime(1_100_000, state: state), 1_100_000)
+    }
+
+    func testClockRecoveryShiftsSetStartAndNeverGoesNegative() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startNow(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .setSets(3), now: 1_031_000)
+
+        let shifted = try WorkoutDomain.workoutCommand(state: state, command: .recoverClock(), now: 600_000)
+        XCTAssertEqual(shifted.workStartedAt, 570_000)
+        XCTAssertEqual(WorkoutDomain.elapsedWorkSeconds(state: shifted, now: 600_000), 30)
+
+        let nearEpoch = try WorkoutDomain.workoutCommand(state: state, command: .recoverClock(), now: 1_000)
+        XCTAssertEqual(nearEpoch.workStartedAt, 0)
+        XCTAssertNoThrow(try WorkoutDomain.validateState(nearEpoch))
+    }
+
+    func testAcknowledgeKeepsTheAlertStartTime() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_070_000)
+        XCTAssertEqual(state.workStartedAt, 1_061_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .acknowledge(), now: 1_080_000)
+        XCTAssertEqual(state.phase, .working)
+        XCTAssertEqual(state.setIndex, 1)
+        XCTAssertEqual(state.workStartedAt, 1_061_000)
+    }
+
+    func testAdjustingARestToZeroStartsTheSetStopwatch() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .adjust(seconds: -120), now: 1_005_000)
+        XCTAssertEqual(state.phase, .alerting)
+        XCTAssertEqual(state.workStartedAt, 1_005_000)
+    }
+
+    func testSavedSetStartOutsideASetIsRejected() throws {
+        var resting = try twoExerciseWorkout(now: 1_000_000)
+        resting = try WorkoutDomain.workoutCommand(state: resting, command: .startRest(), now: 1_001_000)
+        var paused = try WorkoutDomain.workoutCommand(state: resting, command: .pause(), now: 1_002_000)
+        resting.workStartedAt = 1_000_500
+        paused.workStartedAt = 1_000_500
+        XCTAssertThrowsError(try WorkoutDomain.validateState(resting))
+        XCTAssertThrowsError(try WorkoutDomain.validateState(paused))
+
+        var complete = try WorkoutDomain.createWorkout(exercises: [SessionExercise(name: "Жим", rests: [60])], now: 1_000_000)
+        complete = try WorkoutDomain.workoutCommand(state: complete, command: .startRest(), now: 1_001_000)
+        complete = try WorkoutDomain.workoutCommand(state: complete, command: .tick(), now: 1_100_000)
+        complete = try WorkoutDomain.workoutCommand(state: complete, command: .startRest(), now: 1_101_000)
+        XCTAssertEqual(complete.phase, .complete)
+        XCTAssertNil(complete.workStartedAt)
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: complete, command: .setSets(2), now: 1_102_000))
+        complete.workStartedAt = 1_000_500
+        XCTAssertThrowsError(try WorkoutDomain.validateState(complete))
+    }
+
+    func testSetsStepperWorksDuringARestAndRejectsAReusedId() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .setSets(3, id: "s1"), now: 1_002_000)
+        XCTAssertEqual(state.phase, .resting)
+        XCTAssertEqual(state.exercises[0].rests, [60, 60, 60])
+        let repeated = try WorkoutDomain.workoutCommand(state: state, command: .setSets(3, id: "s1"), now: 1_003_000)
+        XCTAssertEqual(repeated.exercises[0].rests.count, 3)
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .setSets(4, id: "s1"), now: 1_003_000))
+    }
+
+    @MainActor
+    func testAlarmWarningRedrawsTheWorkoutScreen() async throws {
+        let fake = FakeRestAlarmService()
+        fake.authorizationState = .denied
+        let coordinator = RestAlarmCoordinator(service: fake)
+        let store = WorkoutStore(restAlarm: coordinator)
+        var redraws = 0
+        let observation = store.objectWillChange.sink { _ in redraws += 1 }
+        defer { observation.cancel() }
+
+        await coordinator.schedule(at: Date().addingTimeInterval(60), exerciseName: "Жим")
+        XCTAssertNotNil(coordinator.warningMessage)
+        for _ in 0..<20 where redraws == 0 { await Task.yield() }
+        XCTAssertGreaterThan(redraws, 0)
     }
 
     func testSetsStepperNeverDropsTheSetInProgress() throws {

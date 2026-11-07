@@ -298,7 +298,6 @@ public struct AlarmsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Готово") { dismiss() }
-                        .foregroundColor(DS.Colors.accent)
                 }
             }
             .sheet(item: $editor) { target in
@@ -502,7 +501,7 @@ struct AlarmEditor: View {
                                 DatePicker("Время сигнала", selection: $moment)
                                     .font(.subheadline)
                                     .foregroundColor(DS.Colors.textPrimary)
-                                    .tint(DS.Colors.accent)
+                                    .tint(DS.Colors.controlTint)
                                     .environment(\.timeZone, TimeZone(identifier: timeZone) ?? .current)
                                     .environment(\.locale, Locale(identifier: "ru_RU"))
                                 ReminderOffsetsPicker(offsets: $offsets)

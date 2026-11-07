@@ -395,7 +395,7 @@ public enum WorkoutDomain {
                 newDeadline = now + remainder
             }
             if let started = state.workStartedAt {
-                newWorkStartedAt = now - max(0, min(state.lastNow - started, 6 * 3_600_000))
+                newWorkStartedAt = max(0, now - max(0, min(state.lastNow - started, 6 * 3_600_000)))
             }
 
         case "tick":
@@ -645,6 +645,15 @@ public enum WorkoutDomain {
     }
 
     /// Seconds since the current set began, for the set stopwatch. Nil outside a set or for sessions saved before 2.1.
+    /// A tap carries the time of the frame it was drawn in, which can trail the last command
+    /// (for example a tick sent on returning to the app) by a fraction of a second.
+    public static func userCommandTime(_ now: Int64, state: WorkoutSessionState) -> Int64 {
+        if now < state.lastNow && state.lastNow - now <= 5_000 {
+            return state.lastNow
+        }
+        return now
+    }
+
     public static func elapsedWorkSeconds(state: WorkoutSessionState, now: Int64) -> Int? {
         guard state.phase == .working || state.phase == .alerting, let started = state.workStartedAt else { return nil }
         return Int(max(0, now - started) / 1000)
