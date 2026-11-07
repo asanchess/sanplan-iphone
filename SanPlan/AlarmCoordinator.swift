@@ -186,6 +186,8 @@ public final class AlarmCoordinator: ObservableObject {
 
     private var needsResync: Bool = false
     private var queuedPlans: [NativePlan]? = nil
+    /// A removal asked for while another operation runs; it runs next and stops a sync from adding more.
+    private var deleteAllRequested: Bool = false
     private var observationTask: Task<Void, Never>?
 
     public var hasUserOptedIn: Bool {
@@ -311,6 +313,17 @@ public final class AlarmCoordinator: ObservableObject {
 
         // 2. Если снимок получен, очищаем записи, которые уже отработали или были удалены из системы
         if let systemIDs = systemSnapshot {
+            // AlarmManager lists only this app's alarms, so a system alarm the registry does not know
+            // (the app was killed mid-sync, or the registry was lost) is ours and can be cancelled safely.
+            // Wanted ones among them are scheduled again below as new.
+            let known = Set(registry.records.keys.compactMap { UUID(uuidString: $0) })
+            for orphan in systemIDs.subtracting(known).subtracting([LiveRestAlarmService.sharedRestAlarmId]) {
+                do {
+                    try await service.cancel(id: orphan)
+                } catch {
+                    currentErrors.append("Не удалось снять неучтённый будильник ARNA: \(error.localizedDescription)")
+                }
+            }
             for (uuidStr, _) in registry.records {
                 guard let uuid = UUID(uuidString: uuidStr) else {
                     registry.records.removeValue(forKey: uuidStr)
@@ -337,6 +350,7 @@ public final class AlarmCoordinator: ObservableObject {
 
         // 3. Планирование новых или восстановление отсутствующих будущих будильников
         for uuidString in newUUIDs {
+            if deleteAllRequested { break }
             guard let alarm = desiredMap[UUID(uuidString: uuidString)!] else { continue }
             do {
                 try await scheduleAlarmKitEntry(alarm: alarm)
@@ -350,6 +364,8 @@ public final class AlarmCoordinator: ObservableObject {
                     eventDate: alarm.eventDate,
                     timeZone: alarm.timeZone
                 )
+                // Recorded at once, so an app killed mid-sync still knows what it scheduled.
+                saveRegistry(registry)
             } catch {
                 currentErrors.append("Ошибка планирования «\(alarm.planTitle)»: \(error.localizedDescription)")
             }
@@ -357,6 +373,7 @@ public final class AlarmCoordinator: ObservableObject {
 
         // 4. Обновление изменившихся будильников (переименование)
         for uuidString in existingUUIDs {
+            if deleteAllRequested { break }
             guard let alarm = desiredMap[UUID(uuidString: uuidString)!],
                   let existing = currentRecords[uuidString] else { continue }
 
@@ -480,11 +497,27 @@ public final class AlarmCoordinator: ObservableObject {
 
     /// Удаляет ИСКЛЮЧИТЕЛЬНО зарегистрированные будильники SanPlan, не затрагивая личные будильники пользователя.
     public func deleteAllOwnAlarms() async {
-        guard !isSyncing else { return }
+        // Nothing queued may bring alarms back once removal is asked for.
+        needsResync = false
+        queuedPlans = nil
+        guard !isSyncing else {
+            deleteAllRequested = true
+            statusMessage = "Удаляю будильники ARNA…"
+            return
+        }
+        deleteAllRequested = false
         isSyncing = true
         defer { finishOperation() }
         var registry = loadRegistry()
         var failedList: [String] = []
+
+        // System alarms the registry lost track of are this app's too (AlarmManager lists only ours).
+        if let systemIDs = try? await service.fetchSystemAlarmIDs() {
+            let known = Set(registry.records.keys.compactMap { UUID(uuidString: $0) })
+            for orphan in systemIDs.subtracting(known).subtracting([LiveRestAlarmService.sharedRestAlarmId]) {
+                do { try await service.cancel(id: orphan) } catch { failedList.append("Будильник ARNA") }
+            }
+        }
 
         for (uuidStr, record) in registry.records {
             guard let uuid = UUID(uuidString: uuidStr) else {
@@ -531,6 +564,10 @@ public final class AlarmCoordinator: ObservableObject {
 
     private func finishOperation() {
         isSyncing = false
+        if deleteAllRequested {
+            Task { [weak self] in await self?.deleteAllOwnAlarms() }
+            return
+        }
         if needsResync, let nextPlans = queuedPlans {
             needsResync = false
             queuedPlans = nil

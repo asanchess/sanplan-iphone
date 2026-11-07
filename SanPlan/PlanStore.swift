@@ -2,7 +2,12 @@ import Foundation
 
 @MainActor
 public final class PlanStore: ObservableObject {
-    @Published public var plans: [PlanItem] = []
+    @Published public var plans: [PlanItem] = [] {
+        didSet {
+            plansRevision += 1
+            reconcileDraftsWithSaved()
+        }
+    }
     @Published public var remoteEvents: [PlanItem] = []
     @Published public var upcomingEvents: [PlanItem] = []
     @Published public var selectedDate: String
@@ -29,6 +34,9 @@ public final class PlanStore: ObservableObject {
     private var loadedRange: (start: String, end: String)? = nil
     /// Bumped at sign-out so a response still in flight cannot bring the old account's plans back.
     private var generation = 0
+    /// Bumped on every write to `plans`, so a list fetched before a save cannot overwrite the save.
+    private var plansRevision = 0
+    private var reloadInFlight = false
 
     public init(
         client: APIClient,
@@ -104,6 +112,7 @@ public final class PlanStore: ObservableObject {
     /// Forgets everything that belongs to the signed-in account.
     public func resetForSignOut() {
         generation += 1
+        reloadInFlight = false
         plans = []
         remoteEvents = []
         upcomingEvents = []
@@ -117,16 +126,26 @@ public final class PlanStore: ObservableObject {
     }
 
     public func reload() async {
+        // Launch, the Today tab and the Plans tab all ask at once; one request answers them all.
+        guard !reloadInFlight else { return }
+        reloadInFlight = true
         let started = generation
+        let revisionAtStart = plansRevision
         isLoading = true
         errorMessage = nil
-        defer { if started == generation { isLoading = false } }
+        defer {
+            reloadInFlight = false
+            if started == generation { isLoading = false }
+        }
 
         do {
             let loaded = try await PlanAPI.getPlans(client: client)
             guard started == generation else { return }
-            plans = loaded
-            onPlansChanged(loaded)
+            // A save or alarm change that landed meanwhile already holds the newer list.
+            if revisionAtStart == plansRevision {
+                plans = loaded
+                onPlansChanged(loaded)
+            }
         } catch let err as APIError {
             guard started == generation else { return }
             handleAPIError(err)
@@ -362,8 +381,44 @@ public final class PlanStore: ObservableObject {
             }
             return err.localizedDescription
         } catch {
+            guard started == generation else { return nil }
             return error.localizedDescription
         }
+    }
+
+    /// A save whose reply was lost may still have reached the server. An unchanged draft that is
+    /// already stored leaves the list; an edited one gets a new id, because the server refuses a
+    /// changed plan under an id it already holds.
+    private func reconcileDraftsWithSaved() {
+        guard !draftPlans.isEmpty else { return }
+        let stored = Dictionary(plans.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var changed = false
+        var next: [PlanItem] = []
+        for draft in draftPlans {
+            guard let saved = stored[draft.id] else { next.append(draft); continue }
+            changed = true
+            if Self.sameContent(saved, draft) {
+                conflictedDraftIds.remove(draft.id)
+                continue
+            }
+            var renamed = draft
+            renamed.id = UUID().uuidString
+            if editingPlanId == draft.id { editingPlanId = renamed.id }
+            if conflictedDraftIds.remove(draft.id) != nil { conflictedDraftIds.insert(renamed.id) }
+            next.append(renamed)
+        }
+        guard changed else { return }
+        draftPlans = next
+        if let editing = editingPlanId, !next.contains(where: { $0.id == editing }) {
+            editingPlanId = next.first?.id
+        }
+    }
+
+    /// Mirrors the server's sameness check for the fields a person can edit.
+    static func sameContent(_ a: PlanItem, _ b: PlanItem) -> Bool {
+        func offsets(_ p: PlanItem) -> [Int] { ((try? PlanDomain.getReminderOffsets(plan: p)) ?? []).sorted() }
+        return a.title == b.title && a.kind == b.kind && a.date == b.date && a.time == b.time
+            && a.durationMinutes == b.durationMinutes && offsets(a) == offsets(b)
     }
 
     private func handleAPIError(_ err: APIError) {

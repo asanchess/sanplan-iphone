@@ -291,7 +291,10 @@ final class FakeAlarmService: AlarmServiceProtocol, @unchecked Sendable {
         return systemIDs
     }
 
+    var scheduleDelayNanoseconds: UInt64 = 0
+
     func schedule(id: UUID, configuration: AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>) async throws {
+        if scheduleDelayNanoseconds > 0 { try await Task.sleep(nanoseconds: scheduleDelayNanoseconds) }
         scheduleCallCount[id, default: 0] += 1
         if let failID = shouldFailSchedulingForID, failID == id {
             throw NSError(domain: "SanPlanTest", code: 501, userInfo: [NSLocalizedDescriptionKey: "Scheduling failed for \(id)"])
@@ -639,5 +642,91 @@ final class AlarmCoordinatorReconciliationTests: XCTestCase {
         XCTAssertEqual(service.systemIDs, IDs)
         XCTAssertEqual(coordinator.activeAlarmCount, 1)
         XCTAssertFalse(coordinator.syncErrors.isEmpty)
+    }
+
+    func testUnregisteredSystemAlarmIsCancelledButRestAlarmIsKept() async {
+        let (defaults, suite) = createTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FakeAlarmService()
+        let orphan = UUID()
+        service.systemIDs = [orphan, LiveRestAlarmService.sharedRestAlarmId]
+        let coordinator = AlarmCoordinator(service: service, userDefaults: defaults)
+        await coordinator.syncAlarms(plans: [])
+        XCTAssertEqual(service.systemIDs, [LiveRestAlarmService.sharedRestAlarmId])
+
+        let second = UUID()
+        service.systemIDs.insert(second)
+        await coordinator.deleteAllOwnAlarms()
+        XCTAssertEqual(service.systemIDs, [LiveRestAlarmService.sharedRestAlarmId])
+    }
+
+    func testLostRegistryLeavesExactlyTheWantedAlarms() async {
+        let (defaults, suite) = createTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FakeAlarmService()
+        let coordinator = AlarmCoordinator(service: service, userDefaults: defaults)
+        let plan = makeFuturePlan(id: "keep", title: "Созвон", secondsFromNow: 3600)
+        await coordinator.syncAlarms(plans: [plan])
+        let wanted = service.systemIDs
+        service.systemIDs.insert(UUID())
+        defaults.set(Data("broken".utf8), forKey: "SanPlan_AlarmRegistry_Storage")
+        await coordinator.syncAlarms(plans: [plan])
+        XCTAssertEqual(service.systemIDs, wanted)
+        XCTAssertEqual(coordinator.activeAlarmCount, 1)
+    }
+
+    func testSignOutDuringSyncLeavesNoAlarms() async throws {
+        let (defaults, suite) = createTestDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let service = FakeAlarmService()
+        service.scheduleDelayNanoseconds = 50_000_000
+        let coordinator = AlarmCoordinator(service: service, userDefaults: defaults)
+        let plans = (0..<5).map { makeFuturePlan(id: "p\($0)", title: "План \($0)", secondsFromNow: 3600 + Double($0) * 600) }
+        let sync = Task { await coordinator.syncAlarms(plans: plans) }
+        while !coordinator.isSyncing { await Task.yield() }
+        await coordinator.deleteAllOwnAlarms()
+        await sync.value
+        for _ in 0..<100 where coordinator.isSyncing || coordinator.activeAlarmCount > 0 {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertTrue(service.systemIDs.isEmpty)
+        XCTAssertEqual(coordinator.activeAlarmCount, 0)
+    }
+}
+
+@MainActor
+final class PlanStoreDraftTests: XCTestCase {
+    private func makeStore() -> PlanStore {
+        UserDefaults.standard.removeObject(forKey: "arna.planner.draft.json")
+        let client = APIClient(baseURL: URL(string: "https://example.invalid")!, session: .shared)
+        return PlanStore(client: client, onUnauthorized: {})
+    }
+
+    private func draft(_ id: String, title: String) -> PlanItem {
+        var item = PlanItem(id: id, kind: "event", title: title, timeZone: "Asia/Qyzylorda")
+        item.date = "2026-12-01"
+        item.time = "10:00"
+        item.durationMinutes = 60
+        return item
+    }
+
+    func testDraftAlreadySavedIsDroppedAndEditedOneGetsNewId() {
+        let store = makeStore()
+        defer { store.clearAllDrafts() }
+        store.setDraftPlans([draft("a", title: "Встреча"), draft("b", title: "Тренировка")])
+        let storedA = store.draftPlans[0]
+        let storedB = store.draftPlans[1]
+        var edited = storedB
+        edited.title = "Тренировка в зале"
+        store.updateDraft(edited)
+        store.editingPlanId = "b"
+
+        // The save reached the server but its reply was lost; the next list shows both plans.
+        store.plans = [storedA, storedB]
+
+        XCTAssertEqual(store.draftPlans.count, 1)
+        XCTAssertEqual(store.draftPlans.first?.title, "Тренировка в зале")
+        XCTAssertNotEqual(store.draftPlans.first?.id, "b")
+        XCTAssertEqual(store.editingPlanId, store.draftPlans.first?.id)
     }
 }
