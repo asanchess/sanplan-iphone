@@ -9,6 +9,7 @@ public struct PlanScreen: View {
     @State private var textInput: String = ""
     @State private var isShowingTextSheet: Bool = false
     @State private var isShowingAlarms: Bool = false
+    @State private var isConfirmingDraftReset: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public enum ViewMode: String, CaseIterable, Identifiable {
@@ -108,7 +109,7 @@ public struct PlanScreen: View {
 
     private var topBar: some View {
         ScreenHeader("Планы") {
-            CircleIconButton(icon: "alarm", accessibilityLabel: "Будильники") {
+            HeaderTextButton("Будильники", icon: "alarm") {
                 isShowingAlarms = true
             }
 
@@ -375,11 +376,21 @@ public struct PlanScreen: View {
                 SectionHeader("Черновики (\(store.draftPlans.count))")
                 Spacer()
                 Button("Сбросить все") {
-                    store.clearAllDrafts()
+                    isConfirmingDraftReset = true
                 }
                 .font(.footnote)
                 .foregroundColor(DS.Colors.destructive)
                 .frame(minHeight: DS.Metrics.minHitTarget)
+                .confirmationDialog(
+                    "Удалить все черновики (\(store.draftPlans.count))?",
+                    isPresented: $isConfirmingDraftReset,
+                    titleVisibility: .visible
+                ) {
+                    Button("Удалить черновики", role: .destructive) { store.clearAllDrafts() }
+                    Button("Отмена", role: .cancel) {}
+                } message: {
+                    Text("Несохранённые планы будут потеряны.")
+                }
             }
 
             if draftsHaveConflict {
@@ -531,12 +542,10 @@ public struct PlanScreen: View {
                     }
                 }
 
-                CircleIconButton(
-                    icon: "keyboard",
-                    accessibilityLabel: "Ввести текст"
-                ) {
+                PillButton("Текстом", icon: "keyboard", style: .secondary) {
                     isShowingTextSheet = true
                 }
+                .frame(maxWidth: 150)
             }
         }
     }

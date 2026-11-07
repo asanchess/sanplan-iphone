@@ -7,6 +7,8 @@ public struct WorkoutScreen: View {
 
     @State private var planInputText: String = ""
     @State private var isEditingPlan: Bool = false
+    @State private var isConfirmingFinish: Bool = false
+    private static let programExample = "вт\nПриседания, 12 раз\nОтжимания, 10 раз\nчт\nВыпады, 10 раз на каждую ногу"
     @State private var parseError: String?
 
     public init(store: WorkoutStore, showSettings: Binding<Bool>) {
@@ -66,13 +68,24 @@ public struct WorkoutScreen: View {
 
                 Card {
                     SectionHeader("Программа тренировок")
-                    Text("Введи дни и список упражнений в формате:\nвт\nПриседания, 12 раз\nчт\nОтжимания, 10 раз")
+                    Text("Каждый день недели — отдельной строкой (пн, вт, …), под ним упражнения: «название, 12 раз». Для одной стороны: «Выпады, 10 раз на каждую ногу».")
                         .font(.subheadline)
                         .foregroundColor(DS.Colors.textSecondary)
 
                     TextEditor(text: $planInputText)
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 180)
+                        .overlay(alignment: .topLeading) {
+                            if planInputText.isEmpty {
+                                Text(Self.programExample)
+                                    .font(.body)
+                                    .foregroundColor(DS.Colors.textSecondary.opacity(0.7))
+                                    .padding(.top, 8)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                         .padding(DS.Metrics.spacing8)
                         .background(DS.Colors.surfaceRaised)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
@@ -200,7 +213,7 @@ public struct WorkoutScreen: View {
                                 .font(.footnote.weight(.semibold))
                                 .foregroundColor(DS.Colors.warning)
                         } else if session.phase == .alerting {
-                            Text("Время вышло!")
+                            Text("Отдых окончен")
                                 .font(.headline.weight(.bold))
                                 .foregroundColor(DS.Colors.positive)
                         }
@@ -245,11 +258,24 @@ public struct WorkoutScreen: View {
                 Spacer()
 
                 Button("Завершить досрочно") {
-                    store.dispatch(command: .finish(), now: currentNow)
+                    isConfirmingFinish = true
                 }
                 .font(.footnote)
                 .foregroundColor(DS.Colors.textSecondary)
+                .frame(minHeight: DS.Metrics.minHitTarget)
                 .padding(.bottom, DS.Metrics.spacing16)
+                .confirmationDialog(
+                    "Завершить тренировку досрочно?",
+                    isPresented: $isConfirmingFinish,
+                    titleVisibility: .visible
+                ) {
+                    Button("Завершить", role: .destructive) {
+                        store.dispatch(command: .finish(), now: Int64(Date().timeIntervalSince1970 * 1000))
+                    }
+                    Button("Продолжить тренировку", role: .cancel) {}
+                } message: {
+                    Text("Оставшиеся подходы не будут выполнены.")
+                }
             }
             .onChange(of: context.date) { _ in
                 if session.phase == .preparing || session.phase == .resting {
@@ -296,7 +322,7 @@ public struct WorkoutScreen: View {
                 .font(.system(size: 64))
                 .foregroundColor(DS.Colors.positive)
 
-            Text("Тренировка завершена!")
+            Text("Тренировка завершена")
                 .font(.largeTitle.weight(.light))
                 .foregroundColor(DS.Colors.textPrimary)
 

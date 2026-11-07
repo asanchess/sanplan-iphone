@@ -710,23 +710,34 @@ public struct FinanceScreen: View {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                 SectionHeader("Сохранение и копия")
 
-                Text("Финансы хранятся на устройстве в защищённом хранилище. Для резервной копии используется файл с шифрованием PBKDF2-SHA256 и AES-GCM.")
+                Text(store.state.records.isEmpty
+                     ? "Данные хранятся только на этом телефоне. Если есть копия с другого устройства, её можно восстановить."
+                     : "Данные хранятся только на этом телефоне. Копия — файл, защищённый вашим паролем; без пароля его не открыть.")
                     .font(.caption)
                     .foregroundColor(DS.Colors.textSecondary)
 
                 VStack(spacing: DS.Metrics.spacing12) {
-                    SecureField("Пароль для экспорта (мин. 8 символов)", text: $vaultPasswordPrompt)
-                        .textFieldStyle(.roundedBorder)
+                    if !store.state.records.isEmpty {
+                        SecureField("Пароль для копии", text: $vaultPasswordPrompt)
+                            .textFieldStyle(.roundedBorder)
 
-                    PillButton(
-                        "Экспортировать зашифрованную копию",
-                        style: .secondary,
-                        isEnabled: vaultPasswordPrompt.count >= 8
-                    ) {
-                        exportVault()
+                        PillButton(
+                            "Сохранить копию в Файлы",
+                            style: .secondary,
+                            isEnabled: vaultPasswordPrompt.count >= 8
+                        ) {
+                            exportVault()
+                        }
+
+                        if vaultPasswordPrompt.count < 8 {
+                            Text("Пароль — не короче 8 символов.")
+                                .font(.caption)
+                                .foregroundColor(DS.Colors.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
 
-                    PillButton("Импортировать копию из Файлов", style: .secondary) {
+                    PillButton("Восстановить из копии", style: .secondary) {
                         showImportSheet = true
                     }
                 }

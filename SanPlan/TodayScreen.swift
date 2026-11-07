@@ -7,6 +7,7 @@ public struct TodayScreen: View {
     @ObservedObject var workouts: WorkoutStore
     @Binding var selectedTab: MainTab
     @Binding var showSettings: Bool
+    @State private var isShowingAlarms = false
 
     public var body: some View {
         NavigationStack {
@@ -29,6 +30,9 @@ public struct TodayScreen: View {
                 .refreshable { await plans.reload() }
             }
             .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $isShowingAlarms) {
+            AlarmsScreen(store: plans)
         }
         .task {
             finance.refreshSummary(today: PlanDomain.today())
@@ -57,7 +61,10 @@ public struct TodayScreen: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            PillButton("Открыть планы", style: .secondary) { selectedTab = .plans }
+            HStack(spacing: DS.Metrics.spacing12) {
+                PillButton(items.isEmpty ? "Добавить план" : "Все планы", style: .secondary) { selectedTab = .plans }
+                PillButton("Будильники", icon: "alarm", style: .secondary) { isShowingAlarms = true }
+            }
         }
     }
 
@@ -78,7 +85,7 @@ public struct TodayScreen: View {
                     .font(.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
-            PillButton("Открыть деньги", style: .secondary) { selectedTab = .money }
+            PillButton((finance.summary?.spendableMinor ?? finance.summary?.balanceMinor) == nil ? "Добавить первую запись" : "Открыть деньги", style: .secondary) { selectedTab = .money }
         }
     }
 
@@ -94,7 +101,7 @@ public struct TodayScreen: View {
                 Text(workouts.training?.days.isEmpty == false ? "Программа готова." : "Программа не задана.")
                     .font(.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
-                PillButton("Открыть тренировку", style: .secondary) { selectedTab = .workout }
+                PillButton(workouts.training?.days.isEmpty == false ? "Начать тренировку" : "Задать программу", style: .secondary) { selectedTab = .workout }
             }
         }
     }

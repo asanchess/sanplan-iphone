@@ -226,6 +226,32 @@ public struct CircleIconButton: View {
     }
 }
 
+/// A round-ended header action that says what it does, for actions people must find without guessing.
+public struct HeaderTextButton: View {
+    private let title: String
+    private let icon: String
+    private let action: () -> Void
+
+    public init(_ title: String, icon: String, action: @escaping () -> Void) {
+        self.title = title
+        self.icon = icon
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(DS.Colors.textPrimary)
+                .padding(.horizontal, DS.Metrics.spacing12)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .background(DS.Colors.surfaceRaised)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(DS.Colors.hairline, lineWidth: 1))
+        }
+    }
+}
+
 public struct Card<Content: View>: View {
     private let content: Content
 
