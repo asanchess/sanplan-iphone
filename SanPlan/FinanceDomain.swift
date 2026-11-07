@@ -62,6 +62,14 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     public var frequency: String?
     public var savedMinor: Int64?
     public var dueDate: String?
+    /// The bank statement import this record came from; nil for records entered by hand.
+    public var importId: String?
+    /// The merchant or counterparty as the bank wrote it, for per-merchant categories.
+    public var merchant: String?
+    /// Free text the owner added.
+    public var note: String?
+    /// Kept in the list but left out of every total, e.g. a transfer between the owner's own cards.
+    public var excluded: Bool?
 
     public init(
         id: String,
@@ -88,19 +96,47 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     }
 }
 
+/// One imported bank statement, so it can be listed and deleted as a whole.
+public struct FinanceImport: Codable, Equatable, Identifiable {
+    public var id: String
+    public var bank: String
+    public var fileName: String
+    public var periodStart: String?
+    public var periodEnd: String?
+    public var importedAt: String
+    public var count: Int
+
+    public init(id: String, bank: String, fileName: String, periodStart: String?, periodEnd: String?, importedAt: String, count: Int) {
+        self.id = id
+        self.bank = bank
+        self.fileName = fileName
+        self.periodStart = periodStart
+        self.periodEnd = periodEnd
+        self.importedAt = importedAt
+        self.count = count
+    }
+}
+
 public struct FinanceState: Codable, Equatable {
     public var version: Int
     public var records: [FinanceRecord]
     public var committedBatches: [String]
+    public var imports: [FinanceImport]?
+    /// Category chosen by the owner for every operation with a merchant, keyed by the normalised merchant name.
+    public var merchantCategories: [String: String]?
 
     public init(
         version: Int = 1,
         records: [FinanceRecord] = [],
-        committedBatches: [String] = []
+        committedBatches: [String] = [],
+        imports: [FinanceImport]? = nil,
+        merchantCategories: [String: String]? = nil
     ) {
         self.version = version
         self.records = records
         self.committedBatches = committedBatches
+        self.imports = imports
+        self.merchantCategories = merchantCategories
     }
 }
 
@@ -328,6 +364,10 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
         }
 
         var clean = FinanceRecord(id: rec.id, kind: rec.kind, title: rec.title)
+        clean.importId = rec.importId.flatMap { $0.isEmpty || $0.count > FinanceConstants.maxIdLen ? nil : $0 }
+        clean.merchant = rec.merchant.flatMap { $0.isEmpty ? nil : String($0.prefix(FinanceConstants.maxTitleLen)) }
+        clean.note = rec.note.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
+        clean.excluded = rec.excluded == true ? true : nil
 
         switch rec.kind {
         case "balance":
@@ -414,7 +454,16 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
         cleanRecords.append(clean)
     }
 
-    return FinanceState(version: 1, records: cleanRecords, committedBatches: cleanBatches)
+    let importIds = Set(cleanRecords.compactMap(\.importId))
+    let cleanImports = value.imports?.filter { importIds.contains($0.id) }
+    let cleanRules = value.merchantCategories?.filter { !$0.key.isEmpty && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
+    return FinanceState(
+        version: 1,
+        records: cleanRecords,
+        committedBatches: cleanBatches,
+        imports: (cleanImports?.isEmpty ?? true) ? nil : cleanImports,
+        merchantCategories: (cleanRules?.isEmpty ?? true) ? nil : cleanRules
+    )
 }
 
 // MARK: - Questions and Clarifications
@@ -686,7 +735,7 @@ public func commitFinance(
         nextBatches = Array(nextBatches.suffix(FinanceConstants.maxBatches))
     }
 
-    let nextState = FinanceState(version: 1, records: nextRecords, committedBatches: nextBatches)
+    let nextState = FinanceState(version: 1, records: nextRecords, committedBatches: nextBatches, imports: cleanState.imports, merchantCategories: cleanState.merchantCategories)
     return try validateFinance(nextState)
 }
 
@@ -713,7 +762,9 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
     return try validateFinance(FinanceState(
         version: 1,
         records: updatedRecords,
-        committedBatches: cleanState.committedBatches
+        committedBatches: cleanState.committedBatches,
+        imports: cleanState.imports,
+        merchantCategories: cleanState.merchantCategories
     ))
 }
 
@@ -781,7 +832,8 @@ public func financeSummary(
     month: String? = nil,
     horizonDays: Int = 30
 ) throws -> FinanceSummary {
-    let cleanState = try validateFinance(state)
+    var cleanState = try validateFinance(state)
+    cleanState.records.removeAll { $0.excluded == true }
 
     guard isValidDateString(today) else {
         throw FinanceError.invalidDate("Invalid today date")

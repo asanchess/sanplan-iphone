@@ -22,6 +22,7 @@ public struct FinanceScreen: View {
     @State private var selectedMonth: String = ""
     @State private var horizonDays: Int = 30
     @State private var recordToDelete: FinanceRecord? = nil
+    @State private var recordToEdit: FinanceRecord? = nil
 
     // Vault Import / Export
     @State private var showExportSheet: Bool = false
@@ -122,10 +123,17 @@ public struct FinanceScreen: View {
 
                         if !store.state.records.isEmpty && !showComposer {
                             summarySection
+                            MoneyChartsSection(insights: FinanceInsights.compute(
+                                store.state,
+                                month: selectedMonth.isEmpty ? currentMonthString : selectedMonth,
+                                today: todayString
+                            ))
                             goalsSection
                             recordsListSection
                         }
                     }
+
+                    StatementsSection(store: store, today: todayString, errorMessage: $errorMessage, statusMessage: $statusMessage)
 
                     vaultActionsSection
                 }
@@ -177,6 +185,25 @@ public struct FinanceScreen: View {
             }
         } message: {
             Text("Запись будет удалена, а статистика пересчитана.")
+        }
+        .sheet(item: $recordToEdit) { record in
+            RecordEditSheet(
+                record: record,
+                onSave: { edit in
+                    do {
+                        try store.replaceState(with: StatementImport.edit(record.id, edit, in: store.state), today: todayString)
+                        statusMessage = "Запись обновлена."
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                    recordToEdit = nil
+                },
+                onDelete: {
+                    recordToEdit = nil
+                    recordToDelete = record
+                },
+                onCancel: { recordToEdit = nil }
+            )
         }
     }
 
@@ -671,36 +698,45 @@ public struct FinanceScreen: View {
                 SectionHeader("История записей")
 
                 ForEach(store.state.records.reversed().prefix(50)) { r in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(r.title)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(DS.Colors.textPrimary)
-                            Text(kindLabel(r.kind) + (r.date != nil ? " · \(r.date!)" : ""))
-                                .font(.caption2)
-                                .foregroundColor(DS.Colors.textSecondary)
-                        }
+                    Button {
+                        recordToEdit = r
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(r.excluded == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                                    .lineLimit(2)
+                                Text(recordSubtitle(r))
+                                    .font(.caption2)
+                                    .foregroundColor(DS.Colors.textSecondary)
+                            }
 
-                        Spacer()
+                            Spacer()
 
-                        VStack(alignment: .trailing, spacing: 2) {
                             if let amt = r.amountMinor {
                                 Text(formatKzt(amt))
                                     .font(.subheadline.weight(.semibold).monospacedDigit())
-                                    .foregroundColor(DS.Colors.textPrimary)
+                                    .foregroundColor(r.excluded == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                                    .strikethrough(r.excluded == true)
                             }
-
-                            Button("Удалить") {
-                                recordToDelete = r
-                            }
-                            .font(.caption2)
-                            .foregroundColor(DS.Colors.destructive)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Открыть запись для изменения")
                     Divider().background(DS.Colors.hairline)
                 }
             }
         }
+    }
+
+    private func recordSubtitle(_ r: FinanceRecord) -> String {
+        var parts = [kindLabel(r.kind)]
+        if let category = r.category, r.kind == "expense" || r.kind == "income" { parts.append(category) }
+        if let date = r.date { parts.append(date) }
+        if r.excluded == true { parts.append("не учитывается") }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Vault Actions Section
