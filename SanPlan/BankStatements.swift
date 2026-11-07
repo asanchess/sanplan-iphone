@@ -508,7 +508,8 @@ public enum StatementImport {
         }
         if let importId = next.records[importedIndex].importId,
            let item = next.imports?.firstIndex(where: { $0.id == importId }) {
-            next.imports?[item].mergedManual = (next.imports?[item].mergedManual ?? []) + [manual]
+            let earlier = next.imports?[item].mergedManual ?? []
+            next.imports?[item].mergedManual = earlier + [manual]
         }
         next.records.remove(at: manualIndex)
         return try validateFinance(next)
