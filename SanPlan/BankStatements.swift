@@ -69,7 +69,17 @@ public enum BankStatementParser {
         return text
     }
 
-    public static func parse(_ text: String) throws -> ParsedStatement {
+    /// PDF text extraction can return lookalike glyphs (Latin «ĸ» for Cyrillic «к») and odd spaces; parse a clean copy.
+    static func normalise(_ text: String) -> String {
+        var result = text.precomposedStringWithCompatibilityMapping
+        for (from, to) in [("ĸ", "к"), ("\u{00A0}", " "), ("\u{202F}", " "), ("\u{2007}", " "), ("\u{2009}", " "), ("\u{2212}", "-")] {
+            result = result.replacingOccurrences(of: from, with: to)
+        }
+        return result
+    }
+
+    public static func parse(_ raw: String) throws -> ParsedStatement {
+        let text = normalise(raw)
         // The bank named first is the header; later mentions are counterparties, e.g. a Halyk transfer to a Kaspi card.
         let lower = text.lowercased()
         func firstIndex(_ words: [String]) -> String.Index? {

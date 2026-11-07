@@ -84,6 +84,14 @@ final class StatementImportTests: XCTestCase {
         XCTAssertEqual(s.closingBalance?.amountMinor, 21_045_000)
     }
 
+    func testLookalikeGlyphsFromPDFExtractionAreNormalised() throws {
+        // Seen in PDFKit output: Latin kra instead of Cyrillic «к», no-break spaces in amounts.
+        let text = Self.halykText.replacingOccurrences(of: "к", with: "ĸ").replacingOccurrences(of: "100 000,00", with: "100\u{00A0}000,00")
+        let s = try BankStatementParser.parse(text)
+        XCTAssertEqual(s.transactions, Self.halykExpected)
+        XCTAssertEqual(s.closingBalance?.amountMinor, 21_045_000)
+    }
+
     func testUnknownOrEmptyStatementIsRejected() {
         XCTAssertThrowsError(try BankStatementParser.parse("Какой-то документ 01.11.2025 100,00")) {
             XCTAssertEqual($0 as? StatementError, .unknownBank)
