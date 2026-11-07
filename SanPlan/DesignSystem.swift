@@ -39,22 +39,33 @@ public enum DS {
                 : UIColor(red: 91/255, green: 98/255, blue: 112/255, alpha: 1.0)
         })
 
+        /// The ARNA logo lilac (#C6B2F4) in dark; a deeper violet (#6B4FD8) in light so white text on it stays readable.
         public static let accent = Color(UIColor { trait in
             trait.userInterfaceStyle == .dark
-                ? UIColor(red: 42/255, green: 102/255, blue: 245/255, alpha: 1.0)
-                : UIColor(red: 31/255, green: 91/255, blue: 234/255, alpha: 1.0)
+                ? UIColor(red: 198/255, green: 178/255, blue: 244/255, alpha: 1.0)
+                : UIColor(red: 107/255, green: 79/255, blue: 216/255, alpha: 1.0)
         })
+
+        /// Text and icons placed on an accent fill: the logo's ink in dark, white in light.
+        public static let onAccent = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 27/255, green: 25/255, blue: 34/255, alpha: 1.0)
+                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
+        })
+
+        /// One violet that reads on both the light and dark system alarm surfaces.
+        public static let alarmTint = Color(red: 142/255, green: 108/255, blue: 240/255)
 
         public static let accentGradientStart = Color(UIColor { trait in
             trait.userInterfaceStyle == .dark
-                ? UIColor(red: 41/255, green: 182/255, blue: 255/255, alpha: 1.0)
-                : UIColor(red: 14/255, green: 143/255, blue: 224/255, alpha: 1.0)
+                ? UIColor(red: 198/255, green: 178/255, blue: 244/255, alpha: 1.0)
+                : UIColor(red: 142/255, green: 108/255, blue: 240/255, alpha: 1.0)
         })
 
         public static let accentGradientEnd = Color(UIColor { trait in
             trait.userInterfaceStyle == .dark
-                ? UIColor(red: 122/255, green: 92/255, blue: 255/255, alpha: 1.0)
-                : UIColor(red: 91/255, green: 63/255, blue: 224/255, alpha: 1.0)
+                ? UIColor(red: 142/255, green: 108/255, blue: 240/255, alpha: 1.0)
+                : UIColor(red: 91/255, green: 63/255, blue: 200/255, alpha: 1.0)
         })
 
         public static let positive = Color(UIColor { trait in
@@ -163,7 +174,7 @@ public struct PillButton: View {
     private var foregroundColor: Color {
         switch style {
         case .primary:
-            return Color.white
+            return DS.Colors.onAccent
         case .secondary:
             return DS.Colors.textPrimary
         case .destructive:
@@ -383,4 +394,45 @@ public struct ErrorBanner: View {
                 .stroke(DS.Colors.destructive.opacity(0.3), lineWidth: 1)
         )
     }
+}
+
+/// Gives any screen with text input a way to put the keyboard away: drag the content down,
+/// or tap «Готово» on the bar that rides above the keyboard. Multi-line fields treat Return as a new line,
+/// so without this the keyboard could not be closed.
+public struct KeyboardDismissBar: ViewModifier {
+    @State private var isKeyboardVisible = false
+
+    public func body(content: Content) -> some View {
+        content
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isKeyboardVisible {
+                    HStack {
+                        Spacer()
+                        Button("Готово") { hideKeyboard() }
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(DS.Colors.accent)
+                            .padding(.horizontal, DS.Metrics.spacing16)
+                            .frame(minHeight: DS.Metrics.minHitTarget)
+                            .accessibilityLabel("Скрыть клавиатуру")
+                    }
+                    .background(DS.Colors.surface)
+                    .overlay(alignment: .top) { Rectangle().fill(DS.Colors.hairline).frame(height: 1) }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                isKeyboardVisible = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                isKeyboardVisible = false
+            }
+    }
+}
+
+public func hideKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
+
+public extension View {
+    func keyboardDismissBar() -> some View { modifier(KeyboardDismissBar()) }
 }

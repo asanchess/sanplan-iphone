@@ -188,7 +188,7 @@ struct ReminderOffsetsPicker: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                .foregroundColor(selected ? Color.white : DS.Colors.textPrimary)
+                .foregroundColor(selected ? DS.Colors.onAccent : DS.Colors.textPrimary)
                 .background(selected ? DS.Colors.accent : DS.Colors.surfaceRaised)
                 .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
         }
@@ -302,7 +302,7 @@ public struct AlarmsScreen: View {
                 }
             }
             .sheet(item: $editor) { target in
-                AlarmEditor(store: store, target: target)
+                AlarmEditor(store: store, target: target).keyboardDismissBar()
             }
             .confirmationDialog("Удалить будильники с iPhone?", isPresented: $confirmDeleteOwn, titleVisibility: .visible) {
                 Button("Удалить с iPhone", role: .destructive) {

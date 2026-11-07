@@ -107,7 +107,7 @@ public struct FinanceScreen: View {
                                     Text(drafts.isEmpty ? "Добавить запись" : "Продолжить черновик")
                                 }
                                 .font(.body.weight(.semibold))
-                                .foregroundColor(Color.white)
+                                .foregroundColor(DS.Colors.onAccent)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: DS.Metrics.pillHeight)
                                 .background(DS.Colors.accent)

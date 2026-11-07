@@ -37,7 +37,7 @@ public final class LiveRestAlarmService: RestAlarmProtocol, @unchecked Sendable 
         let attributes = AlarmAttributes(
             presentation: AlarmPresentation(alert: alertPresentation),
             metadata: metadata,
-            tintColor: Color(red: 0.16, green: 0.40, blue: 0.96)
+            tintColor: DS.Colors.alarmTint
         )
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(date),

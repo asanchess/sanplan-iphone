@@ -466,7 +466,7 @@ public final class AlarmCoordinator: ObservableObject {
         let attributes = AlarmAttributes(
             presentation: AlarmPresentation(alert: alertPresentation),
             metadata: metadata,
-            tintColor: Color(red: 0.10, green: 0.28, blue: 0.60)
+            tintColor: DS.Colors.alarmTint
         )
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(fireDate),
@@ -628,7 +628,7 @@ public final class AlarmCoordinator: ObservableObject {
         let attributes = AlarmAttributes(
             presentation: AlarmPresentation(alert: alertPresentation),
             metadata: metadata,
-            tintColor: Color(red: 0.10, green: 0.28, blue: 0.60)
+            tintColor: DS.Colors.alarmTint
         )
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(alarm.alarmDate),

@@ -126,14 +126,17 @@ public struct RootView: View {
             .tag(MainTab.today)
 
             FinanceScreen(store: model.finance, showSettings: $showSettingsSheet)
+                .keyboardDismissBar()
                 .tabItem { Label(MainTab.money.title, systemImage: MainTab.money.icon) }
                 .tag(MainTab.money)
 
             PlanScreen(store: model.plans, recorder: model.recorder, showSettings: $showSettingsSheet)
+                .keyboardDismissBar()
                 .tabItem { Label(MainTab.plans.title, systemImage: MainTab.plans.icon) }
                 .tag(MainTab.plans)
 
             WorkoutScreen(store: model.workouts, showSettings: $showSettingsSheet)
+                .keyboardDismissBar()
                 .tabItem { Label(MainTab.workout.title, systemImage: MainTab.workout.icon) }
                 .tag(MainTab.workout)
         }

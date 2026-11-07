@@ -100,7 +100,7 @@ public struct PlanScreen: View {
             Task { await store.ensureRangeLoaded() }
         }
         .sheet(isPresented: $isShowingTextSheet) {
-            textInputSheet
+            textInputSheet.keyboardDismissBar()
         }
         .sheet(isPresented: $isShowingAlarms) {
             AlarmsScreen(store: store)
@@ -151,10 +151,10 @@ public struct PlanScreen: View {
                             VStack(spacing: 2) {
                                 Text(weekdayShort(dateStr))
                                     .font(.caption2)
-                                    .foregroundColor(isSelected ? Color.white : DS.Colors.textSecondary)
+                                    .foregroundColor(isSelected ? DS.Colors.onAccent : DS.Colors.textSecondary)
                                 Text(dayNumber(dateStr))
                                     .font(.callout.monospacedDigit().weight(.semibold))
-                                    .foregroundColor(isSelected ? Color.white : (dateStr == today ? DS.Colors.accent : DS.Colors.textPrimary))
+                                    .foregroundColor(isSelected ? DS.Colors.onAccent : (dateStr == today ? DS.Colors.accent : DS.Colors.textPrimary))
                             }
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)

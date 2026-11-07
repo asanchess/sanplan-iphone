@@ -175,6 +175,7 @@ public struct WorkoutScreen: View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             let currentNow = Int64(context.date.timeIntervalSince1970 * 1000)
             let remaining = (try? WorkoutDomain.remainingSeconds(state: session, now: max(session.lastNow, currentNow))) ?? 0
+            let elapsed = WorkoutDomain.elapsedWorkSeconds(state: session, now: max(session.lastNow, currentNow))
 
             VStack(spacing: DS.Metrics.spacing24) {
                 if let warning = store.restAlarm.warningMessage {
@@ -196,14 +197,12 @@ public struct WorkoutScreen: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, DS.Metrics.screenGutter)
 
-                    Text("Подход \(session.setIndex + 1) из \(currentEx.rests.count)")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundColor(DS.Colors.textSecondary)
+                    setsStepper(session: session, now: currentNow)
                 }
 
                 Card {
                     VStack(alignment: .center, spacing: DS.Metrics.spacing8) {
-                        Text(formatTimer(seconds: remaining, phase: session.phase))
+                        Text(formatTimer(seconds: elapsed ?? remaining, phase: session.phase, hasStopwatch: elapsed != nil))
                             .font(.system(size: 64, weight: .light, design: .rounded).monospacedDigit())
                             .foregroundColor(DS.Colors.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -216,6 +215,10 @@ public struct WorkoutScreen: View {
                             Text("Отдых окончен")
                                 .font(.headline.weight(.bold))
                                 .foregroundColor(DS.Colors.positive)
+                        } else if session.phase == .working {
+                            Text("Время подхода")
+                                .font(.footnote)
+                                .foregroundColor(DS.Colors.textSecondary)
                         }
                     }
                     .padding(.vertical, DS.Metrics.spacing16)
@@ -291,8 +294,13 @@ public struct WorkoutScreen: View {
     private func primaryActionButton(session: WorkoutSessionState, now: Int64) -> some View {
         switch session.phase {
         case .preparing:
-            PillButton("Пропустить подготовку", icon: "forward.fill") {
-                store.dispatch(command: .tick(), now: session.deadline ?? now)
+            VStack(spacing: DS.Metrics.spacing12) {
+                PillButton("Начать сейчас", icon: "play.fill") {
+                    store.dispatch(command: .startNow(), now: now)
+                }
+                PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
+                    store.dispatch(command: .startRest(), now: now)
+                }
             }
         case .working:
             PillButton("Начать отдых", icon: "bed.double.fill") {
@@ -307,8 +315,14 @@ public struct WorkoutScreen: View {
                 store.dispatch(command: .resume(), now: now)
             }
         case .alerting:
-            PillButton("Остановить", icon: "stop.circle.fill", style: .primary) {
-                store.dispatch(command: .acknowledge(), now: now)
+            VStack(spacing: DS.Metrics.spacing12) {
+                PillButton("Начать подход", icon: "play.fill", style: .primary) {
+                    store.dispatch(command: .acknowledge(), now: now)
+                }
+                // For a set already done while the alert was showing.
+                PillButton("Начать отдых", icon: "bed.double.fill", style: .secondary) {
+                    store.dispatch(command: .startRest(), now: now)
+                }
             }
         case .complete:
             PillButton("Завершено", icon: "checkmark", isEnabled: false) {}
@@ -399,8 +413,40 @@ public struct WorkoutScreen: View {
         }
     }
 
-    private func formatTimer(seconds: Int, phase: WorkoutPhase) -> String {
-        if phase == .working {
+    /// "Подход 2 из 4" with − / + to change the number of sets of the current exercise.
+    @ViewBuilder
+    private func setsStepper(session: WorkoutSessionState, now: Int64) -> some View {
+        let total = session.exercises[session.exerciseIndex].rests.count
+        HStack(spacing: DS.Metrics.spacing12) {
+            Button {
+                store.dispatch(command: .setSets(total - 1), now: now)
+            } label: {
+                Image(systemName: "minus")
+                    .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+            }
+            .disabled(total - 1 < session.setIndex + 1 || session.phase == .complete)
+            .accessibilityLabel("Убрать подход")
+
+            Text("Подход \(session.setIndex + 1) из \(total)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundColor(DS.Colors.textSecondary)
+                .contentTransition(.numericText())
+
+            Button {
+                store.dispatch(command: .setSets(total + 1), now: now)
+            } label: {
+                Image(systemName: "plus")
+                    .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+            }
+            .disabled(total >= 100 || session.phase == .complete)
+            .accessibilityLabel("Добавить подход")
+        }
+        .font(.body.weight(.semibold))
+        .tint(DS.Colors.accent)
+    }
+
+    private func formatTimer(seconds: Int, phase: WorkoutPhase, hasStopwatch: Bool) -> String {
+        if phase == .working && !hasStopwatch {
             return "—:—"
         }
         let m = seconds / 60

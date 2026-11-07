@@ -24,6 +24,97 @@ final class FakeRestAlarmService: RestAlarmProtocol, @unchecked Sendable {
 
 final class WorkoutDomainTests: XCTestCase {
 
+    private func twoExerciseWorkout(now: Int64) throws -> WorkoutSessionState {
+        try WorkoutDomain.createWorkout(exercises: [
+            SessionExercise(name: "Жим", rests: [60, 60]),
+            SessionExercise(name: "Тяга", rests: [90])
+        ], now: now)
+    }
+
+    func testStartRestDuringWarmUpRestsAfterTheFirstSet() throws {
+        let state = try twoExerciseWorkout(now: 1_000_000)
+        let resting = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_010_000)
+        XCTAssertEqual(resting.phase, .resting)
+        XCTAssertEqual(resting.setIndex, 0)
+        XCTAssertEqual(resting.deadline, 1_070_000)
+        XCTAssertNil(resting.workStartedAt)
+    }
+
+    func testStartRestAfterRestRanOutMovesToNextSetAndRests() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startNow(), now: 1_001_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_040_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_100_000)
+        XCTAssertEqual(state.phase, .alerting)
+        XCTAssertEqual(state.workStartedAt, 1_100_000)
+
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_130_000)
+        XCTAssertEqual(state.phase, .resting)
+        XCTAssertEqual(state.setIndex, 1)
+        XCTAssertEqual(state.deadline, 1_190_000)
+
+        // Last set of the last exercise: ending it from the alert finishes the workout.
+        state = try WorkoutDomain.workoutCommand(state: state, command: .skipRest(), now: 1_140_000)
+        XCTAssertEqual(state.exerciseIndex, 1)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_160_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_250_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_260_000)
+        XCTAssertEqual(state.phase, .complete)
+    }
+
+    func testStartRestIsRejectedDuringARest() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_001_000)
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_002_000))
+        state = try WorkoutDomain.workoutCommand(state: state, command: .pause(), now: 1_003_000)
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_004_000))
+    }
+
+    func testSetStopwatchCountsFromSetStartAndSurvivesSaving() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        XCTAssertNil(WorkoutDomain.elapsedWorkSeconds(state: state, now: 1_005_000))
+        state = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_031_000)
+        XCTAssertEqual(state.workStartedAt, 1_030_000)
+        XCTAssertEqual(WorkoutDomain.elapsedWorkSeconds(state: state, now: 1_075_500), 45)
+
+        let data = try JSONEncoder().encode(state)
+        let restored = try JSONDecoder().decode(WorkoutSessionState.self, from: data)
+        try WorkoutDomain.validateState(restored)
+        XCTAssertEqual(WorkoutDomain.elapsedWorkSeconds(state: restored, now: 1_090_000), 60)
+
+        let skipped = try WorkoutDomain.workoutCommand(state: try twoExerciseWorkout(now: 2_000_000), command: .startNow(), now: 2_004_000)
+        XCTAssertEqual(skipped.phase, .working)
+        XCTAssertEqual(skipped.workStartedAt, 2_004_000)
+    }
+
+    func testSessionSavedBefore21StillLoads() throws {
+        let state = try twoExerciseWorkout(now: 1_000_000)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as! [String: Any]
+        json.removeValue(forKey: "workStartedAt")
+        let legacy = try JSONDecoder().decode(WorkoutSessionState.self, from: JSONSerialization.data(withJSONObject: json))
+        try WorkoutDomain.validateState(legacy)
+        let working = try WorkoutDomain.workoutCommand(state: legacy, command: .tick(), now: 1_030_000)
+        XCTAssertEqual(working.workStartedAt, 1_030_000)
+    }
+
+    func testSetsStepperNeverDropsTheSetInProgress() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .setSets(4), now: 1_001_000)
+        XCTAssertEqual(state.exercises[0].rests, [60, 60, 60, 60])
+
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_002_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .skipRest(), now: 1_003_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_004_000)
+        state = try WorkoutDomain.workoutCommand(state: state, command: .skipRest(), now: 1_005_000)
+        XCTAssertEqual(state.setIndex, 2)
+
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .setSets(2), now: 1_006_000))
+        state = try WorkoutDomain.workoutCommand(state: state, command: .setSets(3), now: 1_006_000)
+        XCTAssertEqual(state.exercises[0].rests.count, 3)
+        XCTAssertEqual(state.exercises[1].rests, [90])
+        XCTAssertThrowsError(try WorkoutDomain.workoutCommand(state: state, command: .setSets(101), now: 1_007_000))
+    }
+
     func testCreateWorkoutAndFullProgressionFlow() throws {
         let exercises = [
             SessionExercise(name: "Приседания", rests: [60, 60]),

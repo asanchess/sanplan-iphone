@@ -83,11 +83,23 @@ public struct WorkoutCommand: Equatable {
     public var type: String
     public var id: String?
     public var seconds: Int?
+    public var count: Int?
 
-    public init(type: String, id: String? = nil, seconds: Int? = nil) {
+    public init(type: String, id: String? = nil, seconds: Int? = nil, count: Int? = nil) {
         self.type = type
         self.id = id
         self.seconds = seconds
+        self.count = count
+    }
+
+    /// Ends the warm-up early and starts the first set.
+    public static func startNow(id: String? = nil) -> WorkoutCommand {
+        WorkoutCommand(type: "startNow", id: id)
+    }
+
+    /// Changes how many sets the current exercise has; never below the set in progress.
+    public static func setSets(_ count: Int, id: String? = nil) -> WorkoutCommand {
+        WorkoutCommand(type: "setSets", id: id, count: count)
     }
 
     public static func recoverClock(id: String? = nil) -> WorkoutCommand {
@@ -142,6 +154,8 @@ public struct WorkoutSessionState: Codable, Equatable {
     public var pausedRemainingMs: Int64?
     public var lastNow: Int64
     public var commandHistory: [WorkoutCommandRecord]
+    /// When the current set began (working) or the rest ran out (alerting). Absent in sessions saved before 2.1.
+    public var workStartedAt: Int64?
 
     public init(
         version: Int = 1,
@@ -153,8 +167,10 @@ public struct WorkoutSessionState: Codable, Equatable {
         deadline: Int64? = nil,
         pausedRemainingMs: Int64? = nil,
         lastNow: Int64,
-        commandHistory: [WorkoutCommandRecord] = []
+        commandHistory: [WorkoutCommandRecord] = [],
+        workStartedAt: Int64? = nil
     ) {
+        self.workStartedAt = workStartedAt
         self.version = version
         self.revision = revision
         self.phase = phase
@@ -194,6 +210,9 @@ public enum WorkoutDomain {
         var dict: [String: Any] = ["type": cmd.type]
         if let seconds = cmd.seconds {
             dict["seconds"] = seconds
+        }
+        if let count = cmd.count {
+            dict["count"] = count
         }
         let sortedKeys = dict.keys.sorted()
         var parts: [String] = []
@@ -240,6 +259,12 @@ public enum WorkoutDomain {
             }
         } else if state.pausedRemainingMs != nil {
             throw WorkoutDomainError("Unexpected paused timer")
+        }
+
+        if let started = state.workStartedAt {
+            if (state.phase != .working && state.phase != .alerting) || started < 0 {
+                throw WorkoutDomainError("Unexpected set start")
+            }
         }
 
         if state.commandHistory.count > 64 {
@@ -355,6 +380,9 @@ public enum WorkoutDomain {
         var newSetIndex = state.setIndex
         var newDeadline = state.deadline
         var newPausedRemainingMs = state.pausedRemainingMs
+        var newExercises = state.exercises
+        // Only phases that keep a set clock carry it forward; every branch below sets it explicitly when it changes.
+        var newWorkStartedAt: Int64? = state.workStartedAt
 
         switch command.type {
         case "recoverClock":
@@ -366,6 +394,9 @@ public enum WorkoutDomain {
                 let remainder = max(0, previousDeadline - state.lastNow)
                 newDeadline = now + remainder
             }
+            if let started = state.workStartedAt {
+                newWorkStartedAt = now - max(0, min(state.lastNow - started, 6 * 3_600_000))
+            }
 
         case "tick":
             if state.phase == .preparing {
@@ -373,6 +404,7 @@ public enum WorkoutDomain {
                     newPhase = .working
                     newDeadline = nil
                     newPausedRemainingMs = nil
+                    newWorkStartedAt = deadline
                 } else {
                     return state
                 }
@@ -381,6 +413,7 @@ public enum WorkoutDomain {
                     newPhase = .alerting
                     newDeadline = nil
                     newPausedRemainingMs = nil
+                    newWorkStartedAt = deadline
                 } else {
                     return state
                 }
@@ -388,15 +421,60 @@ public enum WorkoutDomain {
                 return state
             }
 
-        case "startRest":
-            if state.phase != .working {
-                throw WorkoutDomainError("startRest command is only valid in working phase")
+        case "startNow":
+            if state.phase != .preparing {
+                throw WorkoutDomainError("startNow command is only valid in preparing phase")
             }
-            let currentExercise = state.exercises[state.exerciseIndex]
-            let restSeconds = currentExercise.rests[state.setIndex]
+            newPhase = .working
+            newDeadline = nil
+            newPausedRemainingMs = nil
+            newWorkStartedAt = now
+
+        case "startRest":
+            // The set can end early at any point outside a rest, including during the warm-up.
+            // From alerting the user has already done the next set, so move to it first.
+            var restExerciseIndex = state.exerciseIndex
+            var restSetIndex = state.setIndex
+            switch state.phase {
+            case .preparing, .working:
+                break
+            case .alerting:
+                guard let next = nextSet(state) else {
+                    newPhase = .complete
+                    newDeadline = nil
+                    newPausedRemainingMs = nil
+                    newWorkStartedAt = nil
+                    break
+                }
+                restExerciseIndex = next.exercise
+                restSetIndex = next.set
+            default:
+                throw WorkoutDomainError("startRest command is not valid during a rest")
+            }
+            if newPhase == .complete { break }
+            let restSeconds = state.exercises[restExerciseIndex].rests[restSetIndex]
+            newExerciseIndex = restExerciseIndex
+            newSetIndex = restSetIndex
             newPhase = .resting
             newDeadline = now + Int64(restSeconds) * 1000
             newPausedRemainingMs = nil
+            newWorkStartedAt = nil
+
+        case "setSets":
+            if state.phase == .complete {
+                throw WorkoutDomainError("setSets is not valid after the workout")
+            }
+            guard let count = command.count, count >= state.setIndex + 1, count <= 100 else {
+                throw WorkoutDomainError("setSets count must keep the current set and be at most 100")
+            }
+            var rests = state.exercises[state.exerciseIndex].rests
+            if count > rests.count {
+                let fill = rests.last ?? 120
+                rests.append(contentsOf: Array(repeating: fill, count: count - rests.count))
+            } else {
+                rests.removeLast(rests.count - count)
+            }
+            newExercises[state.exerciseIndex].rests = rests
 
         case "pause":
             if state.phase != .resting {
@@ -412,10 +490,12 @@ public enum WorkoutDomain {
                 newPhase = .alerting
                 newDeadline = nil
                 newPausedRemainingMs = nil
+                newWorkStartedAt = deadline
             } else {
                 newPhase = .paused
                 newPausedRemainingMs = deadline - now
                 newDeadline = nil
+                newWorkStartedAt = nil
             }
 
         case "resume":
@@ -449,6 +529,7 @@ public enum WorkoutDomain {
                     newPhase = .alerting
                     newDeadline = nil
                     newPausedRemainingMs = nil
+                    newWorkStartedAt = now
                 } else {
                     let cappedMs = min(3600000, remainingMs)
                     newPhase = .resting
@@ -464,6 +545,7 @@ public enum WorkoutDomain {
                     newPhase = .alerting
                     newDeadline = nil
                     newPausedRemainingMs = nil
+                    newWorkStartedAt = now
                 } else {
                     let cappedMs = min(3600000, remainingMs)
                     newPhase = .paused
@@ -480,6 +562,7 @@ public enum WorkoutDomain {
             newPhase = .resting
             newDeadline = now + Int64(restSec) * 1000
             newPausedRemainingMs = nil
+            newWorkStartedAt = nil
 
         case "finish":
             if state.phase == .complete {
@@ -488,24 +571,20 @@ public enum WorkoutDomain {
             newPhase = .complete
             newDeadline = nil
             newPausedRemainingMs = nil
+            newWorkStartedAt = nil
 
         case "skipRest":
             if state.phase != .resting && state.phase != .paused {
                 throw WorkoutDomainError("skipRest command is only valid in resting or paused phase")
             }
-            let currentExercise = state.exercises[state.exerciseIndex]
-            if state.setIndex + 1 < currentExercise.rests.count {
-                newExerciseIndex = state.exerciseIndex
-                newSetIndex = state.setIndex + 1
+            if let next = nextSet(state) {
+                newExerciseIndex = next.exercise
+                newSetIndex = next.set
                 newPhase = .working
-            } else if state.exerciseIndex + 1 < state.exercises.count {
-                newExerciseIndex = state.exerciseIndex + 1
-                newSetIndex = 0
-                newPhase = .working
+                newWorkStartedAt = now
             } else {
-                newExerciseIndex = state.exerciseIndex
-                newSetIndex = state.setIndex
                 newPhase = .complete
+                newWorkStartedAt = nil
             }
             newDeadline = nil
             newPausedRemainingMs = nil
@@ -514,19 +593,15 @@ public enum WorkoutDomain {
             if state.phase != .alerting {
                 throw WorkoutDomainError("acknowledge command is only valid in alerting phase")
             }
-            let currentExercise = state.exercises[state.exerciseIndex]
-            if state.setIndex + 1 < currentExercise.rests.count {
-                newExerciseIndex = state.exerciseIndex
-                newSetIndex = state.setIndex + 1
+            if let next = nextSet(state) {
+                newExerciseIndex = next.exercise
+                newSetIndex = next.set
                 newPhase = .working
-            } else if state.exerciseIndex + 1 < state.exercises.count {
-                newExerciseIndex = state.exerciseIndex + 1
-                newSetIndex = 0
-                newPhase = .working
+                // The next set began when the rest ran out, not when the alert was dismissed.
+                newWorkStartedAt = state.workStartedAt ?? now
             } else {
-                newExerciseIndex = state.exerciseIndex
-                newSetIndex = state.setIndex
                 newPhase = .complete
+                newWorkStartedAt = nil
             }
             newDeadline = nil
             newPausedRemainingMs = nil
@@ -547,14 +622,32 @@ public enum WorkoutDomain {
             version: 1,
             revision: state.revision + 1,
             phase: newPhase,
-            exercises: state.exercises,
+            exercises: newExercises,
             exerciseIndex: newExerciseIndex,
             setIndex: newSetIndex,
             deadline: newDeadline,
             pausedRemainingMs: newPausedRemainingMs,
             lastNow: now,
-            commandHistory: nextHistory
+            commandHistory: nextHistory,
+            workStartedAt: (newPhase == .working || newPhase == .alerting) ? newWorkStartedAt : nil
         )
+    }
+
+    /// The set after the current one, or nil when the current set is the last of the workout.
+    static func nextSet(_ state: WorkoutSessionState) -> (exercise: Int, set: Int)? {
+        if state.setIndex + 1 < state.exercises[state.exerciseIndex].rests.count {
+            return (state.exerciseIndex, state.setIndex + 1)
+        }
+        if state.exerciseIndex + 1 < state.exercises.count {
+            return (state.exerciseIndex + 1, 0)
+        }
+        return nil
+    }
+
+    /// Seconds since the current set began, for the set stopwatch. Nil outside a set or for sessions saved before 2.1.
+    public static func elapsedWorkSeconds(state: WorkoutSessionState, now: Int64) -> Int? {
+        guard state.phase == .working || state.phase == .alerting, let started = state.workStartedAt else { return nil }
+        return Int(max(0, now - started) / 1000)
     }
 
     public static func remainingSeconds(state: WorkoutSessionState, now: Int64) throws -> Int {

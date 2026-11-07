@@ -11,9 +11,14 @@ public final class WorkoutStore: ObservableObject {
     private let fileName = "arna_workout_training_v1.json"
     private let fileManager = FileManager.default
     private var alarmWork: Task<Void, Never>?
+    private var restAlarmObservation: AnyCancellable?
 
     public init(restAlarm: RestAlarmCoordinator? = nil) {
         self.restAlarm = restAlarm ?? RestAlarmCoordinator()
+        // The workout screen reads the alarm warning through this store, so redraw it when the warning changes.
+        restAlarmObservation = self.restAlarm.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.objectWillChange.send() }
+        }
         loadFromDisk()
     }
 
