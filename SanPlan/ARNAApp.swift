@@ -9,6 +9,7 @@ struct ARNAApp: App {
             RootView(model: model)
                 .environmentObject(model.auth)
                 .environmentObject(model.alarms)
+                .environmentObject(model.workouts)
         }
     }
 }

@@ -44,7 +44,7 @@ public final class WorkoutStore: ObservableObject {
         }
 
         do {
-            let decoded = try JSONDecoder().decode(WorkoutTrainingPlan.self, from: data)
+            let decoded = WorkoutProgram.migrated(try JSONDecoder().decode(WorkoutTrainingPlan.self, from: data))
             if let session = decoded.session {
                 try WorkoutDomain.validateState(session)
             }
@@ -62,7 +62,7 @@ public final class WorkoutStore: ObservableObject {
 
     public func saveToDisk() {
         let url = storageURL
-        var toSave = training ?? WorkoutTrainingPlan(version: 1, days: [], session: nil)
+        var toSave = training ?? WorkoutProgram.empty()
         toSave.session = activeSession
 
         do {
@@ -71,6 +71,23 @@ public final class WorkoutStore: ObservableObject {
             self.training = toSave
         } catch {
             self.errorMessage = "Не удалось сохранить тренировку: \(error.localizedDescription)"
+        }
+    }
+
+    /// The weekly program as the builder sees it; empty before the first exercise is added.
+    public var program: WorkoutTrainingPlan {
+        training ?? WorkoutProgram.empty()
+    }
+
+    /// One builder edit. A running workout is never touched; errors show as a banner.
+    public func updateProgram(_ edit: (WorkoutTrainingPlan) throws -> WorkoutTrainingPlan) {
+        do {
+            var next = try edit(program)
+            next.session = activeSession
+            training = next
+            saveToDisk()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

@@ -5,11 +5,8 @@ public struct WorkoutScreen: View {
     @ObservedObject private var store: WorkoutStore
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var planInputText: String = ""
     @State private var isEditingPlan: Bool = false
     @State private var isConfirmingFinish: Bool = false
-    private static let programExample = "вт\nПриседания, 12 раз\nОтжимания, 10 раз\nчт\nВыпады, 10 раз на каждую ногу"
-    @State private var parseError: String?
 
     public init(store: WorkoutStore, showSettings: Binding<Bool>) {
         self.store = store
@@ -39,10 +36,10 @@ public struct WorkoutScreen: View {
                         } else {
                             activeWorkoutSessionView(session: session)
                         }
-                    } else if let training = store.training, !training.days.isEmpty, !isEditingPlan {
-                        savedPlanOverview(training: training)
+                    } else if !store.program.days.isEmpty, !isEditingPlan {
+                        savedPlanOverview(training: store.program)
                     } else {
-                        planEditorView
+                        WorkoutBuilderView(store: store, onDone: { isEditingPlan = false })
                     }
                 }
             }
@@ -53,61 +50,6 @@ public struct WorkoutScreen: View {
                     store.reconcileClock(now: now)
                 }
             }
-        }
-    }
-
-    private var planEditorView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                if let error = parseError ?? store.errorMessage {
-                    ErrorBanner(message: error) {
-                        parseError = nil
-                        store.errorMessage = nil
-                    }
-                }
-
-                Card {
-                    SectionHeader("Программа тренировок")
-                    Text("Каждый день недели — отдельной строкой (пн, вт, …), под ним упражнения: «название, 12 раз». Для одной стороны: «Выпады, 10 раз на каждую ногу».")
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.textSecondary)
-
-                    TextEditor(text: $planInputText)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 180)
-                        .overlay(alignment: .topLeading) {
-                            if planInputText.isEmpty {
-                                Text(Self.programExample)
-                                    .font(.body)
-                                    .foregroundColor(DS.Colors.textSecondary.opacity(0.7))
-                                    .padding(.top, 8)
-                                    .padding(.leading, 5)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .padding(DS.Metrics.spacing8)
-                        .background(DS.Colors.surfaceRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DS.Metrics.innerRadius)
-                                .stroke(DS.Colors.hairline, lineWidth: 1)
-                        )
-                }
-
-                PillButton("Сохранить программу", icon: "checkmark") {
-                    parseAndSavePlan()
-                }
-
-                if store.training != nil {
-                    PillButton("Отмена", style: .secondary) {
-                        isEditingPlan = false
-                        parseError = nil
-                    }
-                }
-            }
-            .padding(.horizontal, DS.Metrics.screenGutter)
-            .padding(.vertical, DS.Metrics.spacing16)
         }
     }
 
@@ -127,7 +69,7 @@ public struct WorkoutScreen: View {
                     SectionHeader("Дни тренировок")
                     Spacer()
                     Button("Изменить") {
-                        reopenPlanEditor(from: training)
+                        isEditingPlan = true
                     }
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(DS.Colors.accent)
@@ -135,10 +77,17 @@ public struct WorkoutScreen: View {
 
                 ForEach(training.days, id: \.weekday) { day in
                     Card {
-                        HStack {
-                            Text(weekdayTitle(day.weekday))
-                                .font(.headline.weight(.semibold))
-                                .foregroundColor(DS.Colors.textPrimary)
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(day.title ?? weekdayTitle(day.weekday))
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                if day.title != nil {
+                                    Text(weekdayTitle(day.weekday))
+                                        .font(.caption)
+                                        .foregroundColor(DS.Colors.textSecondary)
+                                }
+                            }
                             Spacer()
                             Text("\(day.exercises.count) упр.")
                                 .font(.subheadline)
@@ -151,7 +100,7 @@ public struct WorkoutScreen: View {
                                     .font(.subheadline)
                                     .foregroundColor(DS.Colors.textPrimary)
                                 Spacer()
-                                Text("\(ex.sets) × \(ex.reps)\(ex.perSide ? " на сторону" : "")")
+                                Text(WorkoutFormat.exerciseSummary(ex))
                                     .font(.footnote.monospacedDigit())
                                     .foregroundColor(DS.Colors.textSecondary)
                             }
@@ -363,32 +312,6 @@ public struct WorkoutScreen: View {
             .padding(.horizontal, DS.Metrics.screenGutter)
             .padding(.bottom, DS.Metrics.spacing24)
         }
-    }
-
-    private func parseAndSavePlan() {
-        do {
-            let parsed = try WorkoutDomain.parseWorkoutText(planInputText)
-            store.setTrainingPlan(parsed)
-            isEditingPlan = false
-            parseError = nil
-        } catch {
-            parseError = error.localizedDescription
-        }
-    }
-
-    private func reopenPlanEditor(from training: WorkoutTrainingPlan) {
-        var lines: [String] = []
-        let dayNames = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
-        for day in training.days {
-            let name = (day.weekday >= 1 && day.weekday <= 7) ? dayNames[day.weekday - 1] : "пн"
-            lines.append(name)
-            for ex in day.exercises {
-                let sideStr = ex.perSide ? " на каждую сторону" : ""
-                lines.append("\(ex.name), \(ex.reps) раз\(sideStr)")
-            }
-        }
-        planInputText = lines.joined(separator: "\n")
-        isEditingPlan = true
     }
 
     private func weekdayTitle(_ weekday: Int) -> String {

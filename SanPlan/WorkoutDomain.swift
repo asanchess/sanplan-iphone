@@ -20,6 +20,10 @@ public struct WorkoutExercisePlan: Codable, Equatable, Hashable {
     public var restSeconds: Int
     public var restAfterSets: [Int]?
     public var needsClarification: Bool?
+    /// Stable identity for the builder; nil only in programs saved before 2.1.
+    public var id: String?
+    /// Rest after the last set, before the next exercise. Nil uses `restSeconds`.
+    public var restAfterExercise: Int?
 
     public init(
         name: String,
@@ -28,8 +32,12 @@ public struct WorkoutExercisePlan: Codable, Equatable, Hashable {
         perSide: Bool = false,
         restSeconds: Int = 120,
         restAfterSets: [Int]? = nil,
-        needsClarification: Bool? = nil
+        needsClarification: Bool? = nil,
+        id: String? = nil,
+        restAfterExercise: Int? = nil
     ) {
+        self.id = id
+        self.restAfterExercise = restAfterExercise
         self.name = name
         self.sets = sets
         self.reps = reps
@@ -43,10 +51,13 @@ public struct WorkoutExercisePlan: Codable, Equatable, Hashable {
 public struct WorkoutDayPlan: Codable, Equatable, Hashable {
     public var weekday: Int
     public var exercises: [WorkoutExercisePlan]
+    /// Optional name for the day, for example «Ноги».
+    public var title: String?
 
-    public init(weekday: Int, exercises: [WorkoutExercisePlan]) {
+    public init(weekday: Int, exercises: [WorkoutExercisePlan], title: String? = nil) {
         self.weekday = weekday
         self.exercises = exercises
+        self.title = title
     }
 }
 
@@ -188,11 +199,14 @@ public struct WorkoutTrainingPlan: Codable, Equatable {
     public var version: Int
     public var days: [WorkoutDayPlan]
     public var session: WorkoutSessionState?
+    /// Values new exercises start with. Nil means `WorkoutDefaults.standard`.
+    public var defaults: WorkoutDefaults?
 
-    public init(version: Int = 1, days: [WorkoutDayPlan], session: WorkoutSessionState? = nil) {
+    public init(version: Int = 1, days: [WorkoutDayPlan], session: WorkoutSessionState? = nil, defaults: WorkoutDefaults? = nil) {
         self.version = version
         self.days = days
         self.session = session
+        self.defaults = defaults
     }
 }
 
@@ -305,6 +319,8 @@ public enum WorkoutDomain {
             let rests: [Int]
             if let customRests = restAfterSets {
                 rests = customRests
+            } else if let afterExercise = exercise.restAfterExercise {
+                rests = Array(repeating: restSeconds, count: sets - 1) + [afterExercise]
             } else {
                 rests = Array(repeating: restSeconds, count: sets)
             }

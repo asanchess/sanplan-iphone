@@ -4,6 +4,7 @@ public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
+    @EnvironmentObject private var workouts: WorkoutStore
 
     @State private var showSignOutConfirmation: Bool = false
 
@@ -114,6 +115,8 @@ public struct SettingsView: View {
                             }
                         }
 
+                        WorkoutDefaultsSection(store: workouts)
+
                         // О приложении
                         VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                             SectionHeader("О приложении")
@@ -202,5 +205,55 @@ public struct SettingsView: View {
             return "Не подключен"
         }
         return "Статус неизвестен"
+    }
+}
+
+/// Starting values for exercises added in the builder. Existing exercises keep their own numbers.
+struct WorkoutDefaultsSection: View {
+    @ObservedObject var store: WorkoutStore
+
+    private var defaults: WorkoutDefaults { WorkoutProgram.defaults(of: store.program) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            SectionHeader("Тренировка")
+            Card {
+                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                    ValueStepperRow(
+                        title: "Подходов",
+                        value: "\(defaults.sets)",
+                        canDecrease: defaults.sets > WorkoutProgram.setsRange.lowerBound,
+                        canIncrease: defaults.sets < WorkoutProgram.setsRange.upperBound,
+                        onDecrease: { change { $0.sets -= 1 } },
+                        onIncrease: { change { $0.sets += 1 } }
+                    )
+                    ValueStepperRow(
+                        title: "Отдых между подходами",
+                        value: WorkoutFormat.rest(defaults.restBetweenSets),
+                        canDecrease: defaults.restBetweenSets > WorkoutProgram.restRange.lowerBound,
+                        canIncrease: defaults.restBetweenSets < WorkoutProgram.restRange.upperBound,
+                        onDecrease: { change { $0.restBetweenSets -= WorkoutProgram.restStep } },
+                        onIncrease: { change { $0.restBetweenSets += WorkoutProgram.restStep } }
+                    )
+                    ValueStepperRow(
+                        title: "Отдых между упражнениями",
+                        value: WorkoutFormat.rest(defaults.restBetweenExercises),
+                        canDecrease: defaults.restBetweenExercises > WorkoutProgram.restRange.lowerBound,
+                        canIncrease: defaults.restBetweenExercises < WorkoutProgram.restRange.upperBound,
+                        onDecrease: { change { $0.restBetweenExercises -= WorkoutProgram.restStep } },
+                        onIncrease: { change { $0.restBetweenExercises += WorkoutProgram.restStep } }
+                    )
+                    Text("Применяется к новым упражнениям. Уже добавленные не меняются.")
+                        .font(.caption)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func change(_ edit: (inout WorkoutDefaults) -> Void) {
+        var next = defaults
+        edit(&next)
+        store.updateProgram { try WorkoutProgram.setDefaults($0, next) }
     }
 }
