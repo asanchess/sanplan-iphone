@@ -151,10 +151,21 @@ public struct WorkoutScreen: View {
 
                 Card {
                     VStack(alignment: .center, spacing: DS.Metrics.spacing8) {
-                        Text(formatTimer(seconds: elapsed ?? remaining, phase: session.phase, hasStopwatch: elapsed != nil))
-                            .font(.system(size: 64, weight: .light, design: .rounded).monospacedDigit())
-                            .foregroundColor(DS.Colors.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .center)
+                        ZStack(alignment: .bottom) {
+                            ARNAProgressMark(
+                                progress: WorkoutProgress.fraction(session, remainingSeconds: remaining),
+                                tint: session.phase == .alerting ? DS.Colors.positive : DS.Colors.accent,
+                                track: DS.Colors.textSecondary.opacity(0.18)
+                            )
+                            .frame(width: 260, height: 196)
+                            Text(formatTimer(seconds: elapsed ?? remaining, phase: session.phase, hasStopwatch: elapsed != nil))
+                                .font(.system(size: 56, weight: .light, design: .rounded).monospacedDigit())
+                                .foregroundColor(DS.Colors.textPrimary)
+                                .contentTransition(.numericText(countsDown: elapsed == nil))
+                                .animation(.snappy, value: elapsed ?? remaining)
+                                .padding(.bottom, DS.Metrics.spacing8)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
 
                         if session.phase == .paused {
                             Text("Пауза")
@@ -228,6 +239,9 @@ public struct WorkoutScreen: View {
                 } message: {
                     Text("Оставшиеся подходы не будут выполнены.")
                 }
+            }
+            .sensoryFeedback(trigger: session.phase) { old, new in
+                WorkoutHaptics.feedback(from: old, to: new)
             }
             .onChange(of: context.date) { _ in
                 if session.phase == .preparing || session.phase == .resting {

@@ -37,6 +37,10 @@
     <string>26.0</string>
     <key>NSAlarmKitUsageDescription</key>
     <string>ARNA ставит системные будильники для планов и конца отдыха на тренировке.</string>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Речь распознаётся на iPhone, чтобы вводить планы и расходы голосом.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Микрофон нужен для голосового ввода планов и расходов.</string>
     <key>UILaunchScreen</key>

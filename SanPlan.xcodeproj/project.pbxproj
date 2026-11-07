@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1A0000012B00000100000008 /* AlarmKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000010 /* AlarmKit.framework */; };
+		1A0000012B00000100000009 /* SanPlanWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A0000022B00000200000003 /* SanPlanWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,12 +19,34 @@
 			remoteGlobalIDString = 1A0000042B00000400000001;
 			remoteInfo = SanPlan;
 		};
+		1A0000092B00000900000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1A00000A2B00000A00000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A0000042B00000400000003;
+			remoteInfo = SanPlanWidgets;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1A00000E2B00000E00000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1A0000012B00000100000009 /* SanPlanWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1A0000022B00000200000001 /* SanPlan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SanPlan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000022B00000200000002 /* SanPlanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SanPlanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0000022B00000200000010 /* AlarmKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AlarmKit.framework; path = System/Library/Frameworks/AlarmKit.framework; sourceTree = SDKROOT; };
+		1A0000022B00000200000003 /* SanPlanWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SanPlanWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +58,16 @@
 		1A00000D2B00000D00000002 /* SanPlanTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SanPlanTests;
+			sourceTree = "<group>";
+		};
+		1A00000D2B00000D00000003 /* SanPlanWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SanPlanWidgets;
+			sourceTree = "<group>";
+		};
+		1A00000D2B00000D00000004 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +88,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A0000062B00000600000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -63,6 +103,8 @@
 			children = (
 				1A00000D2B00000D00000001 /* SanPlan */,
 				1A00000D2B00000D00000002 /* SanPlanTests */,
+				1A00000D2B00000D00000003 /* SanPlanWidgets */,
+				1A00000D2B00000D00000004 /* Shared */,
 				1A0000032B00000300000004 /* Frameworks */,
 				1A0000032B00000300000005 /* Products */,
 			);
@@ -81,6 +123,7 @@
 			children = (
 				1A0000022B00000200000001 /* SanPlan.app */,
 				1A0000022B00000200000002 /* SanPlanTests.xctest */,
+				1A0000022B00000200000003 /* SanPlanWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,13 +138,16 @@
 				1A0000052B00000500000001 /* Sources */,
 				1A0000062B00000600000001 /* Frameworks */,
 				1A0000072B00000700000001 /* Resources */,
+				1A00000E2B00000E00000001 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1A0000082B00000800000002 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1A00000D2B00000D00000001 /* SanPlan */,
+				1A00000D2B00000D00000004 /* Shared */,
 			);
 			name = SanPlan;
 			productName = SanPlan;
@@ -129,6 +175,27 @@
 			productReference = 1A0000022B00000200000002 /* SanPlanTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		1A0000042B00000400000003 /* SanPlanWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A00000B2B00000B00000004 /* Build configuration list for PBXNativeTarget "SanPlanWidgets" */;
+			buildPhases = (
+				1A0000052B00000500000003 /* Sources */,
+				1A0000062B00000600000003 /* Frameworks */,
+				1A0000072B00000700000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1A00000D2B00000D00000003 /* SanPlanWidgets */,
+				1A00000D2B00000D00000004 /* Shared */,
+			);
+			name = SanPlanWidgets;
+			productName = SanPlanWidgets;
+			productReference = 1A0000022B00000200000003 /* SanPlanWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -145,6 +212,9 @@
 					1A0000042B00000400000002 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = 1A0000042B00000400000001;
+					};
+					1A0000042B00000400000003 = {
+						CreatedOnToolsVersion = 26.0;
 					};
 				};
 			};
@@ -163,6 +233,7 @@
 			targets = (
 				1A0000042B00000400000001 /* SanPlan */,
 				1A0000042B00000400000002 /* SanPlanTests */,
+				1A0000042B00000400000003 /* SanPlanWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -176,6 +247,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		1A0000072B00000700000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1A0000072B00000700000003 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -199,6 +277,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		1A0000052B00000500000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -206,6 +291,11 @@
 			isa = PBXTargetDependency;
 			target = 1A0000042B00000400000001 /* SanPlan */;
 			targetProxy = 1A0000092B00000900000001 /* PBXContainerItemProxy */;
+		};
+		1A0000082B00000800000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A0000042B00000400000003 /* SanPlanWidgets */;
+			targetProxy = 1A0000092B00000900000002 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -355,6 +445,52 @@
 			};
 			name = Release;
 		};
+		1A00000C2B00000C00000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SanPlanSupport/Widgets-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "WIDGET_EXTENSION $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1A00000C2B00000C00000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "SanPlanSupport/Widgets-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sanplan.companion.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "WIDGET_EXTENSION $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -381,6 +517,15 @@
 			buildConfigurations = (
 				1A00000C2B00000C00000005 /* Debug */,
 				1A00000C2B00000C00000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A00000B2B00000B00000004 /* Build configuration list for PBXNativeTarget "SanPlanWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A00000C2B00000C00000007 /* Debug */,
+				1A00000C2B00000C00000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

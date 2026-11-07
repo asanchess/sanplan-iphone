@@ -73,6 +73,14 @@ public final class PlanStore: ObservableObject {
         )
     }
 
+    public func agenda(for date: String) -> [AgendaItem] {
+        PlanDomain.getAgendaItems(
+            plans: plans + draftPlans + remoteEvents,
+            targetDate: date,
+            targetTimeZone: timeZone
+        )
+    }
+
     public var upcomingAgenda: [AgendaItem] {
         PlanDomain.getUpcomingItems(
             plans: plans + draftPlans + upcomingEvents,

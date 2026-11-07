@@ -9,6 +9,8 @@ public final class AppModel: ObservableObject {
     public let recorder: VoiceRecorder
     public let finance: FinanceStore
     public let workouts: WorkoutStore
+    public let inputs: InputDrafts
+    public let dictation: SpeechDictation
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -24,7 +26,11 @@ public final class AppModel: ObservableObject {
         )
         self.recorder = VoiceRecorder()
         self.finance = FinanceStore()
-        self.workouts = WorkoutStore()
+        self.workouts = WorkoutStore.shared
+        let inputs = InputDrafts()
+        self.inputs = inputs
+        self.dictation = SpeechDictation(drafts: inputs)
+        WorkoutLiveActivityController.shared.attach(to: WorkoutStore.shared)
     }
 
     /// Plan data belongs to the signed-in account and must not show after sign-out.

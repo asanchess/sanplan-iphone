@@ -4,11 +4,11 @@ import UniformTypeIdentifiers
 public struct FinanceScreen: View {
     @Binding var showSettings: Bool
     @ObservedObject private var store: FinanceStore
+    @ObservedObject private var inputs: InputDrafts
+    @ObservedObject private var dictation: SpeechDictation
 
-    // Voice dictation closure: non-nil shows the mic control
-    private let onDictate: (() -> Void)?
-
-    @State private var textInput: String = ""
+    /// The composer text lives above the tabs, so it survives switching tabs during dictation.
+    private var textInput: String { inputs.money }
     @State private var kindHint: String = ""
     @State private var drafts: [FinanceDraft] = []
     @State private var sourceText: String = ""
@@ -34,10 +34,11 @@ public struct FinanceScreen: View {
     @State private var pendingImportState: FinanceState? = nil
     @State private var exportedDocument: EncryptedVaultDocument? = nil
 
-    public init(store: FinanceStore, showSettings: Binding<Bool>, onDictate: (() -> Void)? = nil) {
+    public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, showSettings: Binding<Bool>) {
         self.store = store
+        self.inputs = inputs
+        self.dictation = dictation
         self._showSettings = showSettings
-        self.onDictate = onDictate
     }
 
     private var todayString: String {
@@ -246,34 +247,33 @@ public struct FinanceScreen: View {
                 .accentColor(DS.Colors.accent)
                 .padding(.vertical, 4)
 
-                TextEditor(text: $textInput)
-                    .frame(minHeight: 80)
-                    .padding(8)
-                    .background(DS.Colors.surfaceRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DS.Metrics.innerRadius)
-                            .stroke(DS.Colors.hairline, lineWidth: 1)
-                    )
-
-                HStack(spacing: DS.Metrics.spacing12) {
-                    if let dictateAction = onDictate {
-                        CircleIconButton(
-                            icon: "mic.fill",
-                            accessibilityLabel: "Продиктовать"
-                        ) {
-                            dictateAction()
+                ComposerField(
+                    placeholder: "Например: потратил 2500 на обед",
+                    text: Binding(get: { inputs.money }, set: { inputs.edit($0, for: .money) }),
+                    isListening: dictation.isListening(to: .money),
+                    level: dictation.level,
+                    onMic: {
+                        if dictation.isListening(to: .money) {
+                            dictation.stop()
+                        } else {
+                            // Money never goes to the server: without Apple Speech there is no dictation here.
+                            Task { await dictation.start(into: .money) }
                         }
-                    }
-
-                    PillButton(
-                        "Разобрать",
-                        style: drafts.isEmpty ? .primary : .secondary,
-                        isEnabled: !textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ) {
+                    },
+                    onParse: {
+                        dictation.stop()
                         parseEnteredText()
+                    },
+                    onClear: {
+                        dictation.stop()
+                        inputs.clear(.money)
                     }
+                )
+
+                if let speechError = dictation.errorMessage {
+                    Text(speechError)
+                        .font(.caption)
+                        .foregroundColor(DS.Colors.warning)
                 }
 
                 Text("Текст разбирается на устройстве. Финансовые данные не передаются на сервер.")
@@ -466,7 +466,7 @@ public struct FinanceScreen: View {
         do {
             try store.commit(drafts: drafts, today: todayString)
             self.drafts = []
-            self.textInput = ""
+            inputs.clear(.money)
             self.sourceText = ""
             self.kindHint = ""
             self.sourceHint = ""

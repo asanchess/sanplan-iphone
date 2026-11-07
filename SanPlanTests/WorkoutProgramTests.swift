@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import SanPlan
 
 final class WorkoutProgramTests: XCTestCase {
@@ -140,10 +141,80 @@ final class WorkoutProgramTests: XCTestCase {
 
     func testExerciseLibrarySearch() {
         XCTAssertEqual(ExerciseLibrary.search("").count, ExerciseLibrary.groups.count)
-        let hits = ExerciseLibrary.search("ЖИМ ЛЕЖА").flatMap(\.exercises)
-        XCTAssertTrue(hits.contains("Жим штанги лёжа"), "Search ignores case and ё")
+        let hits = ExerciseLibrary.search("  ЛЕЖА ").flatMap(\.exercises)
+        XCTAssertTrue(hits.contains("Жим штанги лёжа"), "Search ignores case, spaces and ё")
+        XCTAssertTrue(ExerciseLibrary.search("лёжа").flatMap(\.exercises).contains("Жим гантелей лёжа"))
         XCTAssertTrue(ExerciseLibrary.search("zzz").isEmpty)
         XCTAssertEqual(Set(ExerciseLibrary.allExercises).count, ExerciseLibrary.allExercises.count, "No duplicate names")
+    }
+
+    func testProgressFractionPerPhase() {
+        let exercises = [
+            SessionExercise(name: "A", rests: [60, 60]),
+            SessionExercise(name: "B", rests: [90, 90]),
+        ]
+        var s = WorkoutSessionState(exercises: exercises, lastNow: 0)
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 30), 0, accuracy: 0.001)
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 15), 0.5, accuracy: 0.001)
+        s.phase = .resting
+        s.exerciseIndex = 1
+        s.setIndex = 0
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 45), 0.5, accuracy: 0.001)
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 150), 0, accuracy: 0.001, "Extra time restarts the mark")
+        s.phase = .working
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 0), 0.5, accuracy: 0.001, "Two of four sets done")
+        s.phase = .complete
+        XCTAssertEqual(WorkoutProgress.fraction(s, remainingSeconds: 0), 1)
+    }
+
+    func testHapticsOnSetAndRestEnd() {
+        XCTAssertNil(WorkoutHaptics.feedback(from: .resting, to: .resting))
+        XCTAssertNil(WorkoutHaptics.feedback(from: .resting, to: .paused))
+        XCTAssertEqual(WorkoutHaptics.feedback(from: .resting, to: .alerting), .impact(weight: .heavy, intensity: 1))
+        XCTAssertEqual(WorkoutHaptics.feedback(from: .working, to: .resting), .impact(weight: .medium, intensity: 0.8))
+        XCTAssertEqual(WorkoutHaptics.feedback(from: .working, to: .complete), .success)
+    }
+
+    func testLiveStateFollowsSession() throws {
+        let exercises = [SessionExercise(name: "Жим · 8", rests: [60, 60])]
+        var s = WorkoutSessionState(exercises: exercises, deadline: 40_000, lastNow: 10_000)
+        var live = try XCTUnwrap(WorkoutLiveState.content(for: s))
+        XCTAssertEqual(live.phase, .preparing)
+        XCTAssertEqual(live.setLabel, "Подход 1 из 2")
+        XCTAssertEqual(live.countdownEnd, Date(timeIntervalSince1970: 40))
+        XCTAssertNil(live.stopwatchStart)
+        XCTAssertFalse(live.isLastSet)
+
+        s.phase = .working
+        s.deadline = nil
+        s.workStartedAt = 50_000
+        live = try XCTUnwrap(WorkoutLiveState.content(for: s))
+        XCTAssertEqual(live.stopwatchStart, Date(timeIntervalSince1970: 50))
+        XCTAssertNil(live.countdownEnd)
+
+        s.phase = .paused
+        s.workStartedAt = nil
+        s.pausedRemainingMs = 30_500
+        live = try XCTUnwrap(WorkoutLiveState.content(for: s))
+        XCTAssertEqual(live.pausedRemainingSeconds, 31)
+
+        s.phase = .working
+        s.setIndex = 1
+        XCTAssertTrue(try XCTUnwrap(WorkoutLiveState.content(for: s)).isLastSet)
+
+        s.phase = .complete
+        XCTAssertNil(WorkoutLiveState.content(for: s), "A finished workout leaves the lock screen")
+    }
+
+    func testLiveButtonsMapToDomainCommands() {
+        XCTAssertEqual(WorkoutLiveState.command(for: .startRest, phase: .working)?.type, WorkoutCommand.startRest().type)
+        XCTAssertEqual(WorkoutLiveState.command(for: .skipRest, phase: .resting)?.type, WorkoutCommand.skipRest().type)
+        XCTAssertEqual(WorkoutLiveState.command(for: .skipRest, phase: .alerting)?.type, WorkoutCommand.acknowledge().type,
+                       "A rest that ended while locked moves on to the next set")
+        XCTAssertEqual(WorkoutLiveState.command(for: .addThirty, phase: .resting)?.seconds, 30)
+        XCTAssertNil(WorkoutLiveState.command(for: .addThirty, phase: .working))
+        XCTAssertNil(WorkoutLiveState.command(for: .startNow, phase: .resting), "A stale button does nothing")
+        XCTAssertNil(WorkoutLiveState.command(for: .finish, phase: .complete))
     }
 
     func testRestFormatting() {

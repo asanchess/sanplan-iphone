@@ -3,6 +3,9 @@ import Combine
 
 @MainActor
 public final class WorkoutStore: ObservableObject {
+    /// One store per process, so a lock-screen button launched in the background acts on the same session as the screen.
+    public static let shared = WorkoutStore()
+
     @Published public var training: WorkoutTrainingPlan?
     @Published public var activeSession: WorkoutSessionState?
     @Published public var errorMessage: String?

@@ -3,29 +3,40 @@ import SwiftUI
 public struct PlanScreen: View {
     @ObservedObject public var store: PlanStore
     @ObservedObject public var recorder: VoiceRecorder
+    @ObservedObject public var inputs: InputDrafts
+    @ObservedObject public var dictation: SpeechDictation
+    @ObservedObject public var workouts: WorkoutStore
     @Binding public var showSettings: Bool
+    private let onOpenWorkout: () -> Void
 
     @State private var viewMode: ViewMode = .day
-    @State private var textInput: String = ""
-    @State private var isShowingTextSheet: Bool = false
     @State private var isShowingAlarms: Bool = false
     @State private var isConfirmingDraftReset: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public enum ViewMode: String, CaseIterable, Identifiable {
-        case day = "День"
-        case upcoming = "Предстоящие"
+        case day = "Сегодня"
+        case week = "Неделя"
+        case upcoming = "Все"
         public var id: String { rawValue }
     }
 
     public init(
         store: PlanStore,
         recorder: VoiceRecorder,
-        showSettings: Binding<Bool>
+        inputs: InputDrafts,
+        dictation: SpeechDictation,
+        workouts: WorkoutStore,
+        showSettings: Binding<Bool>,
+        onOpenWorkout: @escaping () -> Void = {}
     ) {
         self.store = store
         self.recorder = recorder
+        self.inputs = inputs
+        self.dictation = dictation
+        self.workouts = workouts
         self._showSettings = showSettings
+        self.onOpenWorkout = onOpenWorkout
     }
 
     public var body: some View {
@@ -51,6 +62,14 @@ public struct PlanScreen: View {
                         .padding(.top, DS.Metrics.spacing8)
                 }
 
+                if let speechErr = dictation.errorMessage {
+                    ErrorBanner(message: speechErr) {
+                        dictation.errorMessage = nil
+                    }
+                    .padding(.horizontal, DS.Metrics.screenGutter)
+                    .padding(.top, DS.Metrics.spacing8)
+                }
+
                 ScrollView {
                     VStack(spacing: DS.Metrics.spacing16) {
                         if recorder.isRecordingOrPaused {
@@ -72,25 +91,27 @@ public struct PlanScreen: View {
                         }
                         .pickerStyle(.segmented)
 
-                        if viewMode == .day {
+                        switch viewMode {
+                        case .day:
                             weekStrip
                             agendaDayList
-                        } else {
+                        case .week:
+                            weekView
+                        case .upcoming:
                             upcomingList
                         }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, DS.Metrics.spacing16)
-                    .padding(.bottom, 90)
-                }
-                .refreshable { await store.reload() }
-            }
-
-            VStack {
-                Spacer()
-                bottomActionsBar
-                    .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.bottom, DS.Metrics.spacing16)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .refreshable { await store.reload() }
+                .safeAreaInset(edge: .bottom) {
+                    if !recorder.isRecordingOrPaused {
+                        composer
+                    }
+                }
             }
         }
         .task {
@@ -98,9 +119,6 @@ public struct PlanScreen: View {
         }
         .onChange(of: store.selectedDate) { _, _ in
             Task { await store.ensureRangeLoaded() }
-        }
-        .sheet(isPresented: $isShowingTextSheet) {
-            textInputSheet.keyboardDismissBar()
         }
         .sheet(isPresented: $isShowingAlarms) {
             AlarmsScreen(store: store)
@@ -529,66 +547,134 @@ public struct PlanScreen: View {
         }
     }
 
-    private var bottomActionsBar: some View {
-        HStack(spacing: DS.Metrics.spacing12) {
-            if !recorder.isRecordingOrPaused {
-                PillButton(
-                    "Диктовать план",
-                    icon: "mic.fill",
-                    style: .primary
-                ) {
-                    Task {
-                        await recorder.start()
-                    }
-                }
+    private var composer: some View {
+        ComposerField(
+            placeholder: "Что запланировать?",
+            text: Binding(get: { inputs.plans }, set: { inputs.edit($0, for: .plans) }),
+            isListening: dictation.isListening(to: .plans),
+            level: dictation.level,
+            isBusy: store.isParsing,
+            onMic: toggleDictation,
+            onParse: parseComposer,
+            onClear: {
+                dictation.stop()
+                inputs.clear(.plans)
+            }
+        )
+        .padding(.horizontal, DS.Metrics.screenGutter)
+        .padding(.top, DS.Metrics.spacing8)
+        .padding(.bottom, DS.Metrics.spacing12)
+        .background(DS.Colors.canvas.opacity(0.97))
+    }
 
-                PillButton("Текстом", icon: "keyboard", style: .secondary) {
-                    isShowingTextSheet = true
-                }
-                .frame(maxWidth: 150)
+    private func toggleDictation() {
+        if dictation.isListening(to: .plans) {
+            dictation.stop()
+            return
+        }
+        Task {
+            if await dictation.start(into: .plans) { return }
+            // Without Apple Speech the recording goes to the server as before.
+            if !dictation.isSupported {
+                dictation.errorMessage = nil
+                await recorder.start()
             }
         }
     }
 
-    private var textInputSheet: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas.ignoresSafeArea()
-                VStack(spacing: DS.Metrics.spacing16) {
-                    TextEditor(text: $textInput)
-                        .padding(DS.Metrics.spacing8)
-                        .scrollContentBackground(.hidden)
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .background(DS.Colors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.cardRadius))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DS.Metrics.cardRadius)
-                                .stroke(DS.Colors.hairline, lineWidth: 1)
-                        )
-                        .frame(maxHeight: 200)
-                        .accessibilityLabel("Текст плана")
+    private func parseComposer() {
+        dictation.stop()
+        let text = inputs.take(.plans)
+        guard !text.isEmpty else { return }
+        Task { await store.parseText(text) }
+    }
 
-                    PillButton("Разобрать текст", style: .primary, isLoading: store.isParsing) {
-                        let text = textInput
-                        isShowingTextSheet = false
-                        textInput = ""
-                        Task {
-                            await store.parseText(text)
-                        }
-                    }
+    // MARK: - Week
 
-                    Spacer()
+    private var weekView: some View {
+        let days = PlanWeek.days(containing: store.selectedDate, timeZone: store.timeZone)
+        let training = Dictionary(
+            PlanWeek.trainingRows(program: workouts.program, days: days, timeZone: store.timeZone).map { ($0.date, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let today = PlanDomain.today(timeZone: store.timeZone)
+        return VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            HStack(spacing: DS.Metrics.spacing4) {
+                Text(PlanWeek.title(of: days, timeZone: store.timeZone))
+                    .font(.headline)
+                    .foregroundColor(DS.Colors.textPrimary)
+                Spacer()
+                if !days.contains(today) {
+                    Button("Сегодня") { store.selectedDate = today }
+                        .font(.footnote.weight(.medium))
+                        .foregroundColor(DS.Colors.accent)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
                 }
-                .padding(DS.Metrics.screenGutter)
+                weekButton(icon: "chevron.left", label: "Предыдущая неделя", days: -7)
+                weekButton(icon: "chevron.right", label: "Следующая неделя", days: 7)
             }
-            .navigationTitle("Ввод текста")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Отмена") {
-                        isShowingTextSheet = false
+            ForEach(days, id: \.self) { date in
+                weekDayBlock(date: date, training: training[date], isToday: date == today)
+            }
+        }
+    }
+
+    private func weekDayBlock(date: String, training: PlanWeek.TrainingRow?, isToday: Bool) -> some View {
+        let items = store.agenda(for: date)
+        return Card {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                HStack {
+                    Text(formatLongDate(date).prefix(1).uppercased() + formatLongDate(date).dropFirst())
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(isToday ? DS.Colors.accent : DS.Colors.textPrimary)
+                    Spacer()
+                    if items.isEmpty && training == nil {
+                        Text("Свободно")
+                            .font(.caption)
+                            .foregroundColor(DS.Colors.textSecondary)
                     }
-                    .foregroundColor(DS.Colors.accent)
+                }
+                if let training {
+                    Button(action: onOpenWorkout) {
+                        HStack(spacing: DS.Metrics.spacing8) {
+                            Image(systemName: "figure.strengthtraining.traditional")
+                            Text("\(training.title) · \(PlanWeek.exercisesLabel(training.exerciseCount))")
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .font(.footnote)
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .padding(.horizontal, DS.Metrics.spacing8)
+                        .frame(minHeight: 36)
+                        .background(DS.Colors.accent.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Тренировка: \(training.title). Открыть раздел Тренировка")
+                }
+                ForEach(items) { it in
+                    Button {
+                        store.selectedDate = date
+                        viewMode = .day
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: DS.Metrics.spacing8) {
+                            Text(it.displayTime)
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundColor(DS.Colors.textSecondary)
+                                .frame(width: 76, alignment: .leading)
+                            Text(it.item.title)
+                                .font(.subheadline)
+                                .foregroundColor(it.item.completed == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                                .strikethrough(it.item.completed == true)
+                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(minHeight: 32)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

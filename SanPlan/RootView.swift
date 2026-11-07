@@ -159,12 +159,20 @@ public struct RootView: View {
             .tabItem { Label(MainTab.today.title, systemImage: MainTab.today.icon) }
             .tag(MainTab.today)
 
-            FinanceScreen(store: model.finance, showSettings: $showSettingsSheet)
+            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, showSettings: $showSettingsSheet)
                 .keyboardDismissBar()
                 .tabItem { Label(MainTab.money.title, systemImage: MainTab.money.icon) }
                 .tag(MainTab.money)
 
-            PlanScreen(store: model.plans, recorder: model.recorder, showSettings: $showSettingsSheet)
+            PlanScreen(
+                store: model.plans,
+                recorder: model.recorder,
+                inputs: model.inputs,
+                dictation: model.dictation,
+                workouts: model.workouts,
+                showSettings: $showSettingsSheet,
+                onOpenWorkout: { selectedTab = .workout }
+            )
                 .keyboardDismissBar()
                 .tabItem { Label(MainTab.plans.title, systemImage: MainTab.plans.icon) }
                 .tag(MainTab.plans)
