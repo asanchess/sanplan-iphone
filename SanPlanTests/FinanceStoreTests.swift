@@ -184,6 +184,49 @@ final class FinanceStoreTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: corruptFolderURL.path).count, 1)
     }
 
+    // MARK: One account, one set of money
+
+    func testEachAccountKeepsItsOwnMoney() throws {
+        try prepareSandbox()
+        let store = FinanceStore(fileManager: sandbox.fileManager, owner: .account("a@example.com"))
+        try store.replaceState(with: sampleState(), today: today)
+
+        store.switchOwner(to: .account("b@example.com"))
+        XCTAssertEqual(store.state, emptyFinance(), "another account starts with nothing")
+        try store.commit(drafts: [FinanceDraft(kind: "income", title: "Аванс", amountMinor: 100_000, date: "2026-05-03", category: "Работа")],
+                         today: today, batchId: "b-1")
+
+        store.switchOwner(to: .account(" A@Example.com "))
+        XCTAssertEqual(store.state.records.map(\.id), ["b1", "e1"], "the first account's money comes back, address case aside")
+        XCTAssertEqual(FinanceStore(fileManager: sandbox.fileManager, owner: .account("b@example.com")).state.records.map(\.id), ["b-1:0"])
+    }
+
+    func testTheFirstAccountTakesOverTheEarlierSharedFile() throws {
+        try prepareSandbox()
+        try makeStore().replaceState(with: sampleState(), today: today)
+
+        let first = FinanceStore(fileManager: sandbox.fileManager, owner: .account("a@example.com"))
+        XCTAssertEqual(first.state.records.count, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storageURL.path), "moved, not copied")
+        XCTAssertEqual(FinanceStore(fileManager: sandbox.fileManager, owner: .account("b@example.com")).state, emptyFinance())
+        XCTAssertEqual(FinanceStore(fileManager: sandbox.fileManager, owner: .account("a@example.com")).state.records.count, 2)
+    }
+
+    func testSignedOutShowsNothingSavesNothingAndKeepsTheFiles() throws {
+        try prepareSandbox()
+        let store = FinanceStore(fileManager: sandbox.fileManager, owner: .account("a@example.com"))
+        try store.replaceState(with: sampleState(), today: today)
+
+        store.switchOwner(to: .none)
+        XCTAssertEqual(store.state, emptyFinance())
+        XCTAssertNil(store.summary)
+        XCTAssertThrowsError(try store.replaceState(with: sampleState(), today: today))
+        store.reset()
+
+        store.switchOwner(to: .account("a@example.com"))
+        XCTAssertEqual(store.state.records.count, 2, "sign-out never deletes an account's money")
+    }
+
     func testResetDeletesTheFileAndClearsEverything() throws {
         try prepareSandbox()
         let store = makeStore()

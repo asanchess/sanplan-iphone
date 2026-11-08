@@ -25,7 +25,13 @@ public final class AppModel: ObservableObject {
             }
         )
         self.recorder = VoiceRecorder()
-        self.finance = FinanceStore()
+        // Money is loaded once the account is known; debug screenshots use the phone's shared file.
+        #if DEBUG
+        let screenshots = ProcessInfo.processInfo.arguments.contains("--screenshot-signed-in")
+        #else
+        let screenshots = false
+        #endif
+        self.finance = FinanceStore(owner: screenshots ? .device : .none)
         self.workouts = WorkoutStore.shared
         let inputs = InputDrafts()
         self.inputs = inputs
@@ -33,13 +39,26 @@ public final class AppModel: ObservableObject {
         WorkoutLiveActivityController.shared.attach(to: WorkoutStore.shared)
     }
 
-    /// Plan data belongs to the signed-in account and must not show after sign-out.
-    /// Workouts and money are local to the phone, never tied to the account, so they stay.
+    /// Plans and money belong to the signed-in account and must not show after sign-out. Money stays saved in that
+    /// account's own file on the phone and comes back on its next sign-in. Workouts are the phone's and stay.
     public func clearAccountData() {
         recorder.cancel()
-        if dictation.isListening(to: .plans) { dictation.stop() }
+        if dictation.isListening(to: .plans) || dictation.isListening(to: .money) { dictation.stop() }
         inputs.clear(.plans)
+        inputs.clear(.money)
         plans.resetForSignOut()
+        finance.switchOwner(to: .none)
+    }
+
+    /// Loads the money of the account that just signed in. A different account never sees the previous one's draft.
+    public func accountSignedIn(email: String) {
+        let next = FinanceStore.Owner.account(email)
+        guard finance.owner != next else { return }
+        if case .account = finance.owner {
+            if dictation.isListening(to: .money) { dictation.stop() }
+            inputs.clear(.money)
+        }
+        finance.switchOwner(to: next)
     }
 
     public func launched() async {

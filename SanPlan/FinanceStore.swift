@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 
 @MainActor
 public final class FinanceStore: ObservableObject {
@@ -8,23 +9,77 @@ public final class FinanceStore: ObservableObject {
     @Published public var notice: String? = nil
     @Published public var isBusy: Bool = false
 
+    /// Whose money is loaded. Each signed-in account keeps its own file; nothing is loaded while signed out.
+    public enum Owner: Equatable {
+        /// Signed out: nothing loaded, nothing saved.
+        case none
+        /// The phone's shared file, for tests and debug screenshots.
+        case device
+        /// The account signed in with this email.
+        case account(String)
+    }
+
+    public private(set) var owner: Owner
     private var isUnavailable = false
     private let fileManager: FileManager
-    private let storageURL: URL
-    private let corruptFolderURL: URL
+    private let arnaDir: URL
+    private var storageURL: URL
+    private var corruptFolderURL: URL
 
-    public init(fileManager: FileManager = .default) {
+    public init(fileManager: FileManager = .default, owner: Owner = .device) {
         self.fileManager = fileManager
 
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let arnaDir = appSupport.appendingPathComponent("ARNA", isDirectory: true)
+        self.arnaDir = arnaDir
 
         try? fileManager.createDirectory(at: arnaDir, withIntermediateDirectories: true, attributes: nil)
 
+        self.owner = owner
         self.storageURL = arnaDir.appendingPathComponent("finance_state.json")
         self.corruptFolderURL = arnaDir.appendingPathComponent("corrupt", isDirectory: true)
 
+        switchOwner(to: owner, force: true)
+    }
+
+    /// The phone's shared file from before money was kept per account.
+    private var sharedURL: URL { arnaDir.appendingPathComponent("finance_state.json") }
+
+    /// A folder per account, named by a hash of the email so the address itself is not written to disk.
+    static func accountFolderName(_ email: String) -> String {
+        let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let digest = SHA256.hash(data: Data(normalized.utf8))
+        return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Loads the money of whoever is signed in now. The same owner again changes nothing, so open work stays.
+    /// The first account to sign in after the update takes over the phone's earlier shared file.
+    public func switchOwner(to next: Owner, force: Bool = false) {
+        guard force || next != owner else { return }
+        owner = next
+        summary = nil
+        notice = nil
+        isBusy = false
+        switch next {
+        case .none:
+            state = emptyFinance()
+            isUnavailable = false
+            return
+        case .device:
+            storageURL = sharedURL
+            corruptFolderURL = arnaDir.appendingPathComponent("corrupt", isDirectory: true)
+        case .account(let email):
+            let folder = arnaDir.appendingPathComponent("accounts", isDirectory: true)
+                .appendingPathComponent(Self.accountFolderName(email), isDirectory: true)
+            try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: nil)
+            storageURL = folder.appendingPathComponent("finance_state.json")
+            corruptFolderURL = folder.appendingPathComponent("corrupt", isDirectory: true)
+            if !fileManager.fileExists(atPath: storageURL.path), fileManager.fileExists(atPath: sharedURL.path) {
+                // A move, not a copy: the next account to sign in starts empty instead of seeing this money.
+                try? fileManager.moveItem(at: sharedURL, to: storageURL)
+            }
+        }
         loadInitialState()
     }
 
@@ -58,13 +113,14 @@ public final class FinanceStore: ObservableObject {
         self.state = emptyFinance()
         self.summary = nil
         self.notice = nil
-        try? fileManager.removeItem(at: storageURL)
+        if owner != .none { try? fileManager.removeItem(at: storageURL) }
         isUnavailable = false
     }
 
     // MARK: - Persistence
 
     private func updateState(_ newState: FinanceState, today: String) throws {
+        guard owner != .none else { throw FinanceError.invalidState("Войдите в аккаунт, чтобы сохранять финансы.") }
         reloadIfUnavailable()
         if isUnavailable {
             throw FinanceVaultError.decryptionFailed("Финансы недоступны, пока телефон заблокирован.")
@@ -84,11 +140,11 @@ public final class FinanceStore: ObservableObject {
 
     /// Call when the app becomes active, in case the first load happened while the phone was locked.
     public func reloadIfUnavailable() {
-        if isUnavailable { loadInitialState() }
+        if isUnavailable && owner != .none { loadInitialState() }
     }
 
     private func loadInitialState() {
-        guard fileManager.fileExists(atPath: storageURL.path) else {
+        guard owner != .none, fileManager.fileExists(atPath: storageURL.path) else {
             self.state = emptyFinance()
             isUnavailable = false
             return

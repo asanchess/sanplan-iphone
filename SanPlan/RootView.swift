@@ -95,11 +95,17 @@ public struct RootView: View {
                 await model.launched()
             }
         }
-        .onChange(of: authService.phase) { _, phase in
-            if phase == .signedOut && !isScreenshotSignedInMode {
+        .onChange(of: authService.phase, initial: true) { _, phase in
+            guard !isScreenshotSignedInMode else { return }
+            switch phase {
+            case .signedOut:
                 showSettingsSheet = false
                 selectedTab = .today
                 model.clearAccountData()
+            case .signedIn(let email):
+                model.accountSignedIn(email: email)
+            case .checking:
+                break
             }
         }
         .onChange(of: scenePhase) { _, phase in
