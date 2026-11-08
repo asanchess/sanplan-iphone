@@ -274,11 +274,16 @@ final class ARNAUITests: XCTestCase {
         let finish = exactButton("Завершить досрочно")
         XCTAssertTrue(finish.exists)
         finish.tap()
+        let confirm = exactButton("Завершить")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finish confirmation did not appear")
+        // iOS 26 shows the dialog as a popover without the cancel button; a tap outside cancels it.
         let keepGoing = exactButton("Продолжить тренировку")
-        XCTAssertTrue(keepGoing.waitForExistence(timeout: 5), "Finish confirmation did not appear")
-        XCTAssertTrue(exactButton("Завершить").exists)
-        keepGoing.tap()
-        XCTAssertTrue(waitUntil(5) { !self.exactButton("Продолжить тренировку").exists })
+        if keepGoing.exists {
+            keepGoing.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        }
+        XCTAssertTrue(waitUntil(5) { !self.exactButton("Завершить").exists }, "The finish dialog did not close")
         XCTAssertTrue(text("Рабочий подход").exists, "Cancelling the dialog changed the workout")
     }
 

@@ -39,7 +39,9 @@ public struct WorkoutScreen: View {
                     } else if !store.program.days.isEmpty, !isEditingPlan {
                         savedPlanOverview(training: store.program)
                     } else {
+                        // Building from scratch stays in the builder after the first exercise, until «Готово».
                         WorkoutBuilderView(store: store, onDone: { isEditingPlan = false })
+                            .onAppear { isEditingPlan = true }
                     }
                 }
             }
