@@ -72,6 +72,7 @@ final class ARNAUITests: XCTestCase {
         launch(tab: 1)
         assertMoneyVisible()
         XCTAssertFalse(isDocumentPickerVisible(), "A document picker is already showing before any tap")
+        openMoneySection("Операции")
 
         let statement = app.buttons["statement-import"]
         scrollTo(statement)
@@ -122,15 +123,17 @@ final class ARNAUITests: XCTestCase {
         confirm.tap()
 
         XCTAssertTrue(text("Записи успешно добавлены.").waitForExistence(timeout: 5), "No success message after confirming")
-        XCTAssertTrue(text("История записей").waitForExistence(timeout: 5), "History section missing")
+        openMoneySection("Операции")
+        expandOperationsFeed()
         let record = recordRow(token)
-        XCTAssertTrue(record.waitForExistence(timeout: 5), "Saved expense is not in the history")
+        XCTAssertTrue(record.waitForExistence(timeout: 5), "Saved expense is not in the operations feed")
         scrollTo(record)
 
         openTab("Планы")
         assertPlansVisible()
         openTab("Деньги")
-        XCTAssertTrue(recordRow(token).waitForExistence(timeout: 5), "Saved expense disappeared after switching tabs")
+        XCTAssertTrue(recordRow(token).waitForExistence(timeout: 5),
+                      "Saved expense disappeared after switching tabs (the Операции tab and the open feed must stay)")
     }
 
     // MARK: - 5. Money: draft survives a tab switch
@@ -347,9 +350,17 @@ final class ARNAUITests: XCTestCase {
 
     @MainActor
     private func assertMoneyVisible(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(app.buttons["statement-import"].waitForExistence(timeout: 10), "Money screen not shown", file: file, line: line)
+        let shown = waitUntil(10) {
+            self.app.buttons["statement-import"].exists || self.app.buttons["clean-header"].exists
+        }
+        XCTAssertTrue(shown, "Money screen not shown (no statement import, no «Чистыми» header)", file: file, line: line)
         XCTAssertTrue(text("Деньги").exists, "Money heading missing", file: file, line: line)
-        XCTAssertTrue(text("Сохранение и копия").exists, "Vault section missing", file: file, line: line)
+        XCTAssertTrue(exactButton("Добавить запись").exists, "Money «+» button missing", file: file, line: line)
+        if app.buttons["clean-header"].exists {
+            for tab in ["Обзор", "План", "Операции"] {
+                XCTAssertTrue(exactButton(tab).exists, "Money tab «\(tab)» missing", file: file, line: line)
+            }
+        }
     }
 
     @MainActor
@@ -430,14 +441,35 @@ final class ARNAUITests: XCTestCase {
         }
     }
 
-    /// Opens the Money composer from the empty state, the «Добавить запись» button or an unfinished draft.
+    /// Picks a tab inside the Money screen; an empty money screen has no tabs and shows everything at once.
+    @MainActor
+    private func openMoneySection(_ title: String) {
+        hideKeyboardIfNeeded()
+        let segment = exactButton(title)
+        if segment.waitForExistence(timeout: 3) { segment.tap() }
+    }
+
+    /// The operations feed is collapsed by default; opens it unless it is open already.
+    @MainActor
+    private func expandOperationsFeed(file: StaticString = #filePath, line: UInt = #line) {
+        let toggle = app.buttons["operations-feed-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Operations feed row missing", file: file, line: line)
+        if !app.textFields["operations-search"].exists {
+            scrollTo(toggle, file: file, line: line)
+            toggle.tap()
+        }
+        XCTAssertTrue(app.textFields["operations-search"].waitForExistence(timeout: 5),
+                      "Operations feed did not open", file: file, line: line)
+    }
+
+    /// Opens the Money composer from the empty state, the «+» button or an unfinished draft.
     @MainActor
     private func openMoneyComposer(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let field = composerField(Labels.moneyComposer)
         if field.waitForExistence(timeout: 2) { return field }
 
         let first = button("Добавить первую запись")
-        let another = button("Добавить запись")
+        let another = exactButton("Добавить запись")
         let resume = button("Продолжить черновик")
         XCTAssertTrue(waitUntil(5) { first.exists || another.exists || resume.exists },
                       "No way to open the money composer", file: file, line: line)

@@ -340,6 +340,8 @@ struct RecordEditSheet: View {
 
 struct MoneyChartsSection: View {
     let insights: FinanceInsights
+    /// Opens the operations feed filtered by the tapped category; nil keeps the legend static.
+    var onCategory: ((String) -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let palette: [Color] = [
@@ -423,15 +425,27 @@ struct MoneyChartsSection: View {
     private var legend: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(insights.categories) { slice in
-                HStack(spacing: 6) {
-                    Circle().fill(color(for: slice)).frame(width: 8, height: 8)
-                    Text(slice.name).font(.caption).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(percent(slice.amountMinor)).font(.caption.monospacedDigit())
+                if let onCategory {
+                    Button { onCategory(slice.name) } label: { legendRow(slice) }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Показать операции категории")
+                } else {
+                    legendRow(slice)
                 }
-                .foregroundColor(DS.Colors.textPrimary)
             }
         }
+    }
+
+    private func legendRow(_ slice: FinanceInsights.Slice) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color(for: slice)).frame(width: 8, height: 8)
+            Text(slice.name).font(.caption).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(percent(slice.amountMinor)).font(.caption.monospacedDigit())
+        }
+        .foregroundColor(DS.Colors.textPrimary)
+        .frame(minHeight: onCategory == nil ? nil : 32)
+        .contentShape(Rectangle())
     }
 
     private var comparison: some View {

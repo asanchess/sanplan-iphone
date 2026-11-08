@@ -137,19 +137,23 @@ public struct FinanceState: Codable, Equatable {
     public var imports: [FinanceImport]?
     /// Category chosen by the owner for every operation with a merchant, keyed by the normalised merchant name.
     public var merchantCategories: [String: String]?
+    /// Monthly plan: category limits, set-aside percent and what the owner already answered (see FinanceBudget.swift).
+    public var budget: FinanceBudget?
 
     public init(
         version: Int = 1,
         records: [FinanceRecord] = [],
         committedBatches: [String] = [],
         imports: [FinanceImport]? = nil,
-        merchantCategories: [String: String]? = nil
+        merchantCategories: [String: String]? = nil,
+        budget: FinanceBudget? = nil
     ) {
         self.version = version
         self.records = records
         self.committedBatches = committedBatches
         self.imports = imports
         self.merchantCategories = merchantCategories
+        self.budget = budget
     }
 }
 
@@ -476,7 +480,8 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
         records: cleanRecords,
         committedBatches: cleanBatches,
         imports: (cleanImports?.isEmpty ?? true) ? nil : cleanImports,
-        merchantCategories: (cleanRules?.isEmpty ?? true) ? nil : cleanRules
+        merchantCategories: (cleanRules?.isEmpty ?? true) ? nil : cleanRules,
+        budget: try value.budget.flatMap { try FinanceBudget.validated($0, records: cleanRecords) }
     )
 }
 
@@ -749,7 +754,7 @@ public func commitFinance(
         nextBatches = Array(nextBatches.suffix(FinanceConstants.maxBatches))
     }
 
-    let nextState = FinanceState(version: 1, records: nextRecords, committedBatches: nextBatches, imports: cleanState.imports, merchantCategories: cleanState.merchantCategories)
+    let nextState = FinanceState(version: 1, records: nextRecords, committedBatches: nextBatches, imports: cleanState.imports, merchantCategories: cleanState.merchantCategories, budget: cleanState.budget)
     return try validateFinance(nextState)
 }
 
@@ -778,7 +783,8 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
         records: updatedRecords,
         committedBatches: cleanState.committedBatches,
         imports: cleanState.imports,
-        merchantCategories: cleanState.merchantCategories
+        merchantCategories: cleanState.merchantCategories,
+        budget: cleanState.budget
     ))
 }
 

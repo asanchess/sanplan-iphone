@@ -19,10 +19,16 @@ public struct FinanceScreen: View {
 
     // Composer & stats visibility
     @State private var showComposer: Bool = false
-    @State private var selectedMonth: String = ""
     @State private var horizonDays: Int = 30
     @State private var recordToDelete: FinanceRecord? = nil
     @State private var recordToEdit: FinanceRecord? = nil
+
+    // Tabs, pinned header and the operations feed
+    @State private var tab: FinanceTab = .overview
+    @State private var showBreakdown = false
+    @State private var showReconcile = false
+    @State private var feedExpanded = false
+    @State private var ledgerFilter = LedgerFilter(month: FinanceText.currentMonth())
 
     // Vault Import / Export
     @State private var showExportSheet: Bool = false
@@ -70,94 +76,61 @@ public struct FinanceScreen: View {
         !drafts.isEmpty && (textInput != sourceText || kindHint != sourceHint)
     }
 
+    private var snapshot: BudgetSnapshot? {
+        guard !store.state.records.isEmpty else { return nil }
+        return try? FinanceBudgeting.snapshot(store.state, today: todayString)
+    }
+
     public var body: some View {
         ZStack {
             DS.Colors.canvas.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: DS.Metrics.spacing24) {
-                    headerBar
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    headerBar(proxy)
+                        .padding(.horizontal, DS.Metrics.screenGutter)
 
-                    if let notice = store.notice {
-                        ErrorBanner(message: notice) {
-                            store.notice = nil
+                    if !store.state.records.isEmpty {
+                        VStack(spacing: DS.Metrics.spacing12) {
+                            CleanHeader(snapshot: snapshot) { showBreakdown = true }
+                            Picker("Раздел", selection: $tab) {
+                                ForEach(FinanceTab.allCases) { Text($0.title).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
                         }
+                        .padding(.horizontal, DS.Metrics.screenGutter)
+                        .padding(.bottom, DS.Metrics.spacing12)
                     }
 
-                    if let err = errorMessage {
-                        ErrorBanner(message: err) {
-                            errorMessage = nil
-                        }
-                    }
+                    ScrollView {
+                        VStack(spacing: DS.Metrics.spacing24) {
+                            messages
 
-                    if let stat = statusMessage {
-                        Card {
-                            Text(stat)
-                                .font(.subheadline)
-                                .foregroundColor(DS.Colors.positive)
-                        }
-                    }
+                            if showComposer || !drafts.isEmpty {
+                                composerSection.id("composer")
+                            }
+                            if !drafts.isEmpty {
+                                reviewSection
+                            }
 
-                    if store.state.records.isEmpty && drafts.isEmpty && !showComposer {
-                        emptyStateView
-                    } else {
-                        if showComposer || !drafts.isEmpty {
-                            composerSection
-                        } else {
-                            Button(action: {
-                                showComposer = true
-                            }) {
-                                HStack {
-                                    Image(systemName: "plus.circle.fill")
-                                    Text(drafts.isEmpty ? "Добавить запись" : "Продолжить черновик")
+                            if store.state.records.isEmpty {
+                                if !showComposer && drafts.isEmpty {
+                                    emptyStateView
                                 }
-                                .font(.body.weight(.semibold))
-                                .foregroundColor(DS.Colors.onAccent)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: DS.Metrics.pillHeight)
-                                .background(DS.Colors.accent)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2))
+                                statementsSection
+                                vaultActionsSection
+                            } else {
+                                tabContent
                             }
                         }
-
-                        if !drafts.isEmpty {
-                            reviewSection
-                        }
-
-                        if !store.state.records.isEmpty && !showComposer {
-                            summarySection
-                            MoneyChartsSection(insights: FinanceInsights.compute(
-                                store.state,
-                                month: selectedMonth.isEmpty ? currentMonthString : selectedMonth,
-                                today: todayString
-                            ))
-                            goalsSection
-                            recordsListSection
-                        }
+                        .padding(.horizontal, DS.Metrics.screenGutter)
+                        .padding(.top, DS.Metrics.spacing4)
+                        .padding(.bottom, DS.Metrics.spacing32)
                     }
-
-                    StatementsSection(
-                        store: store,
-                        today: todayString,
-                        errorMessage: $errorMessage,
-                        statusMessage: $statusMessage,
-                        pickedFile: $pickedStatement,
-                        onPick: {
-                            importsStatement = true
-                            showImportSheet = true
-                        }
-                    )
-
-                    vaultActionsSection
                 }
-                .padding(.horizontal, DS.Metrics.screenGutter)
-                .padding(.bottom, DS.Metrics.spacing32)
             }
         }
         .onAppear {
-            if selectedMonth.isEmpty {
-                selectedMonth = currentMonthString
-            }
             store.refreshSummary(today: todayString, horizonDays: horizonDays)
         }
         .fileExporter(
@@ -226,12 +199,115 @@ public struct FinanceScreen: View {
                 onCancel: { recordToEdit = nil }
             )
         }
+        .sheet(isPresented: $showBreakdown) {
+            CleanBreakdownSheet(snapshot: snapshot) { showBreakdown = false }
+        }
+        .sheet(isPresented: $showReconcile) {
+            ReconcileSheet(today: todayString, apply: applyChange) { showReconcile = false }
+        }
+        .onChange(of: store.state.records.isEmpty) { _, isEmpty in
+            // Sign-out or a reset empties the state: nothing typed into the feed may outlive it.
+            if isEmpty {
+                ledgerFilter = LedgerFilter(month: currentMonthString)
+                feedExpanded = false
+                tab = .overview
+            }
+        }
+    }
+
+    // MARK: - Tabs
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch tab {
+        case .overview:
+            FinanceOverviewTab(
+                store: store,
+                today: todayString,
+                apply: applyChange,
+                onCategory: { category in
+                    ledgerFilter = LedgerFilter(
+                        month: currentMonthString,
+                        kind: .expense,
+                        category: category == "Остальное" ? nil : category
+                    )
+                    feedExpanded = true
+                    tab = .operations
+                },
+                onOpenPlan: { tab = .plan }
+            )
+        case .plan:
+            FinancePlanTab(store: store, today: todayString, apply: applyChange)
+        case .operations:
+            OperationsFeed(store: store, filter: $ledgerFilter, expanded: $feedExpanded) { recordToEdit = $0 }
+            ReconcileCard(snapshot: snapshot) { showReconcile = true }
+            statementsSection
+            vaultActionsSection
+        }
+    }
+
+    @ViewBuilder
+    private var messages: some View {
+        if let notice = store.notice {
+            ErrorBanner(message: notice) {
+                store.notice = nil
+            }
+        }
+
+        if let err = errorMessage {
+            ErrorBanner(message: err) {
+                errorMessage = nil
+            }
+        }
+
+        if let stat = statusMessage {
+            Card {
+                Text(stat)
+                    .font(.subheadline)
+                    .foregroundColor(DS.Colors.positive)
+            }
+        }
+    }
+
+    private var statementsSection: some View {
+        StatementsSection(
+            store: store,
+            today: todayString,
+            errorMessage: $errorMessage,
+            statusMessage: $statusMessage,
+            pickedFile: $pickedStatement,
+            onPick: {
+                importsStatement = true
+                showImportSheet = true
+            }
+        )
+    }
+
+    /// Every budget change goes through here: one pure function on the state, then the encrypted save.
+    private func applyChange(_ message: String?, _ change: (FinanceState) throws -> FinanceState) {
+        errorMessage = nil
+        do {
+            try store.replaceState(with: change(store.state), today: todayString)
+            statusMessage = message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     // MARK: - Header Bar
 
-    private var headerBar: some View {
+    private func headerBar(_ proxy: ScrollViewProxy) -> some View {
         ScreenHeader("Деньги") {
+            CircleIconButton(
+                icon: "plus",
+                accessibilityLabel: "Добавить запись"
+            ) {
+                showComposer = true
+                // The composer sits above the tab content; bring it into view from any scroll position.
+                DispatchQueue.main.async {
+                    withAnimation { proxy.scrollTo("composer", anchor: .top) }
+                }
+            }
             CircleIconButton(
                 icon: "person.crop.circle",
                 accessibilityLabel: "Настройки"
@@ -240,6 +316,7 @@ public struct FinanceScreen: View {
             }
         }
         .padding(.top, DS.Metrics.spacing16)
+        .padding(.bottom, DS.Metrics.spacing12)
     }
 
     // MARK: - Empty State
@@ -270,7 +347,7 @@ public struct FinanceScreen: View {
                     SectionHeader(store.state.records.isEmpty ? "Сколько у тебя денег сейчас?" : "Новая запись")
 
                     if !store.state.records.isEmpty {
-                        Button("К сводке") {
+                        Button("Скрыть") {
                             showComposer = false
                         }
                         .font(.subheadline)
@@ -526,240 +603,6 @@ public struct FinanceScreen: View {
         }
     }
 
-    // MARK: - Summary Section
-
-    private var summarySection: some View {
-        Group {
-            if let sum = store.summary {
-                Card {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                        SectionHeader("Сводка")
-
-                        HStack(spacing: DS.Metrics.spacing16) {
-                            statBox(title: "Доход за месяц", amount: sum.incomeMinor, color: DS.Colors.positive)
-                            statBox(title: "Расход за месяц", amount: sum.expenseMinor, color: DS.Colors.textPrimary)
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Остаток сейчас")
-                                .font(.subheadline)
-                                .foregroundColor(DS.Colors.textSecondary)
-
-                            if let bal = sum.balanceMinor {
-                                Text(formatKzt(bal))
-                                    .font(.title2.weight(.semibold).monospacedDigit())
-                                    .foregroundColor(DS.Colors.textPrimary)
-                            } else {
-                                Text("—")
-                                    .font(.title2.weight(.semibold))
-                                    .foregroundColor(DS.Colors.textSecondary)
-                                Text("Общий остаток ещё не указан.")
-                                    .font(.caption)
-                                    .foregroundColor(DS.Colors.textSecondary)
-                            }
-                        }
-                        .padding(.top, 4)
-
-                        Divider().background(DS.Colors.hairline)
-
-                        HStack {
-                            Text("Отложено на цели")
-                                .font(.subheadline)
-                                .foregroundColor(DS.Colors.textSecondary)
-                            Spacer()
-                            Text(formatKzt(sum.reservedGoalMinor))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundColor(DS.Colors.textPrimary)
-                        }
-
-                        HStack {
-                            Text("Платежи месяца")
-                                .font(.subheadline)
-                                .foregroundColor(DS.Colors.textSecondary)
-                            Spacer()
-                            Text(formatKzt(sum.obligationsMinor))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundColor(DS.Colors.textPrimary)
-                        }
-
-                        HStack {
-                            Text("Свободно")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(DS.Colors.textPrimary)
-                            Spacer()
-                            Text(sum.spendableMinor != nil ? formatKzt(sum.spendableMinor!) : "—")
-                                .font(.subheadline.weight(.semibold).monospacedDigit())
-                                .foregroundColor(DS.Colors.accent)
-                        }
-
-                        if let deficit = sum.deficitMinor, deficit > 0 {
-                            Text("На указанные резервы и платежи не хватает \(formatKzt(deficit)).")
-                                .font(.caption)
-                                .foregroundColor(DS.Colors.destructive)
-                        }
-
-                        if let daily = sum.dailyMinor {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Ориентир на день · \(horizonDays) дн.")
-                                    .font(.caption)
-                                    .foregroundColor(DS.Colors.textSecondary)
-                                Text(formatKzt(daily))
-                                    .font(.headline.weight(.semibold).monospacedDigit())
-                                    .foregroundColor(DS.Colors.textPrimary)
-                            }
-                            .padding(.top, 4)
-                        }
-
-                        if !sum.byCategory.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Расходы по категориям")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundColor(DS.Colors.textSecondary)
-
-                                ForEach(sum.byCategory, id: \.name) { cat in
-                                    HStack {
-                                        Text(cat.name)
-                                            .font(.caption)
-                                            .foregroundColor(DS.Colors.textPrimary)
-                                        Spacer()
-                                        Text(formatKzt(cat.amountMinor))
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundColor(DS.Colors.textSecondary)
-                                    }
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func statBox(title: String, amount: Int64, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(DS.Colors.textSecondary)
-            Text(formatKzt(amount))
-                .font(.headline.weight(.semibold).monospacedDigit())
-                .foregroundColor(color)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(DS.Colors.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-    }
-
-    // MARK: - Goals Section
-
-    private var goalsSection: some View {
-        let goals = store.state.records.filter { $0.kind == "goal" }
-        return Group {
-            if !goals.isEmpty {
-                Card {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                        SectionHeader("Накопления")
-
-                        ForEach(goals) { g in
-                            let prog = (try? goalProgress(
-                                amountMinor: g.amountMinor ?? 1,
-                                savedMinor: g.savedMinor ?? 0,
-                                dueDate: g.dueDate,
-                                today: todayString
-                            ))
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(g.title)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(DS.Colors.textPrimary)
-                                    Spacer()
-                                    if let p = prog {
-                                        Text("\(p.progressPercent)%")
-                                            .font(.caption.weight(.medium).monospacedDigit())
-                                            .foregroundColor(DS.Colors.accent)
-                                    }
-                                }
-
-                                Text("\(formatKzt(g.savedMinor ?? 0)) из \(formatKzt(g.amountMinor ?? 0))")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundColor(DS.Colors.textSecondary)
-
-                                ProgressView(value: Double(prog?.progressPercent ?? 0), total: 100)
-                                    .accentColor(DS.Colors.accent)
-
-                                if let p = prog {
-                                    Text("Осталось \(formatKzt(p.remainingMinor))")
-                                        .font(.caption2)
-                                        .foregroundColor(DS.Colors.textSecondary)
-
-                                    if let dailyReq = p.requiredDailyMinor, dailyReq > 0 {
-                                        Text("\(formatKzt(dailyReq)) в день до срока")
-                                            .font(.caption2)
-                                            .foregroundColor(DS.Colors.textSecondary)
-                                    }
-                                }
-                            }
-                            .padding(12)
-                            .background(DS.Colors.surfaceRaised)
-                            .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Records List Section
-
-    private var recordsListSection: some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                SectionHeader("История записей")
-
-                ForEach(store.state.records.reversed().prefix(50)) { r in
-                    Button {
-                        recordToEdit = r
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(r.title)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundColor(r.excluded == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                                    .lineLimit(2)
-                                Text(recordSubtitle(r))
-                                    .font(.caption2)
-                                    .foregroundColor(DS.Colors.textSecondary)
-                            }
-
-                            Spacer()
-
-                            if let amt = r.amountMinor {
-                                Text(formatKzt(amt))
-                                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                                    .foregroundColor(r.excluded == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                                    .strikethrough(r.excluded == true)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Открыть запись для изменения")
-                    Divider().background(DS.Colors.hairline)
-                }
-            }
-        }
-    }
-
-    private func recordSubtitle(_ r: FinanceRecord) -> String {
-        var parts = [kindLabel(r.kind)]
-        if let category = r.category, r.kind == "expense" || r.kind == "income" { parts.append(category) }
-        if let date = r.date { parts.append(date) }
-        if r.excluded == true { parts.append("не учитывается") }
-        return parts.joined(separator: " · ")
-    }
-
     // MARK: - Vault Actions Section
 
     private var vaultActionsSection: some View {
@@ -880,34 +723,6 @@ public struct FinanceScreen: View {
 
         case .failure(let err):
             errorMessage = err.localizedDescription
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func formatKzt(_ amountMinor: Int64) -> String {
-        let whole = amountMinor / 100
-        let frac = abs(amountMinor % 100)
-        let numFormatter = NumberFormatter()
-        numFormatter.numberStyle = .decimal
-        numFormatter.groupingSeparator = " "
-        let formattedWhole = numFormatter.string(from: NSNumber(value: whole)) ?? "\(whole)"
-        if frac == 0 {
-            return "\(formattedWhole) ₸"
-        } else {
-            return String(format: "%@,%02d ₸", formattedWhole, frac)
-        }
-    }
-
-    private func kindLabel(_ kind: String) -> String {
-        switch kind {
-        case "balance": return "Остаток"
-        case "income": return "Доход"
-        case "expense": return "Расход"
-        case "obligation": return "Регулярный платёж"
-        case "goal": return "Цель"
-        case "planned_income": return "Ожидаемый доход"
-        default: return kind
         }
     }
 }
