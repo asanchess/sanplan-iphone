@@ -298,7 +298,8 @@ struct CleanBreakdownSheet: View {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                         MoneyRow(label: s.asOf.map { "На счетах на \(FinanceText.dayMonth($0))" } ?? "На счетах",
                                  value: FinanceText.money(accounts))
-                        MoneyRow(label: "− Отложено в конвертах", value: FinanceText.money(s.reservedMinor))
+                        MoneyRow(label: s.outsideMinor > 0 ? "− Отложено в конвертах со счетов" : "− Отложено в конвертах",
+                                 value: FinanceText.money(s.reservedMinor))
                         MoneyRow(label: "− Платежи месяца, ещё не оплачены", value: FinanceText.money(s.unpaidPaymentsMinor))
                         MoneyRow(label: "− Остатки лимитов", value: FinanceText.money(s.limitsRemainingMinor))
                         Divider().background(DS.Colors.hairline)
@@ -307,6 +308,11 @@ struct CleanBreakdownSheet: View {
                         Text("Деньги, которые не заняты ни конвертами, ни планом месяца. Перерасход лимита уже есть в остатке на счетах.")
                             .font(.caption)
                             .foregroundColor(DS.Colors.textSecondary)
+                        if s.outsideMinor > 0 {
+                            Text("Ещё \(FinanceText.money(s.outsideMinor)) в конвертах лежит вне счетов, поэтому не вычитается.")
+                                .font(.caption)
+                                .foregroundColor(DS.Colors.textSecondary)
+                        }
                     }
                 }
                 Card {
@@ -912,6 +918,11 @@ struct EnvelopeRow: View {
             }
             ProgressView(value: Double(min(saved, target)), total: Double(target))
                 .tint(DS.Colors.accent)
+            if let outside = goal.outsideMinor, outside > 0 {
+                Text("из них вне счетов \(FinanceText.money(outside))")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
             HStack(spacing: DS.Metrics.spacing16) {
                 Button("Отложить", action: onAdd)
                     .disabled(FinanceEnvelopes.room(goal) == 0)
@@ -1117,13 +1128,56 @@ struct EnvelopeMoveSheet: View {
     @State private var error: String? = nil
     /// Set when the amount is above what is left to the target; the next tap grows the target.
     @State private var growTarget = false
+    /// The money is not on the accounts (cash, a deposit), so «Чистыми» does not change.
+    @State private var outside: Bool
 
-    private var limit: Int64 { move.isWithdraw ? (move.goal.savedMinor ?? 0) : FinanceEnvelopes.room(move.goal) }
+    init(move: EnvelopeMove, apply: FinanceApply, onClose: @escaping () -> Void) {
+        self.move = move
+        self.apply = apply
+        self.onClose = onClose
+        // Taking back from an envelope that holds only outside money starts on that part.
+        let held = move.goal.outsideMinor ?? 0
+        _outside = State(initialValue: move.isWithdraw && held > 0 && held == (move.goal.savedMinor ?? 0))
+    }
+
+    private var outsideHeld: Int64 { move.goal.outsideMinor ?? 0 }
+    private var onAccountsHeld: Int64 { (move.goal.savedMinor ?? 0) - outsideHeld }
+
+    private var limit: Int64 {
+        guard move.isWithdraw else { return FinanceEnvelopes.room(move.goal) }
+        return outside ? outsideHeld : onAccountsHeld
+    }
+
+    /// Taking back offers the choice only when both parts hold money.
+    private var showsSource: Bool { !move.isWithdraw || (outsideHeld > 0 && onAccountsHeld > 0) }
+
+    private var sourceNote: String {
+        switch (move.isWithdraw, outside) {
+        case (false, false): return "Деньги остаются на карте, но перестают быть «Чистыми»."
+        case (false, true): return "Наличные или вклад, которых нет в выписках. «Чистыми» не изменится."
+        case (true, false): return "Сумма снова станет «Чистыми»."
+        case (true, true): return "Деньги вне счетов: «Чистыми» не изменится."
+        }
+    }
 
     var body: some View {
         FinanceSheet(title: move.isWithdraw ? "Забрать из «\(move.goal.title)»" : "Отложить в «\(move.goal.title)»", onClose: onClose) {
             Text(move.isWithdraw ? "Сейчас отложено \(FinanceText.money(limit))." : "До цели осталось \(FinanceText.money(limit)).")
                 .font(.subheadline)
+                .foregroundColor(DS.Colors.textSecondary)
+            if showsSource {
+                Picker(move.isWithdraw ? "Откуда" : "Где лежат деньги", selection: $outside) {
+                    Text("На счетах").tag(false)
+                    Text("Вне счетов").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: outside) { _, _ in
+                    growTarget = false
+                    error = nil
+                }
+            }
+            Text(sourceNote)
+                .font(.caption)
                 .foregroundColor(DS.Colors.textSecondary)
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
@@ -1160,12 +1214,15 @@ struct EnvelopeMoveSheet: View {
         }
         let goalId = move.goal.id
         let raise = growTarget
+        let fromOutside = outside
         let failure: String?
         if move.isWithdraw {
-            failure = apply("Забрано \(FinanceText.money(minor)).") { try FinanceBudgeting.withdraw($0, amountMinor: minor, goalId: goalId) }
+            failure = apply("Забрано \(FinanceText.money(minor)).") {
+                try FinanceBudgeting.withdraw($0, amountMinor: minor, goalId: goalId, outsideAccounts: fromOutside)
+            }
         } else {
-            failure = apply("Отложено \(FinanceText.money(minor)).") {
-                try FinanceBudgeting.setAside($0, amountMinor: minor, goalId: goalId, raiseTarget: raise)
+            failure = apply("Отложено \(FinanceText.money(minor))\(fromOutside ? " вне счетов" : "").") {
+                try FinanceBudgeting.setAside($0, amountMinor: minor, goalId: goalId, raiseTarget: raise, outsideAccounts: fromOutside)
             }
         }
         if let failure { error = failure; growTarget = false } else { onClose() }
@@ -1180,6 +1237,7 @@ struct NewEnvelopeSheet: View {
     @State private var title = "Подушка"
     @State private var target = ""
     @State private var saved = ""
+    @State private var savedOutside = false
     @State private var error: String? = nil
 
     var body: some View {
@@ -1192,6 +1250,17 @@ struct NewEnvelopeSheet: View {
             TextField("Уже отложено, ₸ — необязательно", text: $saved)
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
+            if !saved.filter(\.isNumber).isEmpty {
+                Picker("Где лежат деньги", selection: $savedOutside) {
+                    Text("На счетах").tag(false)
+                    Text("Вне счетов").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Text(savedOutside ? "Наличные или вклад, которых нет в выписках. «Чистыми» не изменится."
+                                  : "Деньги остаются на карте, но перестают быть «Чистыми».")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
             if let error {
                 Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
             }
@@ -1217,8 +1286,14 @@ struct NewEnvelopeSheet: View {
         }
         let draft = FinanceDraft(kind: "goal", title: name, amountMinor: goal * 100, savedMinor: already * 100)
         let date = today
-        let failure = apply("Конверт «\(name)» создан.") {
-            try commitFinance(state: $0, drafts: [draft], batchId: UUID().uuidString, nowDate: date)
+        let outsideMinor = savedOutside && already > 0 ? already * 100 : nil
+        let failure = apply("Конверт «\(name)» создан.") { state in
+            let before = Set(state.records.map(\.id))
+            var next = try commitFinance(state: state, drafts: [draft], batchId: UUID().uuidString, nowDate: date)
+            if let outsideMinor, let i = next.records.firstIndex(where: { $0.kind == "goal" && !before.contains($0.id) }) {
+                next.records[i].outsideMinor = outsideMinor
+            }
+            return next
         }
         if let failure { error = failure } else { onClose() }
     }

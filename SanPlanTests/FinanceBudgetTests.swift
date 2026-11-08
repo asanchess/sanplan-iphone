@@ -547,4 +547,37 @@ final class FinanceBudgetTests: XCTestCase {
         XCTAssertNil(FinanceText.tenge("999999999999"), "twelve digits would overflow minor units in a sum")
         XCTAssertNil(FinanceText.tenge("99999999999999999999"))
     }
+
+    /// Cash or a deposit no statement shows: it fills the envelope but never comes out of «Чистыми».
+    func testMoneyOutsideTheAccountsFillsTheEnvelopeButNotTheBalance() throws {
+        var state = november()
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, 70_000_00)
+
+        state = try FinanceBudgeting.setAside(state, amountMinor: 30_000_00, goalId: "cushion", outsideAccounts: true)
+        var snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
+        XCTAssertEqual(snap.cleanMinor, 70_000_00, "outside money leaves «Чистыми» alone")
+        XCTAssertEqual(snap.reservedMinor, 50_000_00)
+        XCTAssertEqual(snap.outsideMinor, 30_000_00)
+        XCTAssertEqual(state.records.first { $0.id == "cushion" }?.savedMinor, 80_000_00)
+
+        state = try FinanceBudgeting.setAside(state, amountMinor: 10_000_00, goalId: "cushion")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, 60_000_00)
+
+        XCTAssertThrowsError(try FinanceBudgeting.withdraw(state, amountMinor: 40_000_00, goalId: "cushion", outsideAccounts: true))
+        state = try FinanceBudgeting.withdraw(state, amountMinor: 20_000_00, goalId: "cushion", outsideAccounts: true)
+        snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
+        XCTAssertEqual(snap.cleanMinor, 60_000_00, "taking outside money back changes nothing on the accounts")
+        XCTAssertEqual(snap.outsideMinor, 10_000_00)
+
+        XCTAssertThrowsError(try FinanceBudgeting.withdraw(state, amountMinor: 61_000_00, goalId: "cushion"),
+                             "only 60 000 of the envelope is on the accounts")
+        state = try FinanceBudgeting.withdraw(state, amountMinor: 10_000_00, goalId: "cushion")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, 70_000_00)
+        XCTAssertTrue(FinanceBudgeting.exportText(state, today: "2026-11-10").contains("вне счетов"))
+
+        // Lowering what is saved by hand lowers the outside part with it.
+        let i = try XCTUnwrap(state.records.firstIndex { $0.id == "cushion" })
+        state.records[i].savedMinor = 4_000_00
+        XCTAssertEqual(try validateFinance(state).records[i].outsideMinor, 4_000_00)
+    }
 }

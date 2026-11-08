@@ -124,8 +124,10 @@ public struct BudgetSnapshot: Equatable {
     /// Date of the balance the numbers start from: the latest statement or reconciliation.
     public let asOf: String?
     public let statementAgeDays: Int?
-    /// Everything in the envelopes (savings goals).
+    /// What the envelopes hold on the accounts; this part is taken out of «Чистыми».
     public let reservedMinor: Int64
+    /// What the envelopes hold outside the accounts (cash, a deposit); never taken out of «Чистыми».
+    public var outsideMinor: Int64 = 0
     /// Payments of the plan not yet paid this month.
     public let unpaidPaymentsMinor: Int64
     public let limits: [LimitStatus]
@@ -327,7 +329,7 @@ public enum FinanceBudgeting {
         let asOf = state.records
             .filter { $0.kind == "balance" && $0.excluded != true && ($0.date ?? "") <= today }
             .compactMap(\.date).max()
-        return BudgetSnapshot(
+        var snap = BudgetSnapshot(
             onAccountsMinor: summary.balanceMinor,
             asOf: asOf,
             statementAgeDays: asOf.flatMap { daysBetween($0, today) },
@@ -339,6 +341,8 @@ public enum FinanceBudgeting {
             flexiblePerDayMinor: remaining / Int64(daysLeft),
             daysLeft: daysLeft
         )
+        snap.outsideMinor = state.records.filter { $0.kind == "goal" }.reduce(Int64(0)) { $0 + ($1.outsideMinor ?? 0) }
+        return snap
     }
 
     /// The owner enters what is on the cards now; it becomes the newest balance, so the difference is neither
@@ -523,8 +527,9 @@ public enum FinanceBudgeting {
 
     /// Moves money into an envelope. Nothing moves in the bank; the amount only stops being «Чистыми».
     /// With `raiseTarget` an envelope that is full or nearly full grows its target instead of refusing.
+    /// With `outsideAccounts` the money is not on the accounts at all (cash, a deposit), so «Чистыми» stays as it is.
     public static func setAside(_ state: FinanceState, amountMinor: Int64, goalId: String, incomeId: String? = nil,
-                                raiseTarget: Bool = false) throws -> FinanceState {
+                                raiseTarget: Bool = false, outsideAccounts: Bool = false) throws -> FinanceState {
         var next = try validateFinance(state)
         guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
             throw FinanceError.invalidAmount("Нечего откладывать: сумма должна быть больше нуля")
@@ -539,6 +544,9 @@ public enum FinanceBudgeting {
             next.records[i].amountMinor = saved
         }
         next.records[i].savedMinor = saved
+        if outsideAccounts {
+            next.records[i].outsideMinor = (next.records[i].outsideMinor ?? 0) + amountMinor
+        }
         var budget = next.budget ?? FinanceBudget()
         budget.savingsGoalId = goalId
         if let incomeId { budget.handledIncomes = (budget.handledIncomes ?? []) + [incomeId] }
@@ -546,14 +554,25 @@ public enum FinanceBudgeting {
         return try validateFinance(next)
     }
 
-    /// Takes money back out of an envelope.
-    public static func withdraw(_ state: FinanceState, amountMinor: Int64, goalId: String) throws -> FinanceState {
+    /// Takes money back out of an envelope: from the part on the accounts (it becomes «Чистыми» again) or from the
+    /// part kept outside them (nothing on the accounts changes).
+    public static func withdraw(_ state: FinanceState, amountMinor: Int64, goalId: String,
+                                outsideAccounts: Bool = false) throws -> FinanceState {
         var next = try validateFinance(state)
-        guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }),
-              (next.records[i].savedMinor ?? 0) >= amountMinor else {
+        guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
             throw FinanceError.invalidAmount("Нельзя забрать больше, чем отложено")
         }
-        next.records[i].savedMinor = (next.records[i].savedMinor ?? 0) - amountMinor
+        let saved = next.records[i].savedMinor ?? 0
+        let outside = next.records[i].outsideMinor ?? 0
+        let available = outsideAccounts ? outside : saved - outside
+        guard available >= amountMinor else {
+            throw FinanceError.invalidAmount(outsideAccounts ? "Вне счетов отложено меньше" : "Со счетов отложено меньше")
+        }
+        next.records[i].savedMinor = saved - amountMinor
+        if outsideAccounts {
+            let left = outside - amountMinor
+            next.records[i].outsideMinor = left > 0 ? left : nil
+        }
         return try validateFinance(next)
     }
 
@@ -742,6 +761,7 @@ public enum FinanceBudgeting {
             basis = "обычных расходов"
         }
         guard base > 0 else { return nil }
+        // All of it, on the accounts or not: the cushion is what there is to live on.
         let reserved = state.records.filter { $0.kind == "goal" }.reduce(Int64(0)) { $0 + ($1.savedMinor ?? 0) }
         let tenths = reserved * 10 / base
         let text = reserved == 0
@@ -859,7 +879,9 @@ public enum FinanceBudgeting {
         if let snap = try? snapshot(state, today: today) {
             lines.append("")
             if let onAccounts = snap.onAccountsMinor { lines.append("На счетах: \(money(onAccounts)) (на \(snap.asOf ?? today)).") }
-            lines.append("Отложено: \(money(snap.reservedMinor)). Откладываю \(state.budget?.savePercent ?? defaultSavePercent)% от каждого дохода.")
+            let outside = state.records.filter { $0.kind == "goal" }.reduce(Int64(0)) { $0 + ($1.outsideMinor ?? 0) }
+            let outsideNote = outside > 0 ? ", ещё \(money(outside)) вне счетов (наличные, вклад)" : ""
+            lines.append("Отложено на счетах: \(money(snap.reservedMinor))\(outsideNote). Откладываю \(state.budget?.savePercent ?? defaultSavePercent)% от каждого дохода.")
             if let clean = snap.cleanMinor { lines.append("Свободно после всех планов: \(money(clean)).") }
         }
         let found = hints(state, today: today)

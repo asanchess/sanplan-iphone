@@ -61,6 +61,9 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     public var obligationId: String?
     public var frequency: String?
     public var savedMinor: Int64?
+    /// Envelopes only: the part of `savedMinor` kept outside the accounts (cash, a deposit no statement shows).
+    /// It counts toward the envelope and its target but is never taken out of «Чистыми».
+    public var outsideMinor: Int64?
     public var dueDate: String?
     /// The bank statement import this record came from; nil for records entered by hand.
     public var importId: String?
@@ -459,6 +462,10 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
             }
             clean.amountMinor = rec.amountMinor
             clean.savedMinor = rec.savedMinor
+            // An edit that lowers what is saved lowers the outside part with it.
+            if let outside = rec.outsideMinor, outside > 0, isValidMoney(outside), saved > 0 {
+                clean.outsideMinor = min(outside, saved)
+            }
             if let dd = rec.dueDate {
                 guard isValidDateString(dd) else {
                     throw FinanceError.invalidState("Invalid goal dueDate")
@@ -960,7 +967,8 @@ public func financeSummary(
     var reservedGoalMinor: Int64 = 0
     for r in cleanState.records {
         if r.kind == "goal" {
-            reservedGoalMinor += r.savedMinor ?? 0
+            // Money kept outside the accounts was never in the balance, so it is not taken out of it.
+            reservedGoalMinor += (r.savedMinor ?? 0) - (r.outsideMinor ?? 0)
         }
     }
 
