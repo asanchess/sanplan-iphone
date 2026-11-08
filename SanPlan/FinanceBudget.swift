@@ -821,11 +821,15 @@ public enum FinanceBudgeting {
 
     /// Word stems of a plan title, so «Аренда» finds «аренду» and «Связь» finds «Связь и интернет».
     static func stems(_ title: String) -> [String] {
-        title.lowercased()
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .map(String.init)
-            .filter { $0.count >= 4 }
-            .map { String($0.prefix(max(4, $0.count - 2))) }
+        let words: [Substring] = title.lowercased().split(whereSeparator: { (c: Character) -> Bool in
+            !c.isLetter && !c.isNumber
+        })
+        var out: [String] = []
+        for word in words where word.count >= 4 {
+            let keep: Int = max(4, word.count - 2)
+            out.append(String(word.prefix(keep)))
+        }
+        return out
     }
 
     static func importsById(_ state: FinanceState) -> [String: FinanceImport] {
