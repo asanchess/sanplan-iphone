@@ -416,6 +416,20 @@ final class FinanceBudgetTests: XCTestCase {
         XCTAssertTrue(FinanceBudgeting.paymentStatus(state, obligation: rent, today: "2026-11-10").isPaid)
     }
 
+    /// Marked by hand before the statement came: the imported rent is still offered, so it leaves flexible spending.
+    func testAMarkByHandStillOffersTheImportedPayment() throws {
+        var state = try FinanceBudgeting.togglePaidByHand(november(), obligationId: "rent", today: "2026-11-03")
+        state.records.append(op("pay1", "expense", 118_000, "2026-11-06", merchant: "Аренда квартиры", importId: "k"))
+        let match = try XCTUnwrap(FinanceBudgeting.paymentMatches(state, today: "2026-11-10").first { $0.obligationId == "rent" })
+        XCTAssertEqual(match.recordId, "pay1")
+
+        state = try FinanceBudgeting.linkPayment(state, recordId: match.recordId, obligationId: "rent")
+        XCTAssertNil(state.budget?.manualPaid)
+        XCTAssertTrue(FinanceBudgeting.paymentMatches(state, today: "2026-11-10").allSatisfy { $0.obligationId != "rent" },
+                      "paid by the operation, nothing more to offer")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").unpaidPaymentsMinor, 0)
+    }
+
     /// Mondays of November 2026: 2, 9, 16, 23, 30. Charges already past are in the balance; only the ones ahead stay.
     func testWeeklyPaymentKeepsOnlyTheChargesAhead() throws {
         let gym = FinanceRecord(id: "gym", kind: "obligation", title: "Зал", amountMinor: 10_000_00, date: "2026-11-02", frequency: "weekly")

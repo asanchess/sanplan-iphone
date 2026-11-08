@@ -365,7 +365,11 @@ public enum FinanceBudgeting {
         var used = Set<String>()
         var out: [PaymentMatch] = []
         for ob in state.records where ob.kind == "obligation" && ob.frequency == "monthly" {
-            guard let amount = ob.amountMinor, !paymentStatus(state, obligation: ob, today: today).isPaid else { continue }
+            // A mark by hand still looks for the real operation, so it leaves flexible spending and its merchant is learned.
+            guard let amount = ob.amountMinor else { continue }
+            let status = paymentStatus(state, obligation: ob, today: today)
+            let paidByOperations = amount > 0 && status.paidMinor * 10 >= amount * 9
+            guard !status.isPaid || (status.markedByHand && !paidByOperations) else { continue }
             let words = stems(ob.title)
             let fitting = candidates.filter { r in
                 guard !used.contains(r.id), !dismissed.contains(ob.id + "|" + r.id), let a = r.amountMinor,

@@ -218,10 +218,13 @@ struct CleanHeader: View {
             return ("Остаток не указан: добавь его через «+» или загрузи выписку", true)
         }
         if clean < 0 { return ("Не хватает \(FinanceText.money(-clean)) на план месяца", true) }
+        // A stale balance comes first: the number itself may be wrong. The breakdown still says there are no limits.
+        if let asOf = s.asOf, s.isStale {
+            return ("остаток на \(FinanceText.dayMonth(asOf)) · пора загрузить свежую выписку", true)
+        }
         // Without limits nothing is kept for everyday spending, so «Чистыми» is not money free to spend.
         if s.limits.isEmpty { return ("Лимитов нет — на повседневные траты ничего не учтено. Задать их можно в «Плане»", true) }
         guard let asOf = s.asOf else { return ("на счетах", false) }
-        if s.isStale { return ("остаток на \(FinanceText.dayMonth(asOf)) · пора загрузить свежую выписку", true) }
         return ("на счетах на \(FinanceText.dayMonth(asOf))", false)
     }
 
@@ -409,6 +412,11 @@ struct FinanceOverviewTab: View {
                     }
                 }
                 if let goal, offer > 0 {
+                    if FinanceEnvelopes.room(goal) < offer {
+                        Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + offer)).")
+                            .font(.caption)
+                            .foregroundColor(DS.Colors.textSecondary)
+                    }
                     PillButton("Отложить \(FinanceText.money(offer)) в «\(goal.title)»", style: .primary) {
                         apply("Отложено \(FinanceText.money(offer)).") { state in
                             let saved = try FinanceBudgeting.setAside(state, amountMinor: offer, goalId: goal.id, raiseTarget: true)
