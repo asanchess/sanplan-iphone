@@ -484,7 +484,9 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
     }
 
     let importIds = Set(cleanRecords.compactMap(\.importId))
-    let cleanImports = value.imports?.filter { importIds.contains($0.id) }
+    // A statement whose operations were all deleted one by one still knows its account's closing balance; only
+    // `deleteImport` drops a statement on purpose.
+    let cleanImports = value.imports?.filter { importIds.contains($0.id) || ($0.closingMinor != nil && $0.closingDate != nil) }
     let cleanRules = value.merchantCategories?.filter { !$0.key.isEmpty && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
     return FinanceState(
         version: 1,
