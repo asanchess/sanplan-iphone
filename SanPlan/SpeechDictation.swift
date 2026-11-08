@@ -15,6 +15,8 @@ public final class SpeechDictation: ObservableObject {
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    /// Identifies the current recognition, so results of an earlier one are ignored.
+    private var session = UUID()
 
     public init(drafts: InputDrafts) {
         self.drafts = drafts
@@ -79,12 +81,14 @@ public final class SpeechDictation: ObservableObject {
 
         self.request = request
         self.target = target
+        let session = UUID()
+        self.session = session
         drafts.beginDictation(into: target)
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             let transcript = result?.bestTranscription.formattedString
             let isFinal = result?.isFinal ?? false
             Task { @MainActor in
-                guard let self, self.target == target else { return }
+                guard let self, self.session == session, self.target == target else { return }
                 if let transcript {
                     self.drafts.applySpeech(transcript, to: target)
                 }
@@ -100,6 +104,7 @@ public final class SpeechDictation: ObservableObject {
     /// Stops listening and keeps whatever was recognised in the field.
     public func stop() {
         if let target { drafts.endDictation(into: target) }
+        session = UUID()
         task?.finish()
         cleanUp()
     }

@@ -225,7 +225,7 @@ public final class PlanStore: ObservableObject {
 
     public func transcribe(audio: Data, mimeType: String) async {
         guard audio.count <= Self.maxAudioBytes else {
-            errorMessage = "Запись слишком длинная. Продиктуй короче, до 10 минут."
+            errorMessage = "Запись слишком длинная. Продиктуй короче, до минуты."
             return
         }
         let started = generation

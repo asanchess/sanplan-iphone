@@ -34,8 +34,9 @@ public struct FinanceInsights: Equatable {
             ? Array(byCategory.prefix(5)) + [Slice(name: "Остальное", amountMinor: byCategory.dropFirst(5).reduce(0) { $0 + $1.amountMinor })]
             : byCategory
 
-        let byMerchant = Dictionary(grouping: expenses, by: { $0.merchant ?? $0.title })
-            .map { Slice(name: $0.key, amountMinor: $0.value.reduce(0) { $0 + ($1.amountMinor ?? 0) }) }
+        // «MAGNUM» and «Magnum» are one merchant; the name shown is the one seen first.
+        let byMerchant = Dictionary(grouping: expenses, by: { MerchantCategories.key($0.merchant ?? $0.title) })
+            .map { Slice(name: $0.value[0].merchant ?? $0.value[0].title, amountMinor: $0.value.reduce(0) { $0 + ($1.amountMinor ?? 0) }) }
             .sorted { $0.amountMinor != $1.amountMinor ? $0.amountMinor > $1.amountMinor : $0.name < $1.name }
 
         let expense = total("expense", month)

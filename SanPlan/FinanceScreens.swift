@@ -27,6 +27,9 @@ public struct FinanceScreen: View {
     // Vault Import / Export
     @State private var showExportSheet: Bool = false
     @State private var showImportSheet: Bool = false
+    /// What the single file importer is open for; SwiftUI presents only one importer per screen.
+    @State private var importsStatement = false
+    @State private var pickedStatement: URL?
     @State private var vaultPasswordPrompt: String = ""
     @State private var vaultPasswordConfirm: String = ""
     @State private var isExporting: Bool = false
@@ -133,7 +136,17 @@ public struct FinanceScreen: View {
                         }
                     }
 
-                    StatementsSection(store: store, today: todayString, errorMessage: $errorMessage, statusMessage: $statusMessage)
+                    StatementsSection(
+                        store: store,
+                        today: todayString,
+                        errorMessage: $errorMessage,
+                        statusMessage: $statusMessage,
+                        pickedFile: $pickedStatement,
+                        onPick: {
+                            importsStatement = true
+                            showImportSheet = true
+                        }
+                    )
 
                     vaultActionsSection
                 }
@@ -162,10 +175,18 @@ public struct FinanceScreen: View {
         }
         .fileImporter(
             isPresented: $showImportSheet,
-            allowedContentTypes: [.json],
+            allowedContentTypes: importsStatement ? [.pdf] : [.json],
             allowsMultipleSelection: false
         ) { result in
-            handleImportResult(result)
+            if importsStatement {
+                importsStatement = false
+                switch result {
+                case .success(let urls): pickedStatement = urls.first
+                case .failure(let error): errorMessage = error.localizedDescription
+                }
+            } else {
+                handleImportResult(result)
+            }
         }
         .alert("Удалить запись?", isPresented: Binding(
             get: { recordToDelete != nil },
@@ -774,6 +795,7 @@ public struct FinanceScreen: View {
                     }
 
                     PillButton("Восстановить из копии", style: .secondary) {
+                        importsStatement = false
                         showImportSheet = true
                     }
                 }

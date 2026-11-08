@@ -42,8 +42,10 @@ struct StatementsSection: View {
     let today: String
     @Binding var errorMessage: String?
     @Binding var statusMessage: String?
+    /// The PDF the owner picked in the Money screen's file importer.
+    @Binding var pickedFile: URL?
+    let onPick: () -> Void
 
-    @State private var isPicking = false
     @State private var isReading = false
     @State private var pending: PendingStatement?
     @State private var suggestions: [StatementImport.MergeSuggestion] = []
@@ -58,8 +60,9 @@ struct StatementsSection: View {
                     .foregroundColor(DS.Colors.textSecondary)
 
                 PillButton("Импорт выписки", icon: "doc.text.magnifyingglass", style: .secondary, isLoading: isReading) {
-                    isPicking = true
+                    onPick()
                 }
+                .accessibilityIdentifier("statement-import")
 
                 ForEach(suggestions) { suggestion in
                     mergeRow(suggestion)
@@ -84,8 +87,10 @@ struct StatementsSection: View {
                 }
             }
         }
-        .fileImporter(isPresented: $isPicking, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
-            read(result)
+        .onChange(of: pickedFile) { _, url in
+            guard let url else { return }
+            pickedFile = nil
+            read(url)
         }
         .sheet(item: $pending) { pending in
             StatementPreviewSheet(pending: pending, onImport: { confirm(pending) }, onCancel: { self.pending = nil })
@@ -129,8 +134,7 @@ struct StatementsSection: View {
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
     }
 
-    private func read(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
+    private func read(_ url: URL) {
         isReading = true
         errorMessage = nil
         let rules = store.state.merchantCategories

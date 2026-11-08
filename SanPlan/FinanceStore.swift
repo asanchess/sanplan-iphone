@@ -59,6 +59,7 @@ public final class FinanceStore: ObservableObject {
         self.summary = nil
         self.notice = nil
         try? fileManager.removeItem(at: storageURL)
+        isUnavailable = false
     }
 
     // MARK: - Persistence
@@ -89,6 +90,7 @@ public final class FinanceStore: ObservableObject {
     private func loadInitialState() {
         guard fileManager.fileExists(atPath: storageURL.path) else {
             self.state = emptyFinance()
+            isUnavailable = false
             return
         }
 

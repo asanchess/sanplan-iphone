@@ -603,6 +603,8 @@ public enum MerchantCategories {
 
     private static let keywords: [(String, [String])] = [
         ("Подписки", ["openai", "chatgpt", "anthropic", "claude", "netflix", "spotify", "apple.com", "youtube", "google", "yandex plus", "яндекс плюс"]),
+        // Marketplaces before groceries: «Яндекс Маркет» and «Wildberries Marketplace» are shopping.
+        ("Покупки", ["wildberries", "ozon", "яндекс маркет", "yandex market", "marketplace", "kaspi магазин", "kaspi.kz магазин", "lamoda", "technodom", "sulpak", "mechta", "ikea", "zara", "lc waikiki"]),
         ("Продукты", ["magnum", "small", "galmart", "anvar", "арбуз", "arbuz", "toimart", "дешевле", "fix price", "metro", "супермаркет", "market", "маркет", "продукт", "minimarket", "khleb", "хлеб", "gaumart"]),
         ("Доставка еды", ["wolt", "glovo", "yandex eda", "яндекс еда", "chocofood", "доставка"]),
         ("Кафе и рестораны", ["kfc", "burger", "mcdonald", "starbucks", "coffee", "кофе", "cafe", "кафе", "kafe", "ресторан", "restaura", "pizza", "пицц", "doner", "донер", "bar ", "fast food", "popeyes", "bahandi", "cafeteria", "kurochka", "dastarkhan", "дастархан"]),
@@ -612,7 +614,7 @@ public enum MerchantCategories {
         ("Коммунальные", ["алсеко", "alseco", "энерго", "водоканал", "коммунал", "ерц"]),
         ("Учёба", ["образоват", "школ", "курсы", "univer", "университет", "satpayev", "сатпаев"]),
         ("Развлечения", ["kinopark", "кино", "chaplin", "steam", "playstation"]),
-        ("Покупки", ["wildberries", "ozon", "kaspi магазин", "kaspi.kz магазин", "lamoda", "technodom", "sulpak", "mechta", "ikea", "zara", "lc waikiki", "shop"]),
+        ("Покупки", ["shop"]),
     ]
 
     public static func key(_ merchant: String) -> String {
@@ -621,7 +623,8 @@ public enum MerchantCategories {
 
     public static func category(operation: String, merchant: String, incoming: Bool, rules: [String: String]?) -> String {
         if let rule = rules?[key(merchant)] { return rule }
-        let text = (operation + " " + merchant).lowercased()
+        // A trailing space lets whole-word keywords such as «bar » match at the end of the name.
+        let text = (operation + " " + merchant + " ").lowercased()
         if incoming {
             if text.contains("зарплат") || text.contains("salary") { return "Зарплата" }
             return operation.lowercased().contains("перевод") ? "Переводы" : "Пополнения"
