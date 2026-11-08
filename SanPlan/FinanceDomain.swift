@@ -776,6 +776,7 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
     }
 
     let isObligation = target.kind == "obligation"
+    let wasImported = target.importId != nil
     var updatedRecords: [FinanceRecord] = []
 
     for r in cleanState.records {
@@ -787,6 +788,15 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
             next.obligationId = nil
         }
         updatedRecords.append(next)
+    }
+
+    if wasImported {
+        var rebuilt = FinanceState(
+            version: 1, records: updatedRecords, committedBatches: cleanState.committedBatches, imports: cleanState.imports,
+            merchantCategories: cleanState.merchantCategories, budget: cleanState.budget
+        )
+        StatementImport.rebuildBalance(&rebuilt)
+        updatedRecords = rebuilt.records
     }
 
     return try validateFinance(FinanceState(

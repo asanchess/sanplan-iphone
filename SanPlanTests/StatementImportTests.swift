@@ -310,7 +310,9 @@ final class StatementImportTests: XCTestCase {
         XCTAssertEqual(balances.count, 1)
         XCTAssertEqual(balances.first?.amountMinor, 35_754_950 + 19_540_000)
         XCTAssertEqual(balances.first?.date, "2025-11-30")
-        XCTAssertEqual(state.records.last?.id, StatementImport.balanceRecordId, "Placed after the operations of its day")
+        let checkpoint = try XCTUnwrap(state.records.firstIndex { $0.id == StatementImport.balanceRecordId })
+        let sameDay = state.records.indices.filter { state.records[$0].importId != nil && state.records[$0].date == "2025-11-30" }
+        XCTAssertTrue(sameDay.allSatisfy { $0 < checkpoint }, "Placed after the operations of its day")
 
         let summary = try financeSummary(state, today: "2025-11-30")
         XCTAssertEqual(summary.balanceMinor, 35_754_950 + 19_540_000)

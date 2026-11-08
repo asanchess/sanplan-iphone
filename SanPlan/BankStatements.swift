@@ -480,16 +480,23 @@ public enum StatementImport {
 
         var total: Int64 = 0
         for i in latest.values { total += i.closingMinor ?? 0 }
-        // The same records the summary counts, so it lands back on each closing balance exactly.
-        for r in state.records where r.excluded != true && (r.kind == "income" || r.kind == "expense") {
-            guard let importId = r.importId, let key = accountOfImport[importId], let closing = latest[key]?.closingDate,
+        // The records the summary counts, so it lands back on each closing balance exactly. A transfer from the
+        // owner's other account with no partner is rolled back too: its other side is past that account's statement,
+        // so counting it on this one alone would count the same money twice.
+        for r in state.records where r.kind == "income" || r.kind == "expense" {
+            let loneOwnTransfer = r.excluded == true && r.pairedWith == nil && r.note == ownTransferNote
+            guard r.excluded != true || loneOwnTransfer,
+                  let importId = r.importId, let key = accountOfImport[importId], let closing = latest[key]?.closingDate,
                   let day = r.date, day > date, day <= closing else { continue }
             let amount = r.amountMinor ?? 0
             total += r.kind == "income" ? -amount : amount
         }
         // An overdrawn account lowers the sum. A balance below zero has no checkpoint in the money model, so none is set.
         guard total >= 0 else { return }
-        state.records.append(FinanceRecord(id: balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: total, date: date))
+        // Right after the statements' operations of that day, so a hand-entered one of the same day still counts
+        // however many imports come later.
+        let position = state.records.lastIndex { $0.importId != nil && $0.date == date }.map { $0 + 1 } ?? 0
+        state.records.insert(FinanceRecord(id: balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: total, date: date), at: position)
     }
 
     /// Hand-entered records that look like the same operation as an imported one: same kind, date and amount.
@@ -605,6 +612,8 @@ public enum StatementImport {
                 }
             }
         }
+        // The balance checkpoint rolls later imported operations back; a changed amount, date or exclusion moves it.
+        rebuildBalance(&next)
         return try validateFinance(next)
     }
 }

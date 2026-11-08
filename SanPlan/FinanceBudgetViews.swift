@@ -1120,7 +1120,10 @@ struct EnvelopeMoveSheet: View {
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
-                .onChange(of: amount) { _, _ in growTarget = false }
+                .onChange(of: amount) { _, _ in
+                    growTarget = false
+                    error = nil
+                }
             if let error {
                 Text(error).font(.caption).foregroundColor(growTarget ? DS.Colors.textSecondary : DS.Colors.destructive)
             }

@@ -395,10 +395,16 @@ public enum FinanceBudgeting {
         guard next.records[i].obligationId == nil else {
             throw FinanceError.invalidState("Эта операция уже отмечена как оплата другого платежа")
         }
-        // One monthly payment is never closed twice: once its month is paid, no more links.
-        if ob.frequency == "monthly", let day = next.records[i].date,
-           paymentStatus(next, obligation: ob, today: lastDay(of: day)).isPaid {
-            throw FinanceError.invalidState("«\(ob.title)» за этот месяц уже оплачен")
+        // One monthly payment is never closed twice: once operations pay its month, no more links. A mark by hand
+        // gives way to the real operation, so its merchant is learned.
+        if ob.frequency == "monthly", let day = next.records[i].date {
+            let mark = obligationId + "|" + String(day.prefix(7))
+            var withoutMark = next
+            withoutMark.budget?.manualPaid?.removeAll { $0 == mark }
+            if paymentStatus(withoutMark, obligation: ob, today: lastDay(of: day)).isPaid {
+                throw FinanceError.invalidState("«\(ob.title)» за этот месяц уже оплачен")
+            }
+            next = withoutMark
         }
         next.records[i].obligationId = obligationId
         let key = MerchantCategories.key(next.records[i].merchant ?? next.records[i].title)
@@ -881,11 +887,12 @@ public enum FinanceBudgeting {
     static func looksLikePerson(_ name: String) -> Bool {
         let text = name.trimmingCharacters(in: .whitespaces)
         let patterns = [
-            #"^[А-ЯЁӘҒҚҢӨҰҮҺІA-Z][а-яёәғқңөұүһіa-z]+\s+[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.?(\s?[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.?)?$"#,
+            // A name and one initial, or two initials with a dot between: «Apple TV» and «Beeline KZ» are not people.
+            #"^[А-ЯЁӘҒҚҢӨҰҮҺІA-Z][а-яёәғқңөұүһіa-z]+\s+[А-ЯЁӘҒҚҢӨҰҮҺІA-Z](\.?|\.\s?[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.?)$"#,
             #"^[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.\s?([А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.\s?)?[А-ЯЁӘҒҚҢӨҰҮҺІA-Z][а-яёәғқңөұүһіa-z]+$"#,
             #"^(ИП|IP|И\.П\.)\s"#,
-            // An all-caps Cyrillic pair or triple is a person unless a company form stands in front.
-            #"^(?!(ТОО|АО|ОАО|ООО|ЗАО|ГКП|РГП|КГП|ОФ|ПК)\s)[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}(\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,})?$"#,
+            // An all-caps Cyrillic pair or triple is a person unless it carries a company form or a shop word.
+            #"^(?!.*\b(ТОО|АО|ОАО|ООО|ЗАО|ГКП|РГП|КГП|ОФ|ПК|АПТЕКА|МАГАЗИН|КАФЕ|ТАКСИ|ЯНДЕКС|РЕСТОРАН|САЛОН|МАРКЕТ|СУПЕРМАРКЕТ|ФИТНЕС|ЦЕНТР|АЗС|ДОСТАВКА|ПЛЮС|ШОП|КЛИНИКА|БАР)\b)[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}(\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,})?$"#,
             #"^[A-Z]{2,}\s+[A-Z]\.?$"#,
             #"^[А-ЯЁӘҒҚҢӨҰҮҺІ][а-яёәғқңөұүһі]+\s+[А-ЯЁӘҒҚҢӨҰҮҺІ][а-яёәғқңөұүһі]+(вич|вна|ична|улы|ұлы|кызы|қызы)$"#,
         ]

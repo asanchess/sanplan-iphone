@@ -372,9 +372,48 @@ final class FinanceBudgetTests: XCTestCase {
         XCTAssertEqual(snap.onAccountsMinor, (300_000 - 4_000) * 100, "both closing balances, less the hand-entered spending")
         XCTAssertEqual(snap.asOf, "2026-11-01", "freshness is the oldest account's")
 
+        // Editing or deleting an imported operation moves the checkpoint with it.
+        var edited = try StatementImport.edit("h1", StatementImport.RecordEdit(
+            title: "Магнум", amountMinor: 30_000_00, date: "2026-11-05", category: "Продукты", note: "", excluded: true,
+            applyCategoryToMerchant: false
+        ), in: state)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(edited, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000) * 100)
+        edited = try removeFinanceRecord(state: state, id: "h2")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(edited, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000) * 100)
+
+        // A hand-entered operation on the checkpoint day still counts after another import.
+        state.records.append(op("m0", "expense", 1_000, "2026-11-01", category: "Наличные"))
+        StatementImport.rebuildBalance(&state)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000 - 1_000) * 100)
+
         state = try FinanceBudgeting.reconcile(state, totalMinor: 250_000_00, today: "2026-11-07", id: "r1")
         snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
         XCTAssertEqual(snap.onAccountsMinor, 260_000_00, "the reconciliation stands, plus Halyk's income after it")
+    }
+
+    /// Kaspi → Halyk on 5 Nov: Kaspi's statement ends on 1 Nov, so only Halyk's incoming side is known.
+    func testLoneTransferFromAnOwnAccountIsNotCountedTwice() throws {
+        var incoming = op("in", "income", 50_000, "2026-11-05", category: "Переводы", importId: "h")
+        incoming.excluded = true
+        incoming.note = StatementImport.ownTransferNote
+        var state = FinanceState(records: [incoming])
+        state.imports = [
+            FinanceImport(id: "k", bank: "Kaspi", fileName: "k.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-02",
+                          count: 0, closingMinor: 100_000_00, closingDate: "2026-11-01"),
+            FinanceImport(id: "h", bank: "Halyk", fileName: "h.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-10",
+                          count: 1, closingMinor: 200_000_00, closingDate: "2026-11-10"),
+        ]
+        StatementImport.rebuildBalance(&state)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 250_000_00)
+    }
+
+    func testRealPaymentReplacesAMarkByHand() throws {
+        var state = try FinanceBudgeting.togglePaidByHand(november(), obligationId: "rent", today: "2026-11-03")
+        state.records.append(op("pay1", "expense", 120_000, "2026-11-06", merchant: "Иванов А."))
+        state = try FinanceBudgeting.linkPayment(state, recordId: "pay1", obligationId: "rent")
+        XCTAssertNil(state.budget?.manualPaid)
+        XCTAssertNotNil(state.budget?.obligationMerchants)
+        XCTAssertTrue(FinanceBudgeting.paymentStatus(state, obligation: rent, today: "2026-11-10").isPaid)
     }
 
     /// Mondays of November 2026: 2, 9, 16, 23, 30. Charges already past are in the balance; only the ones ahead stay.
@@ -451,7 +490,8 @@ final class FinanceBudgetTests: XCTestCase {
         for name in ["Айгерим К.", "Иванов А.А.", "А. Иванов", "ИП Сейткали", "ИВАНОВ АЛЕКСЕЙ", "Айгерим Кайратовна", "AIGERIM K."] {
             XCTAssertTrue(FinanceBudgeting.looksLikePerson(name), name)
         }
-        for name in ["Magnum", "ТОО ПРИМЕР", "MAGNUM CASH&CARRY", "Coffee Point", "Kaspi Gold"] {
+        for name in ["Magnum", "ТОО ПРИМЕР", "MAGNUM CASH&CARRY", "Coffee Point", "Kaspi Gold", "Apple TV", "Beeline KZ",
+                     "АПТЕКА ПЛЮС", "ЯНДЕКС ТАКСИ", "КАФЕ ДАСТАРХАН"] {
             XCTAssertFalse(FinanceBudgeting.looksLikePerson(name), name)
         }
         XCTAssertEqual(FinanceBudgeting.safeName("Halyk 4400 43** **** 1234"), "Halyk …")
