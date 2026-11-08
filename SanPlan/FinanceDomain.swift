@@ -337,6 +337,17 @@ public func emptyFinance() -> FinanceState {
 
 // MARK: - Validation and State Invariants
 
+/// Typed spending used to land in «Еда» and «Связь», names no statement or limit knows. Read as the current ones.
+func legacyCategory(_ category: String, title: String) -> String {
+    switch category {
+    case "Еда":
+        let eatingOut = title.lowercased().range(of: "обед|ужин|завтрак|кафе|ресторан|кофе", options: .regularExpression) != nil
+        return eatingOut ? "Кафе и рестораны" : "Продукты"
+    case "Связь": return "Связь и интернет"
+    default: return category
+    }
+}
+
 public func validateFinance(_ value: FinanceState) throws -> FinanceState {
     if value.version != 1 {
         throw FinanceError.invalidState("Unsupported finance state version")
@@ -408,7 +419,7 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
             clean.amountMinor = rec.amountMinor
             clean.date = rec.date
             let trimmedCat = rec.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            clean.category = !trimmedCat.isEmpty ? trimmedCat : "Без категории"
+            clean.category = !trimmedCat.isEmpty ? legacyCategory(trimmedCat, title: rec.title) : "Без категории"
 
             if rec.kind == "expense" {
                 if let obId = rec.obligationId, !obId.isEmpty {
@@ -942,39 +953,13 @@ public func financeSummary(
     }
 
     // 5. Obligations for current month
-    guard let (tYear, tMonth, _) = parseYmd(today) else {
+    guard parseYmd(today) != nil else {
         throw FinanceError.invalidDate("Invalid today date")
     }
-    let lastDayOfMonth = getDaysInMonth(year: tYear, month: tMonth)
-    let endOfMonthYmd = String(format: "%04d-%02d-%02d", tYear, tMonth, lastDayOfMonth)
-    let currentMonthStr = String(today.prefix(7))
-
-    var linkedExpensesByObligation: [String: Int64] = [:]
-    for r in cleanState.records {
-        if r.kind == "expense", let obId = r.obligationId, let rDate = r.date, rDate <= today, rDate.hasPrefix(currentMonthStr) {
-            linkedExpensesByObligation[obId] = (linkedExpensesByObligation[obId] ?? 0) + (r.amountMinor ?? 0)
-        }
-    }
-
+    // One rule for «paid» across the header, the plan and the month review.
     var obligationsMinor: Int64 = 0
-    for r in cleanState.records {
-        if r.kind == "obligation" {
-            let linked = linkedExpensesByObligation[r.id] ?? 0
-            let amt = r.amountMinor ?? 0
-            if r.frequency == "monthly" {
-                let remaining = max(0, amt - linked)
-                obligationsMinor += remaining
-            } else if r.frequency == "weekly" {
-                let regDate = r.date ?? today
-                guard let (ry, rm, rd) = parseYmd(regDate) else { continue }
-                let weekday = weekdayFromEpochDays(daysSinceEpoch(year: ry, month: rm, day: rd))
-                let startDate = regDate > "\(currentMonthStr)-01" ? regDate : "\(currentMonthStr)-01"
-                let count = countWeekdayDates(fromYmd: startDate, toYmd: endOfMonthYmd, targetWeekday: weekday)
-                let totalExpected = amt * Int64(count)
-                let remaining = max(0, totalExpected - linked)
-                obligationsMinor += remaining
-            }
-        }
+    for r in cleanState.records where r.kind == "obligation" {
+        obligationsMinor += FinanceBudgeting.paymentStatus(cleanState, obligation: r, today: today).unpaidMinor
     }
 
     // 6. Planned income (informational, never increases balance/spendable)
@@ -1411,12 +1396,15 @@ public func parseFinanceText(
         }
 
         let category: String
-        if regexTest("обед|еда|продукты|ужин|кафе", in: lower) {
-            category = "Еда"
+        // The same names statements and limits use (MerchantCategories), so typed and imported spending add up.
+        if regexTest("обед|ужин|завтрак|кафе|ресторан|кофе", in: lower) {
+            category = "Кафе и рестораны"
+        } else if regexTest("еда|продукт", in: lower) {
+            category = "Продукты"
         } else if regexTest("такси|автобус|метро|транспорт|проезд", in: lower) {
             category = "Транспорт"
-        } else if regexTest("тариф|телефон|интернет", in: lower) {
-            category = "Связь"
+        } else if regexTest("тариф|телефон|интернет|связь", in: lower) {
+            category = "Связь и интернет"
         } else {
             category = "Без категории"
         }

@@ -168,7 +168,7 @@ final class FinanceDomainTests: XCTestCase {
         XCTAssertEqual(drafts.count, 1)
         XCTAssertEqual(drafts[0].kind, "expense")
         XCTAssertEqual(drafts[0].amountMinor, 250000)
-        XCTAssertEqual(drafts[0].category, "Еда")
+        XCTAssertEqual(drafts[0].category, "Кафе и рестораны")
         XCTAssertEqual(drafts[0].date, "2026-05-01")
     }
 

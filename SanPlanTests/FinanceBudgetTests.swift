@@ -345,4 +345,152 @@ final class FinanceBudgetTests: XCTestCase {
         XCTAssertEqual(FinanceBudgeting.money(0), "0 ₸")
         XCTAssertEqual(FinanceBudgeting.money(123_456_789_00), "123 456 789 ₸")
     }
+
+    // MARK: Review fixes
+
+    /// Kaspi closes on 1 Nov, Halyk on 10 Nov. Halyk's later operations are taken back to 1 Nov, so a hand-entered
+    /// operation and a reconciliation in between still count.
+    func testBalanceStartsFromTheOldestStatementSoLaterRecordsCount() throws {
+        var state = FinanceState(records: [
+            op("h0", "expense", 5_000, "2026-11-01", category: "Продукты", importId: "h"),
+            op("h1", "expense", 30_000, "2026-11-05", category: "Продукты", importId: "h"),
+            op("h2", "income", 10_000, "2026-11-08", category: "Зарплата", importId: "h"),
+            op("m1", "expense", 4_000, "2026-11-06", category: "Кафе и рестораны"),
+        ])
+        state.imports = [
+            FinanceImport(id: "k", bank: "Kaspi", fileName: "k.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-02",
+                          count: 0, closingMinor: 100_000_00, closingDate: "2026-11-01"),
+            FinanceImport(id: "h", bank: "Halyk", fileName: "h.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-10",
+                          count: 3, closingMinor: 200_000_00, closingDate: "2026-11-10"),
+        ]
+        StatementImport.rebuildBalance(&state)
+        let checkpoint = try XCTUnwrap(state.records.first { $0.id == StatementImport.balanceRecordId })
+        XCTAssertEqual(checkpoint.date, "2026-11-01")
+        XCTAssertEqual(checkpoint.amountMinor, 320_000_00)
+
+        var snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
+        XCTAssertEqual(snap.onAccountsMinor, (300_000 - 4_000) * 100, "both closing balances, less the hand-entered spending")
+        XCTAssertEqual(snap.asOf, "2026-11-01", "freshness is the oldest account's")
+
+        state = try FinanceBudgeting.reconcile(state, totalMinor: 250_000_00, today: "2026-11-07", id: "r1")
+        snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
+        XCTAssertEqual(snap.onAccountsMinor, 260_000_00, "the reconciliation stands, plus Halyk's income after it")
+    }
+
+    /// Mondays of November 2026: 2, 9, 16, 23, 30. Charges already past are in the balance; only the ones ahead stay.
+    func testWeeklyPaymentKeepsOnlyTheChargesAhead() throws {
+        let gym = FinanceRecord(id: "gym", kind: "obligation", title: "Зал", amountMinor: 10_000_00, date: "2026-11-02", frequency: "weekly")
+        var state = FinanceState(records: [FinanceRecord(id: "b", kind: "balance", title: "Остаток", amountMinor: 300_000_00, date: "2026-11-01"), gym])
+
+        var status = FinanceBudgeting.paymentStatus(state, obligation: gym, today: "2026-11-10")
+        XCTAssertEqual(status.chargesLeft, 3)
+        XCTAssertEqual(status.unpaidMinor, 30_000_00)
+        XCTAssertFalse(status.isDue)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").unpaidPaymentsMinor, 30_000_00)
+
+        state.records.append(op("g16", "expense", 10_000, "2026-11-16", category: "Развлечения"))
+        state = try FinanceBudgeting.linkPayment(state, recordId: "g16", obligationId: "gym")
+        status = FinanceBudgeting.paymentStatus(state, obligation: gym, today: "2026-11-16")
+        XCTAssertTrue(status.isDue && status.isPaid)
+        XCTAssertEqual(status.unpaidMinor, 20_000_00)
+
+        state = try FinanceBudgeting.togglePaidByHand(state, obligationId: "gym", today: "2026-11-23")
+        status = FinanceBudgeting.paymentStatus(state, obligation: gym, today: "2026-11-23")
+        XCTAssertTrue(status.markedByHand)
+        XCTAssertEqual(status.unpaidMinor, 10_000_00)
+    }
+
+    func testPaymentMarkedPaidByHandAndUnmarked() throws {
+        var state = try FinanceBudgeting.togglePaidByHand(november(), obligationId: "rent", today: "2026-11-10")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").unpaidPaymentsMinor, 0)
+        XCTAssertTrue(FinanceBudgeting.paymentStatus(state, obligation: rent, today: "2026-11-10").markedByHand)
+        XCTAssertEqual(FinanceBudgeting.review(state, month: "2026-11", today: "2026-11-30").paidPayments, ["Аренда"])
+        XCTAssertFalse(FinanceBudgeting.paymentStatus(state, obligation: rent, today: "2026-12-03").isPaid, "the mark is for one month")
+
+        state = try FinanceBudgeting.togglePaidByHand(state, obligationId: "rent", today: "2026-11-10")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").unpaidPaymentsMinor, 120_000_00)
+    }
+
+    func testAPaymentIsNeverClosedTwiceAndAnOperationPaysOnlyOne() throws {
+        var state = november()
+        state.records.append(FinanceRecord(id: "phone", kind: "obligation", title: "Связь", amountMinor: 5_000_00, date: "2026-09-01", frequency: "monthly"))
+        state.records.append(op("pay1", "expense", 120_000, "2026-11-06", merchant: "Иванов А."))
+        state.records.append(op("pay2", "expense", 118_000, "2026-11-07", merchant: "Иванов А."))
+        state = try FinanceBudgeting.linkPayment(state, recordId: "pay1", obligationId: "rent")
+        XCTAssertThrowsError(try FinanceBudgeting.linkPayment(state, recordId: "pay2", obligationId: "rent"))
+        XCTAssertThrowsError(try FinanceBudgeting.linkPayment(state, recordId: "pay1", obligationId: "phone"))
+        XCTAssertTrue(FinanceBudgeting.paymentMatches(state, today: "2026-11-10").allSatisfy { $0.obligationId != "rent" })
+
+        let candidates = FinanceBudgeting.paymentCandidates(state, obligation: state.records.first { $0.id == "phone" }!, today: "2026-11-10")
+        XCTAssertEqual(candidates.first?.id, "cafe1", "the closest amount first, linked operations left out")
+        XCTAssertFalse(candidates.contains { $0.id == "pay1" })
+    }
+
+    func testSetAsideGrowsTheTargetOnlyWhenAskedAndOncePerIncome() throws {
+        var state = FinanceState(records: [op("sal", "income", 250_000, "2026-11-05", category: "Зарплата"), cushion])
+        XCTAssertThrowsError(try FinanceBudgeting.setAside(state, amountMinor: 460_000_00, goalId: "cushion"))
+        let grown = try FinanceBudgeting.setAside(state, amountMinor: 460_000_00, goalId: "cushion", raiseTarget: true)
+        XCTAssertEqual(grown.records.first { $0.id == "cushion" }?.savedMinor, 510_000_00)
+        XCTAssertEqual(grown.records.first { $0.id == "cushion" }?.amountMinor, 510_000_00)
+
+        state = try FinanceBudgeting.setAside(state, amountMinor: 25_000_00, goalId: "cushion", incomeId: "sal")
+        XCTAssertThrowsError(try FinanceBudgeting.setAside(state, amountMinor: 25_000_00, goalId: "cushion", incomeId: "sal"))
+        XCTAssertThrowsError(try FinanceBudgeting.setAside(state, amountMinor: 0, goalId: "cushion")) {
+            XCTAssertFalse(($0 as? FinanceError)?.errorDescription?.contains("Nothing") ?? true)
+        }
+    }
+
+    func testNoSetAsideOfferForOwnTransfersOrTopUps() {
+        var own = op("own", "income", 50_000, "2026-11-05", category: "Переводы", merchant: "Kaspi Gold")
+        own.note = StatementImport.ownTransferNote
+        let state = FinanceState(records: [own, op("top", "income", 40_000, "2026-11-06", category: "Пополнения"), cushion])
+        XCTAssertTrue(FinanceBudgeting.setAsideOffers(state, today: "2026-11-10").isEmpty)
+    }
+
+    func testPeopleAndCardNumbersStayOutOfHintsAndTheExport() {
+        for name in ["Айгерим К.", "Иванов А.А.", "А. Иванов", "ИП Сейткали", "ИВАНОВ АЛЕКСЕЙ", "Айгерим Кайратовна", "AIGERIM K."] {
+            XCTAssertTrue(FinanceBudgeting.looksLikePerson(name), name)
+        }
+        for name in ["Magnum", "ТОО ПРИМЕР", "MAGNUM CASH&CARRY", "Coffee Point", "Kaspi Gold"] {
+            XCTAssertFalse(FinanceBudgeting.looksLikePerson(name), name)
+        }
+        XCTAssertEqual(FinanceBudgeting.safeName("Halyk 4400 43** **** 1234"), "Halyk …")
+        XCTAssertNil(FinanceBudgeting.safeName("ИП Сейткали"))
+
+        var state = feed()
+        state.records.append(op("ip", "expense", 9_000, "2026-11-04", category: "Покупки", merchant: "ИП Сейткали", importId: "k"))
+        state.records.append(op("card", "expense", 7_000, "2026-11-04", category: "Покупки", merchant: "Halyk 4400 43** **** 1234", importId: "h"))
+        let text = FinanceBudgeting.exportText(state, today: "2026-11-10")
+        XCTAssertFalse(text.contains("Сейткали"))
+        XCTAssertFalse(text.contains("1234"))
+        XCTAssertTrue(text.contains("Halyk …"))
+    }
+
+    func testTypedCategoriesMatchStatementsAndOldOnesAreRead() throws {
+        XCTAssertEqual(try parseFinanceText("Купил продукты на 8000", today: "2026-11-10").first?.category, "Продукты")
+        XCTAssertEqual(try parseFinanceText("Оплатил интернет 5000", today: "2026-11-10").first?.category, "Связь и интернет")
+
+        let state = FinanceState(records: [
+            FinanceRecord(id: "a", kind: "expense", title: "Обед", amountMinor: 2_500_00, date: "2026-05-01", category: "Еда"),
+            FinanceRecord(id: "b", kind: "expense", title: "Магнум", amountMinor: 8_000_00, date: "2026-05-01", category: "Еда"),
+            FinanceRecord(id: "c", kind: "expense", title: "Тариф", amountMinor: 5_000_00, date: "2026-05-01", category: "Связь"),
+        ])
+        let clean = try validateFinance(state)
+        XCTAssertEqual(clean.records.map(\.category), ["Кафе и рестораны", "Продукты", "Связь и интернет"])
+        XCTAssertEqual(try validateFinance(clean), clean, "reading again changes nothing")
+    }
+
+    func testNoRunOutForecastInTheFirstDays() throws {
+        var state = FinanceState(records: [op("t1", "expense", 15_000, "2026-11-02", category: "Транспорт")])
+        state = try FinanceBudgeting.setLimits(state, ["Транспорт": 30_000_00])
+        let early = FinanceBudgeting.limitStatuses(state, month: "2026-11", today: "2026-11-03")
+        XCTAssertNil(early.first?.runsOutDay, "one purchase on the 2nd sets no pace")
+    }
+
+    func testTypedAmountsAreBounded() {
+        XCTAssertEqual(FinanceText.tenge("25 000"), 25_000)
+        XCTAssertNil(FinanceText.tenge(""))
+        XCTAssertNil(FinanceText.tenge("999999999999"), "twelve digits would overflow minor units in a sum")
+        XCTAssertNil(FinanceText.tenge("99999999999999999999"))
+    }
 }

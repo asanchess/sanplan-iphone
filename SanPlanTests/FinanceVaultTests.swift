@@ -62,7 +62,7 @@ final class FinanceVaultTests: XCTestCase {
             title: "Обед",
             amountMinor: 250000,
             date: "2026-05-01",
-            category: "Еда"
+            category: "Кафе и рестораны"
         ))
 
         let password = "my-secret-passphrase-123"

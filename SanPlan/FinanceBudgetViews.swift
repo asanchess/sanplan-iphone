@@ -1,8 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// Applies a pure change to the finance state and reports the result; nil message means no status line.
-typealias FinanceApply = (_ message: String?, _ change: (FinanceState) throws -> FinanceState) -> Void
+/// Applies a pure change to the finance state; nil message means no status line. Returns nil once saved, else
+/// the reason, so a sheet closes only on success and shows the reason otherwise.
+struct FinanceApply {
+    let run: (_ message: String?, _ change: (FinanceState) throws -> FinanceState) -> String?
+
+    @discardableResult
+    func callAsFunction(_ message: String?, _ change: (FinanceState) throws -> FinanceState) -> String? {
+        run(message, change)
+    }
+}
 
 // MARK: - Text and shared helpers
 
@@ -64,6 +72,13 @@ enum FinanceText {
         minor > 0 ? "+" + money(minor) : money(minor)
     }
 
+    /// Whole tenge typed into a field: digits only, at most a hundred billion, so minor units never overflow.
+    static func tenge(_ raw: String) -> Int64? {
+        let digits = raw.filter(\.isNumber)
+        guard !digits.isEmpty, digits.count <= 11, let value = Int64(digits), value <= 100_000_000_000 else { return nil }
+        return value
+    }
+
     /// Whole tenge for an editable field: «25000».
     static func field(_ minor: Int64?) -> String {
         guard let minor, minor > 0 else { return "" }
@@ -104,7 +119,7 @@ struct FilterChip: View {
         .font(.subheadline.weight(.medium))
         .foregroundColor(isActive ? DS.Colors.onAccent : DS.Colors.textPrimary)
         .padding(.horizontal, 12)
-        .frame(minHeight: 36)
+        .frame(minHeight: DS.Metrics.minHitTarget)
         .background(isActive ? DS.Colors.accent : DS.Colors.surfaceRaised)
         .clipShape(Capsule())
         .contentShape(Capsule())
@@ -185,7 +200,7 @@ struct CleanHeader: View {
     private var perDay: String? {
         guard let s = snapshot, s.limitsRemainingMinor > 0 else { return nil }
         let rounded = s.flexiblePerDayMinor / 10_000 * 10_000
-        return "~" + FinanceText.money(rounded) + "/день"
+        return "~" + FinanceText.money(rounded) + "/день на гибкие траты"
     }
 
     private var amountText: String {
@@ -203,6 +218,8 @@ struct CleanHeader: View {
             return ("Остаток не указан: добавь его через «+» или загрузи выписку", true)
         }
         if clean < 0 { return ("Не хватает \(FinanceText.money(-clean)) на план месяца", true) }
+        // Without limits nothing is kept for everyday spending, so «Чистыми» is not money free to spend.
+        if s.limits.isEmpty { return ("Лимитов нет — на повседневные траты ничего не учтено. Задать их можно в «Плане»", true) }
         guard let asOf = s.asOf else { return ("на счетах", false) }
         if s.isStale { return ("остаток на \(FinanceText.dayMonth(asOf)) · пора загрузить свежую выписку", true) }
         return ("на счетах на \(FinanceText.dayMonth(asOf))", false)
@@ -211,25 +228,26 @@ struct CleanHeader: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("Чистыми")
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    Text(amountText)
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                        .foregroundColor(amountColor)
-                    if let perDay {
-                        Text("· " + perDay)
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundColor(DS.Colors.textSecondary)
+                // One line when it fits; on a small phone or with large text the daily amount moves under the sum.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        label
+                        amount
+                        if let perDay { perDayText("· " + perDay) }
+                        Spacer(minLength: 0)
+                        infoIcon
                     }
-                    Spacer(minLength: 0)
-                    Image(systemName: "info.circle")
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            label
+                            amount.minimumScaleFactor(0.6).lineLimit(1)
+                            Spacer(minLength: 0)
+                            infoIcon
+                        }
+                        if let perDay { perDayText(perDay).fixedSize(horizontal: false, vertical: true) }
+                    }
                 }
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
                 Text(note.text)
                     .font(.caption)
                     .foregroundColor(note.warns ? DS.Colors.warning : DS.Colors.textSecondary)
@@ -247,10 +265,27 @@ struct CleanHeader: View {
         .accessibilityHint("Показать, из чего складывается сумма")
         .accessibilityIdentifier("clean-header")
     }
+
+    private var label: some View {
+        Text("Чистыми").font(.subheadline).foregroundColor(DS.Colors.textSecondary)
+    }
+
+    private var amount: some View {
+        Text(amountText).font(.title3.weight(.semibold).monospacedDigit()).foregroundColor(amountColor)
+    }
+
+    private func perDayText(_ text: String) -> some View {
+        Text(text).font(.subheadline.monospacedDigit()).foregroundColor(DS.Colors.textSecondary)
+    }
+
+    private var infoIcon: some View {
+        Image(systemName: "info.circle").font(.footnote).foregroundColor(DS.Colors.textSecondary)
+    }
 }
 
 struct CleanBreakdownSheet: View {
     let snapshot: BudgetSnapshot?
+    let onSetLimits: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -278,9 +313,10 @@ struct CleanBreakdownSheet: View {
                         MoneyRow(label: "Дней до конца месяца, с сегодняшним", value: "\(s.daysLeft)")
                         MoneyRow(label: "В день", value: FinanceText.money(s.flexiblePerDayMinor), emphasized: true)
                         if s.limits.isEmpty {
-                            Text("Лимитов на этот месяц нет — их можно задать во вкладке «План».")
+                            Text("Лимитов на этот месяц нет, поэтому на повседневные траты в «Чистыми» ничего не оставлено.")
                                 .font(.caption)
                                 .foregroundColor(DS.Colors.textSecondary)
+                            PillButton("Задать лимиты", style: .secondary, action: onSetLimits)
                         }
                     }
                 }
@@ -308,6 +344,7 @@ struct FinanceOverviewTab: View {
     let onOpenPlan: () -> Void
 
     @State private var reviewMonth: MonthRef? = nil
+    @State private var creatingEnvelope = false
 
     private var month: String { String(today.prefix(7)) }
 
@@ -333,6 +370,9 @@ struct FinanceOverviewTab: View {
         .sheet(item: $reviewMonth) { ref in
             MonthReviewSheet(store: store, today: today, month: ref.id, apply: apply) { reviewMonth = nil }
         }
+        .sheet(isPresented: $creatingEnvelope) {
+            NewEnvelopeSheet(today: today, apply: apply) { creatingEnvelope = false }
+        }
     }
 
     private func hintsCard(_ hints: [FinanceHint]) -> some View {
@@ -349,7 +389,7 @@ struct FinanceOverviewTab: View {
     private func pendingReviewCard(_ pending: String) -> some View {
         let review = FinanceBudgeting.review(store.state, month: pending, today: today)
         let goal = FinanceEnvelopes.savingsGoal(store.state)
-        let offer = min(review.savedOnLimitsMinor, goal.map(FinanceEnvelopes.room) ?? 0)
+        let offer = goal == nil ? 0 : review.savedOnLimitsMinor
         return Card {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                 SectionHeader("Итоги \(FinanceText.monthGenitive(pending))")
@@ -371,7 +411,7 @@ struct FinanceOverviewTab: View {
                 if let goal, offer > 0 {
                     PillButton("Отложить \(FinanceText.money(offer)) в «\(goal.title)»", style: .primary) {
                         apply("Отложено \(FinanceText.money(offer)).") { state in
-                            let saved = try FinanceBudgeting.setAside(state, amountMinor: offer, goalId: goal.id)
+                            let saved = try FinanceBudgeting.setAside(state, amountMinor: offer, goalId: goal.id, raiseTarget: true)
                             return try FinanceBudgeting.markReviewed(saved, month: pending)
                         }
                     }
@@ -395,10 +435,10 @@ struct FinanceOverviewTab: View {
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                     SectionHeader("Отложить с дохода")
                     if goal == nil {
-                        Text("Конверта для накоплений пока нет. Создай его во вкладке «План», например «Подушка».")
+                        Text("Конверта для накоплений пока нет.")
                             .font(.subheadline)
                             .foregroundColor(DS.Colors.textSecondary)
-                        PillButton("Открыть план", style: .secondary, action: onOpenPlan)
+                        PillButton("Создать конверт", icon: "plus", style: .primary) { creatingEnvelope = true }
                     }
                     ForEach(offers.prefix(3)) { offer in
                         SetAsideOfferRow(offer: offer, goal: goal, apply: apply)
@@ -463,17 +503,23 @@ struct SetAsideOfferRow: View {
     let apply: FinanceApply
 
     var body: some View {
-        let amount = min(offer.suggestedMinor, goal.map(FinanceEnvelopes.room) ?? 0)
+        let amount = offer.suggestedMinor
+        let grows = goal.map { FinanceEnvelopes.room($0) < amount } ?? false
         VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
             Text("\(offer.incomeTitle) · \(FinanceText.money(offer.incomeMinor)) · \(FinanceText.dayMonth(offer.date))")
                 .font(.subheadline)
                 .foregroundColor(DS.Colors.textPrimary)
                 .lineLimit(2)
+            if let goal, grows {
+                Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + amount)).")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
             HStack(spacing: DS.Metrics.spacing12) {
                 if let goal, amount > 0 {
                     PillButton("Отложить \(FinanceText.money(amount))", style: .primary) {
                         apply("Отложено \(FinanceText.money(amount)) в «\(goal.title)».") {
-                            try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, incomeId: offer.incomeId)
+                            try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, incomeId: offer.incomeId, raiseTarget: true)
                         }
                     }
                 }
@@ -657,10 +703,6 @@ struct FinancePlanTab: View {
 
     private var paymentsCard: some View {
         let obligations = store.state.records.filter { $0.kind == "obligation" }
-        var paidBy: [String: Int64] = [:]
-        for r in store.state.records where r.kind == "expense" && r.excluded != true && (r.date ?? "").hasPrefix(month) {
-            if let id = r.obligationId { paidBy[id, default: 0] += r.amountMinor ?? 0 }
-        }
         return Card {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                 SectionHeader("Обязательные платежи")
@@ -672,8 +714,13 @@ struct FinancePlanTab: View {
                 ForEach(obligations) { ob in
                     PaymentRow(
                         obligation: ob,
-                        paidMinor: paidBy[ob.id] ?? 0,
-                        onMark: { payingObligation = ob }
+                        status: FinanceBudgeting.paymentStatus(store.state, obligation: ob, today: today),
+                        onMark: { payingObligation = ob },
+                        onUnmark: {
+                            apply("Отметка об оплате «\(ob.title)» снята.") {
+                                try FinanceBudgeting.togglePaidByHand($0, obligationId: ob.id, today: today)
+                            }
+                        }
                     )
                 }
             }
@@ -734,11 +781,13 @@ struct FinancePlanTab: View {
 
 struct PaymentRow: View {
     let obligation: FinanceRecord
-    let paidMinor: Int64
+    let status: PaymentStatus
     let onMark: () -> Void
+    let onUnmark: () -> Void
 
     private var isMonthly: Bool { obligation.frequency == "monthly" }
-    private var isPaid: Bool { isMonthly && paidMinor * 10 >= (obligation.amountMinor ?? 0) * 9 }
+    /// A weekly payment shows a tick only on the day its charge is paid.
+    private var isPaid: Bool { status.isDue && status.isPaid }
 
     var body: some View {
         HStack(alignment: .center, spacing: DS.Metrics.spacing12) {
@@ -749,7 +798,7 @@ struct PaymentRow: View {
                 Text(obligation.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(DS.Colors.textPrimary)
-                Text(status)
+                Text(statusText)
                     .font(.caption)
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -757,20 +806,30 @@ struct PaymentRow: View {
             Text(FinanceText.money(obligation.amountMinor ?? 0))
                 .font(.subheadline.monospacedDigit())
                 .foregroundColor(DS.Colors.textPrimary)
-            if isMonthly && !isPaid {
+            if status.isDue && !status.isPaid {
                 Button("Оплачен", action: onMark)
                     .font(.caption.weight(.semibold))
                     .foregroundColor(DS.Colors.accent)
                     .frame(minWidth: DS.Metrics.minHitTarget, minHeight: DS.Metrics.minHitTarget)
                     .accessibilityLabel("Отметить оплату «\(obligation.title)»")
+            } else if status.markedByHand {
+                Button("Снять", action: onUnmark)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(DS.Colors.accent)
+                    .frame(minWidth: DS.Metrics.minHitTarget, minHeight: DS.Metrics.minHitTarget)
+                    .accessibilityLabel("Снять отметку об оплате «\(obligation.title)»")
             }
         }
     }
 
-    private var status: String {
-        if !isMonthly { return "каждую неделю" }
-        if isPaid { return "оплачен" }
-        if paidMinor > 0 { return "оплачено \(FinanceText.money(paidMinor)), ожидается остаток" }
+    private var statusText: String {
+        if !isMonthly {
+            let left = status.chargesLeft == 0 ? "в этом месяце больше нет" : "до конца месяца ещё \(status.chargesLeft)"
+            return (isPaid ? "сегодня оплачен · " : "каждую неделю · ") + left
+        }
+        if status.markedByHand { return "оплачен, отмечен вручную" }
+        if status.isPaid { return "оплачен" }
+        if status.paidMinor > 0 { return "оплачено \(FinanceText.money(status.paidMinor)), ожидается остаток" }
         return "ожидается"
     }
 }
@@ -965,14 +1024,17 @@ struct LimitsEditSheet: View {
     private func save() {
         var limits: [String: Int64] = [:]
         for (c, raw) in values where !raw.isEmpty {
-            guard let tenge = Int64(raw), tenge > 0, tenge < 1_000_000_000 else {
+            guard let tenge = FinanceText.tenge(raw), tenge > 0, tenge < 1_000_000_000 else {
                 error = "Проверь сумму у «\(c)»."
                 return
             }
             limits[c] = tenge * 100
         }
-        apply("Лимиты сохранены.") { try FinanceBudgeting.setLimits($0, limits) }
-        onClose()
+        if let failure = apply("Лимиты сохранены.", { try FinanceBudgeting.setLimits($0, limits) }) {
+            error = failure
+        } else {
+            onClose()
+        }
     }
 }
 
@@ -983,17 +1045,24 @@ struct PaymentLinkSheet: View {
     let apply: FinanceApply
     let onClose: () -> Void
 
+    @State private var error: String? = nil
+
     var body: some View {
-        let month = String(today.prefix(7))
-        let candidates = store.state.records
-            .filter { $0.kind == "expense" && $0.excluded != true && $0.obligationId == nil && ($0.date ?? "").hasPrefix(month) }
-            .sorted { ($0.date ?? "") > ($1.date ?? "") }
+        let candidates = FinanceBudgeting.paymentCandidates(store.state, obligation: obligation, today: today)
         FinanceSheet(title: "Чем оплачен «\(obligation.title)»", onClose: onClose) {
-            Text("Выбери операцию этого месяца. Получатель запомнится, и в следующий раз приложение предложит его само.")
+            PillButton("Оплачен без операции", icon: "checkmark", style: .primary) {
+                finish(apply("«\(obligation.title)» отмечен оплаченным.") {
+                    try FinanceBudgeting.togglePaidByHand($0, obligationId: obligation.id, today: today)
+                })
+            }
+            Text("Наличными, с чужой карты или выписки ещё нет. Или выбери операцию ниже — сначала самые близкие по сумме; получатель запомнится, и в следующий раз приложение предложит его само.")
                 .font(.caption)
                 .foregroundColor(DS.Colors.textSecondary)
+            if let error {
+                Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
+            }
             if candidates.isEmpty {
-                Text("В этом месяце нет подходящих расходов. Добавь расход через «+» или загрузи выписку.")
+                Text("В этом месяце нет расходов без отметки. Можно добавить расход через «+» или загрузить выписку.")
                     .font(.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -1001,10 +1070,9 @@ struct PaymentLinkSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(candidates) { r in
                         Button {
-                            apply("«\(obligation.title)» оплачен.") {
+                            finish(apply("«\(obligation.title)» оплачен.") {
                                 try FinanceBudgeting.linkPayment($0, recordId: r.id, obligationId: obligation.id)
-                            }
-                            onClose()
+                            })
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -1026,6 +1094,10 @@ struct PaymentLinkSheet: View {
             }
         }
     }
+
+    private func finish(_ failure: String?) {
+        if let failure { error = failure } else { onClose() }
+    }
 }
 
 struct EnvelopeMoveSheet: View {
@@ -1035,6 +1107,8 @@ struct EnvelopeMoveSheet: View {
 
     @State private var amount = ""
     @State private var error: String? = nil
+    /// Set when the amount is above what is left to the target; the next tap grows the target.
+    @State private var growTarget = false
 
     private var limit: Int64 { move.isWithdraw ? (move.goal.savedMinor ?? 0) : FinanceEnvelopes.room(move.goal) }
 
@@ -1046,31 +1120,44 @@ struct EnvelopeMoveSheet: View {
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
+                .onChange(of: amount) { _, _ in growTarget = false }
             if let error {
-                Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
+                Text(error).font(.caption).foregroundColor(growTarget ? DS.Colors.textSecondary : DS.Colors.destructive)
             }
-            PillButton(move.isWithdraw ? "Забрать" : "Отложить", style: .primary, isEnabled: !amount.isEmpty) { save() }
+            PillButton(growTarget ? "Отложить и поднять цель" : (move.isWithdraw ? "Забрать" : "Отложить"),
+                       style: .primary, isEnabled: !amount.isEmpty) { save() }
         }
         .presentationDetents([.medium])
     }
 
     private func save() {
-        guard let tenge = Int64(amount.filter(\.isNumber)), tenge > 0 else {
+        guard let tenge = FinanceText.tenge(amount), tenge > 0 else {
             error = "Введи сумму в тенге."
             return
         }
         let minor = tenge * 100
-        guard minor <= limit else {
-            error = move.isWithdraw ? "Отложено меньше." : "Это больше, чем осталось до цели."
-            return
+        if minor > limit {
+            if move.isWithdraw {
+                error = "Отложено меньше."
+                return
+            }
+            if !growTarget {
+                growTarget = true
+                error = "Это больше, чем осталось до цели. Цель вырастет до \(FinanceText.money((move.goal.savedMinor ?? 0) + minor))."
+                return
+            }
         }
         let goalId = move.goal.id
+        let raise = growTarget
+        let failure: String?
         if move.isWithdraw {
-            apply("Забрано \(FinanceText.money(minor)).") { try FinanceBudgeting.withdraw($0, amountMinor: minor, goalId: goalId) }
+            failure = apply("Забрано \(FinanceText.money(minor)).") { try FinanceBudgeting.withdraw($0, amountMinor: minor, goalId: goalId) }
         } else {
-            apply("Отложено \(FinanceText.money(minor)).") { try FinanceBudgeting.setAside($0, amountMinor: minor, goalId: goalId) }
+            failure = apply("Отложено \(FinanceText.money(minor)).") {
+                try FinanceBudgeting.setAside($0, amountMinor: minor, goalId: goalId, raiseTarget: raise)
+            }
         }
-        onClose()
+        if let failure { error = failure; growTarget = false } else { onClose() }
     }
 }
 
@@ -1104,21 +1191,25 @@ struct NewEnvelopeSheet: View {
 
     private func save() {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let goal = Int64(target.filter(\.isNumber)), goal > 0 else {
+        guard let goal = FinanceText.tenge(target), goal > 0 else {
             error = "Введи сумму цели в тенге."
             return
         }
-        let already = Int64(saved.filter(\.isNumber)) ?? 0
+        guard saved.filter(\.isNumber).isEmpty || FinanceText.tenge(saved) != nil else {
+            error = "Проверь, сколько уже отложено."
+            return
+        }
+        let already = FinanceText.tenge(saved) ?? 0
         guard already <= goal else {
             error = "Отложено больше, чем цель."
             return
         }
         let draft = FinanceDraft(kind: "goal", title: name, amountMinor: goal * 100, savedMinor: already * 100)
         let date = today
-        apply("Конверт «\(name)» создан.") {
+        let failure = apply("Конверт «\(name)» создан.") {
             try commitFinance(state: $0, drafts: [draft], batchId: UUID().uuidString, nowDate: date)
         }
-        onClose()
+        if let failure { error = failure } else { onClose() }
     }
 }
 
@@ -1242,7 +1333,7 @@ struct OperationsFeed: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(DS.Colors.onAccent)
                         .padding(.horizontal, 12)
-                        .frame(minHeight: 36)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
                         .background(DS.Colors.accent)
                         .clipShape(Capsule())
                     }
@@ -1427,14 +1518,14 @@ struct ReconcileSheet: View {
     }
 
     private func save() {
-        guard let tenge = Int64(amount.filter(\.isNumber)), tenge >= 0, tenge < 100_000_000_000 else {
+        guard let tenge = FinanceText.tenge(amount) else {
             error = "Введи сумму в тенге."
             return
         }
         let date = today
-        apply("Остаток сверен.") {
+        let failure = apply("Остаток сверен.") {
             try FinanceBudgeting.reconcile($0, totalMinor: tenge * 100, today: date, id: UUID().uuidString)
         }
-        onClose()
+        if let failure { error = failure } else { onClose() }
     }
 }

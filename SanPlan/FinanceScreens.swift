@@ -51,12 +51,8 @@ public struct FinanceScreen: View {
         self._showSettings = showSettings
     }
 
-    private var todayString: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "Asia/Qyzylorda") ?? TimeZone(secondsFromGMT: 5 * 3600)!
-        return formatter.string(from: Date())
-    }
+    /// Gregorian day in Qyzylorda whatever calendar the phone uses.
+    private var todayString: String { FinanceText.today() }
 
     private var currentMonthString: String {
         String(todayString.prefix(7))
@@ -200,10 +196,13 @@ public struct FinanceScreen: View {
             )
         }
         .sheet(isPresented: $showBreakdown) {
-            CleanBreakdownSheet(snapshot: snapshot) { showBreakdown = false }
+            CleanBreakdownSheet(snapshot: snapshot, onSetLimits: {
+                showBreakdown = false
+                tab = .plan
+            }) { showBreakdown = false }
         }
         .sheet(isPresented: $showReconcile) {
-            ReconcileSheet(today: todayString, apply: applyChange) { showReconcile = false }
+            ReconcileSheet(today: todayString, apply: financeApply) { showReconcile = false }
         }
         .onChange(of: store.state.records.isEmpty) { _, isEmpty in
             // Sign-out or a reset empties the state: nothing typed into the feed may outlive it.
@@ -224,7 +223,7 @@ public struct FinanceScreen: View {
             FinanceOverviewTab(
                 store: store,
                 today: todayString,
-                apply: applyChange,
+                apply: financeApply,
                 onCategory: { category in
                     ledgerFilter = LedgerFilter(
                         month: currentMonthString,
@@ -237,7 +236,7 @@ public struct FinanceScreen: View {
                 onOpenPlan: { tab = .plan }
             )
         case .plan:
-            FinancePlanTab(store: store, today: todayString, apply: applyChange)
+            FinancePlanTab(store: store, today: todayString, apply: financeApply)
         case .operations:
             OperationsFeed(store: store, filter: $ledgerFilter, expanded: $feedExpanded) { recordToEdit = $0 }
             ReconcileCard(snapshot: snapshot) { showReconcile = true }
@@ -284,15 +283,20 @@ public struct FinanceScreen: View {
     }
 
     /// Every budget change goes through here: one pure function on the state, then the encrypted save.
-    private func applyChange(_ message: String?, _ change: (FinanceState) throws -> FinanceState) {
+    /// Nil when the change is saved, else the reason, so a sheet can stay open and show it.
+    private func applyChange(_ message: String?, _ change: (FinanceState) throws -> FinanceState) -> String? {
         errorMessage = nil
         do {
             try store.replaceState(with: change(store.state), today: todayString)
             statusMessage = message
+            return nil
         } catch {
             errorMessage = error.localizedDescription
+            return error.localizedDescription
         }
     }
+
+    private var financeApply: FinanceApply { FinanceApply(run: applyChange) }
 
     // MARK: - Header Bar
 

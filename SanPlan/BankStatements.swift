@@ -462,18 +462,33 @@ public enum StatementImport {
         if record.note == nil { record.note = ownTransferNote }
     }
 
-    /// One checkpoint: the sum of each statement's latest closing balance, dated at the latest of them, placed after
-    /// the imported operations so ones on that day are already inside it.
+    /// One checkpoint on the oldest of the accounts' latest closing days, placed after the imported operations so
+    /// ones on that day are already inside it. An account whose statement goes further has its later operations
+    /// taken back out of its closing balance; the summary adds them again with everything else after that day. So
+    /// hand-entered operations and a reconciliation made after the older statement still count.
     static func rebuildBalance(_ state: inout FinanceState) {
         state.records.removeAll { $0.id == balanceRecordId }
-        let latestPerAccount = Dictionary(grouping: (state.imports ?? []).filter { $0.closingMinor != nil && $0.closingDate != nil }) {
-            "\($0.bank)|\($0.account ?? "")"
-        }.compactMap { $0.value.max { ($0.closingDate ?? "") < ($1.closingDate ?? "") } }
-        guard !latestPerAccount.isEmpty else { return }
+        func account(_ i: FinanceImport) -> String { "\(i.bank)|\(i.account ?? "")" }
+        var latest: [String: FinanceImport] = [:]
+        for i in state.imports ?? [] where i.closingMinor != nil && i.closingDate != nil {
+            if let have = latest[account(i)], (have.closingDate ?? "") >= (i.closingDate ?? "") { continue }
+            latest[account(i)] = i
+        }
+        guard let date = latest.values.compactMap(\.closingDate).min() else { return }
+        var accountOfImport: [String: String] = [:]
+        for i in state.imports ?? [] { accountOfImport[i.id] = account(i) }
+
+        var total: Int64 = 0
+        for i in latest.values { total += i.closingMinor ?? 0 }
+        // The same records the summary counts, so it lands back on each closing balance exactly.
+        for r in state.records where r.excluded != true && (r.kind == "income" || r.kind == "expense") {
+            guard let importId = r.importId, let key = accountOfImport[importId], let closing = latest[key]?.closingDate,
+                  let day = r.date, day > date, day <= closing else { continue }
+            let amount = r.amountMinor ?? 0
+            total += r.kind == "income" ? -amount : amount
+        }
         // An overdrawn account lowers the sum. A balance below zero has no checkpoint in the money model, so none is set.
-        let total = latestPerAccount.reduce(Int64(0)) { $0 + ($1.closingMinor ?? 0) }
         guard total >= 0 else { return }
-        let date = latestPerAccount.compactMap(\.closingDate).max() ?? ""
         state.records.append(FinanceRecord(id: balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: total, date: date))
     }
 

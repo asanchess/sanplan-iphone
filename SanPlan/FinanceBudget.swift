@@ -23,6 +23,9 @@ public struct FinanceBudget: Codable, Equatable {
     public var handledIncomes: [String]?
     /// Months whose review card the owner closed.
     public var reviewedMonths: [String]?
+    /// Payments marked paid without an operation: «obligationId|yyyy-MM» for a monthly one,
+    /// «obligationId|yyyy-MM-dd» for one weekly charge.
+    public var manualPaid: [String]?
 
     public init(
         limits: [String: Int64]? = nil,
@@ -32,7 +35,8 @@ public struct FinanceBudget: Codable, Equatable {
         obligationMerchants: [String: String]? = nil,
         dismissedMatches: [String]? = nil,
         handledIncomes: [String]? = nil,
-        reviewedMonths: [String]? = nil
+        reviewedMonths: [String]? = nil,
+        manualPaid: [String]? = nil
     ) {
         self.limits = limits
         self.savePercent = savePercent
@@ -42,6 +46,7 @@ public struct FinanceBudget: Codable, Equatable {
         self.dismissedMatches = dismissedMatches
         self.handledIncomes = handledIncomes
         self.reviewedMonths = reviewedMonths
+        self.manualPaid = manualPaid
     }
 
     static let maxLimits = 64
@@ -83,6 +88,10 @@ public struct FinanceBudget: Codable, Equatable {
         }
         out.handledIncomes = answers(b.handledIncomes) { ids.contains($0) }
         out.reviewedMonths = answers(b.reviewedMonths) { isValidMonthString($0) }
+        out.manualPaid = answers(b.manualPaid) { mark in
+            let parts = mark.split(separator: "|").map(String.init)
+            return parts.count == 2 && obligations.contains(parts[0]) && (isValidMonthString(parts[1]) || isValidDateString(parts[1]))
+        }
         return out == FinanceBudget() ? nil : out
     }
 
@@ -128,6 +137,21 @@ public struct BudgetSnapshot: Equatable {
     public let daysLeft: Int
 
     public var isStale: Bool { (statementAgeDays ?? 0) > 7 }
+}
+
+/// Where one payment of the plan stands this month. The header, the plan and the month review all read this.
+public struct PaymentStatus: Equatable {
+    /// Operations linked to it this month, up to today.
+    public let paidMinor: Int64
+    /// Monthly: paid this month. Weekly: today's charge is paid, or none falls today.
+    public let isPaid: Bool
+    public let markedByHand: Bool
+    /// What «Чистыми» still keeps for it until the month ends.
+    public let unpaidMinor: Int64
+    /// Weekly: charges still ahead this month, today's included while unpaid. Monthly: 1 while unpaid.
+    public let chargesLeft: Int
+    /// Weekly: a charge falls today, so it can be marked. Monthly: always.
+    public let isDue: Bool
 }
 
 public struct PaymentMatch: Equatable, Identifiable {
@@ -230,6 +254,8 @@ public enum FinanceBudgeting {
     static let incomeCategories: Set<String> = ["Зарплата", "Пополнения"]
     /// Categories whose merchants are people or cash, never named in hints or the export.
     static let personalCategories: Set<String> = ["Переводы", "Наличные", "Пополнения", "Зарплата"]
+    /// Money the owner moved in, not earned: no set-aside offer for it.
+    static let personalIncomeCategories: Set<String> = ["Пополнения"]
 
     // MARK: Plan settings
 
@@ -261,7 +287,8 @@ public enum FinanceBudgeting {
             let spent = spentBy[entry.key] ?? 0
             let projected = days.elapsed > 0 ? spent * Int64(days.total) / Int64(days.elapsed) : spent
             var runsOut: Int?
-            if spent > 0, spent < limit, projected > limit, days.elapsed > 0, days.elapsed < days.total {
+            // Fewer than five days in, one purchase would set the pace for the whole month.
+            if spent > 0, spent < limit, projected > limit, days.elapsed >= 5, days.elapsed < days.total {
                 // The day the running total reaches the limit at today's pace, rounded up.
                 let day = Int((limit * Int64(days.elapsed) + spent - 1) / spent)
                 runsOut = day <= days.total ? day : nil
@@ -333,14 +360,12 @@ public enum FinanceBudgeting {
         let dismissed = Set(state.budget?.dismissedMatches ?? [])
         let learned = state.budget?.obligationMerchants ?? [:]
         let thisMonth = counted(state).filter { $0.kind == "expense" && monthOf($0.date) == month && ($0.date ?? "") <= today }
-        var paid: [String: Int64] = [:]
-        for r in thisMonth { if let o = r.obligationId { paid[o, default: 0] += r.amountMinor ?? 0 } }
         let candidates = thisMonth.filter { $0.obligationId == nil && !isOwnTransfer($0) }
 
         var used = Set<String>()
         var out: [PaymentMatch] = []
         for ob in state.records where ob.kind == "obligation" && ob.frequency == "monthly" {
-            guard let amount = ob.amountMinor, (paid[ob.id] ?? 0) < amount else { continue }
+            guard let amount = ob.amountMinor, !paymentStatus(state, obligation: ob, today: today).isPaid else { continue }
             let words = stems(ob.title)
             let fitting = candidates.filter { r in
                 guard !used.contains(r.id), !dismissed.contains(ob.id + "|" + r.id), let a = r.amountMinor,
@@ -363,9 +388,17 @@ public enum FinanceBudgeting {
     /// merchant for the next months. The summary then stops counting that payment as unpaid.
     public static func linkPayment(_ state: FinanceState, recordId: String, obligationId: String) throws -> FinanceState {
         var next = try validateFinance(state)
-        guard next.records.contains(where: { $0.id == obligationId && $0.kind == "obligation" }),
+        guard let ob = next.records.first(where: { $0.id == obligationId && $0.kind == "obligation" }),
               let i = next.records.firstIndex(where: { $0.id == recordId && $0.kind == "expense" }) else {
-            throw FinanceError.invalidState("Unknown payment or operation")
+            throw FinanceError.invalidState("Платёж или операция не найдены")
+        }
+        guard next.records[i].obligationId == nil else {
+            throw FinanceError.invalidState("Эта операция уже отмечена как оплата другого платежа")
+        }
+        // One monthly payment is never closed twice: once its month is paid, no more links.
+        if ob.frequency == "monthly", let day = next.records[i].date,
+           paymentStatus(next, obligation: ob, today: lastDay(of: day)).isPaid {
+            throw FinanceError.invalidState("«\(ob.title)» за этот месяц уже оплачен")
         }
         next.records[i].obligationId = obligationId
         let key = MerchantCategories.key(next.records[i].merchant ?? next.records[i].title)
@@ -377,6 +410,79 @@ public enum FinanceBudgeting {
         }
         next.budget = budget
         return try validateFinance(next)
+    }
+
+    /// Marks a payment paid when no operation shows it (cash, someone else paid). Monthly: for the month of today;
+    /// weekly: today's charge. Marking again takes the mark back.
+    public static func togglePaidByHand(_ state: FinanceState, obligationId: String, today: String) throws -> FinanceState {
+        guard let ob = state.records.first(where: { $0.id == obligationId && $0.kind == "obligation" }) else {
+            throw FinanceError.invalidState("Платёж не найден")
+        }
+        let mark = obligationId + "|" + (ob.frequency == "weekly" ? today : String(today.prefix(7)))
+        return try updateBudget(state) { budget in
+            var marks = budget.manualPaid ?? []
+            if let i = marks.firstIndex(of: mark) { marks.remove(at: i) } else { marks.append(mark) }
+            budget.manualPaid = marks.isEmpty ? nil : marks
+        }
+    }
+
+    /// The shared rule for «paid»: linked operations reach 90 % of the amount, or the owner marked it by hand.
+    /// Weekly payments keep only the charges still ahead this month; the ones already past are in the balance.
+    public static func paymentStatus(_ state: FinanceState, obligation ob: FinanceRecord, today: String) -> PaymentStatus {
+        let month = String(today.prefix(7))
+        let amount = ob.amountMinor ?? 0
+        let marks = Set(state.budget?.manualPaid ?? [])
+        var paid: Int64 = 0
+        var paidToday: Int64 = 0
+        for r in state.records where r.kind == "expense" && r.excluded != true && r.obligationId == ob.id {
+            guard let day = r.date, day <= today, day.hasPrefix(month) else { continue }
+            paid += r.amountMinor ?? 0
+            if day == today { paidToday += r.amountMinor ?? 0 }
+        }
+        func covers(_ sum: Int64) -> Bool { amount > 0 && sum * 10 >= amount * 9 }
+
+        if ob.frequency == "weekly" {
+            let start = ob.date ?? today
+            guard let anchor = parseYmd(start), let t = parseYmd(today) else {
+                return PaymentStatus(paidMinor: paid, isPaid: true, markedByHand: false, unpaidMinor: 0, chargesLeft: 0, isDue: false)
+            }
+            let weekday = weekdayFromEpochDays(daysSinceEpoch(year: anchor.year, month: anchor.month, day: anchor.day))
+            let end = String(format: "%04d-%02d-%02d", t.year, t.month, getDaysInMonth(year: t.year, month: t.month))
+            var left = countWeekdayDates(fromYmd: max(start, today), toYmd: end, targetWeekday: weekday)
+            let todayWeekday = weekdayFromEpochDays(daysSinceEpoch(year: t.year, month: t.month, day: t.day))
+            let isDue = start <= today && todayWeekday == weekday
+            let byHand = isDue && marks.contains(ob.id + "|" + today)
+            let todayPaid = isDue && (byHand || covers(paidToday))
+            if todayPaid { left = max(0, left - 1) }
+            return PaymentStatus(paidMinor: paid, isPaid: !isDue || todayPaid, markedByHand: byHand,
+                                 unpaidMinor: amount * Int64(left), chargesLeft: left, isDue: isDue)
+        }
+        guard ob.frequency == "monthly" else {
+            return PaymentStatus(paidMinor: paid, isPaid: true, markedByHand: false, unpaidMinor: 0, chargesLeft: 0, isDue: false)
+        }
+        let byHand = marks.contains(ob.id + "|" + month)
+        let isPaid = byHand || covers(paid)
+        return PaymentStatus(paidMinor: paid, isPaid: isPaid, markedByHand: byHand,
+                             unpaidMinor: isPaid ? 0 : max(0, amount - paid), chargesLeft: isPaid ? 0 : 1, isDue: true)
+    }
+
+    /// Spending of this month not linked to any payment, the closest in amount first, for choosing by hand.
+    public static func paymentCandidates(_ state: FinanceState, obligation ob: FinanceRecord, today: String) -> [FinanceRecord] {
+        let month = String(today.prefix(7))
+        let amount = ob.amountMinor ?? 0
+        let list = counted(state).filter {
+            $0.kind == "expense" && $0.obligationId == nil && !isOwnTransfer($0) && monthOf($0.date) == month && ($0.date ?? "") <= today
+        }
+        return list.sorted { a, b in
+            let da = abs((a.amountMinor ?? 0) - amount)
+            let db = abs((b.amountMinor ?? 0) - amount)
+            return da != db ? da < db : (a.date ?? "") > (b.date ?? "")
+        }
+    }
+
+    static func lastDay(of date: String) -> String {
+        guard let d = parseYmd(date) else { return date }
+        return String(format: "%04d-%02d-%02d", d.year, d.month, getDaysInMonth(year: d.year, month: d.month))
     }
 
     public static func dismissMatch(_ state: FinanceState, _ match: PaymentMatch) throws -> FinanceState {
@@ -393,7 +499,10 @@ public enum FinanceBudgeting {
         let month = String(today.prefix(7))
         let step = 100 * oneTenge
         return counted(state)
-            .filter { $0.kind == "income" && monthOf($0.date) == month && ($0.date ?? "") <= today && !handled.contains($0.id) }
+            .filter {
+                $0.kind == "income" && monthOf($0.date) == month && ($0.date ?? "") <= today && !handled.contains($0.id)
+                    && !isOwnTransfer($0) && !personalIncomeCategories.contains($0.category ?? "")
+            }
             .compactMap { r -> SetAsideOffer? in
                 let amount = r.amountMinor ?? 0
                 let suggested = amount * percent / 100 / step * step
@@ -403,14 +512,21 @@ public enum FinanceBudgeting {
     }
 
     /// Moves money into an envelope. Nothing moves in the bank; the amount only stops being «Чистыми».
-    public static func setAside(_ state: FinanceState, amountMinor: Int64, goalId: String, incomeId: String? = nil) throws -> FinanceState {
+    /// With `raiseTarget` an envelope that is full or nearly full grows its target instead of refusing.
+    public static func setAside(_ state: FinanceState, amountMinor: Int64, goalId: String, incomeId: String? = nil,
+                                raiseTarget: Bool = false) throws -> FinanceState {
         var next = try validateFinance(state)
         guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
-            throw FinanceError.invalidAmount("Nothing to set aside")
+            throw FinanceError.invalidAmount("Нечего откладывать: сумма должна быть больше нуля")
         }
-        let saved = (next.records[i].savedMinor ?? 0) + amountMinor
-        guard saved <= (next.records[i].amountMinor ?? 0) else {
-            throw FinanceError.invalidAmount("Больше, чем осталось до цели")
+        if let incomeId, (next.budget?.handledIncomes ?? []).contains(incomeId) {
+            throw FinanceError.invalidState("С этого дохода уже отложено")
+        }
+        let (saved, overflow) = (next.records[i].savedMinor ?? 0).addingReportingOverflow(amountMinor)
+        guard !overflow, isValidMoney(saved) else { throw FinanceError.invalidAmount("Слишком большая сумма") }
+        if saved > (next.records[i].amountMinor ?? 0) {
+            guard raiseTarget else { throw FinanceError.invalidAmount("Больше, чем осталось до цели") }
+            next.records[i].amountMinor = saved
         }
         next.records[i].savedMinor = saved
         var budget = next.budget ?? FinanceBudget()
@@ -579,8 +695,7 @@ public enum FinanceBudgeting {
             let median = amounts[amounts.count / 2]
             guard median > 0, amounts.allSatisfy({ abs($0 - median) * 100 <= median * 15 }) else { continue }
             let first = entry.value[0]
-            let name = first.merchant ?? first.title
-            guard !looksLikePerson(name) else { continue }
+            guard let name = safeName(first.merchant ?? first.title) else { continue }
             out.append(FinanceHint(kind: .recurring, subject: name, text: "«\(name)» списывается каждый месяц, около \(money(median)), — этого нет в плане", priority: 50))
         }
         return out
@@ -594,8 +709,7 @@ public enum FinanceBudgeting {
             let amounts = entry.value.compactMap(\.amountMinor)
             let total = amounts.reduce(0, +)
             guard amounts.count >= 8, amounts.allSatisfy({ $0 <= 3000 * oneTenge }), total >= 15000 * oneTenge else { continue }
-            let name = entry.value[0].merchant ?? entry.value[0].title
-            guard !looksLikePerson(name) else { continue }
+            guard let name = safeName(entry.value[0].merchant ?? entry.value[0].title) else { continue }
             out.append(FinanceHint(kind: .smallFrequent, subject: name, text: "«\(name)»: \(amounts.count) покупок в этом месяце, всего \(money(total))", priority: 40))
         }
         return out
@@ -640,11 +754,10 @@ public enum FinanceBudgeting {
             average = sum(counted(state).filter { $0.kind == "expense" && inRange.contains(monthOf($0.date)) }) / Int64(others.count)
         }
         let limits = limitStatuses(state, month: month, today: today)
-        var paidBy: [String: Int64] = [:]
-        for r in ops where r.kind == "expense" { if let o = r.obligationId { paidBy[o, default: 0] += r.amountMinor ?? 0 } }
         var paid: [String] = [], unpaid: [String] = []
+        let asOf = month < String(today.prefix(7)) ? lastDay(of: month + "-01") : today
         for ob in state.records where ob.kind == "obligation" && ob.frequency == "monthly" {
-            if (paidBy[ob.id] ?? 0) * 10 >= (ob.amountMinor ?? 0) * 9 { paid.append(ob.title) } else { unpaid.append(ob.title) }
+            if paymentStatus(state, obligation: ob, today: asOf).isPaid { paid.append(ob.title) } else { unpaid.append(ob.title) }
         }
         return MonthReview(
             month: month,
@@ -705,11 +818,12 @@ public enum FinanceBudgeting {
             month = nextMonth(month)
         }
 
-        let named = ops.filter { $0.kind == "expense" && !personalCategories.contains($0.category ?? "") && !looksLikePerson($0.merchant ?? $0.title) }
+        let named = ops.filter { $0.kind == "expense" && !personalCategories.contains($0.category ?? "") }
         var byMerchant: [(name: String, total: Int64, count: Int)] = []
         for group in Dictionary(grouping: named, by: { MerchantCategories.key($0.merchant ?? $0.title) }).values {
+            guard let name = safeName(group[0].merchant ?? group[0].title) else { continue }
             let total = group.reduce(Int64(0)) { $0 + ($1.amountMinor ?? 0) }
-            byMerchant.append((name: group[0].merchant ?? group[0].title, total: total, count: group.count))
+            byMerchant.append((name: name, total: total, count: group.count))
         }
         byMerchant.sort { $0.total != $1.total ? $0.total > $1.total : $0.name < $1.name }
         if !byMerchant.isEmpty {
@@ -762,10 +876,30 @@ public enum FinanceBudgeting {
         return (minor < 0 ? "-" : "") + groups.joined(separator: " ") + " ₸"
     }
 
-    /// «Иван И.» or «Aigerim K» — how banks show a person; such names never go into hints or the export.
+    /// How banks show a person: «Иван И.», «Aigerim K», «Иванов А.А.», «А. Иванов», «ИП Сейткали», «ИВАНОВ АЛЕКСЕЙ»,
+    /// «Айгерим Кайратовна». Such names never go into hints or the export.
     static func looksLikePerson(_ name: String) -> Bool {
-        name.trimmingCharacters(in: .whitespaces)
-            .range(of: #"^[А-ЯЁA-Z][а-яёa-z]+ [А-ЯЁA-Z]\.?$"#, options: .regularExpression) != nil
+        let text = name.trimmingCharacters(in: .whitespaces)
+        let patterns = [
+            #"^[А-ЯЁӘҒҚҢӨҰҮҺІA-Z][а-яёәғқңөұүһіa-z]+\s+[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.?(\s?[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.?)?$"#,
+            #"^[А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.\s?([А-ЯЁӘҒҚҢӨҰҮҺІA-Z]\.\s?)?[А-ЯЁӘҒҚҢӨҰҮҺІA-Z][а-яёәғқңөұүһіa-z]+$"#,
+            #"^(ИП|IP|И\.П\.)\s"#,
+            // An all-caps Cyrillic pair or triple is a person unless a company form stands in front.
+            #"^(?!(ТОО|АО|ОАО|ООО|ЗАО|ГКП|РГП|КГП|ОФ|ПК)\s)[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,}(\s+[А-ЯЁӘҒҚҢӨҰҮҺІ]{2,})?$"#,
+            #"^[A-Z]{2,}\s+[A-Z]\.?$"#,
+            #"^[А-ЯЁӘҒҚҢӨҰҮҺІ][а-яёәғқңөұүһі]+\s+[А-ЯЁӘҒҚҢӨҰҮҺІ][а-яёәғқңөұүһі]+(вич|вна|ична|улы|ұлы|кызы|қызы)$"#,
+        ]
+        return patterns.contains { text.range(of: $0, options: .regularExpression) != nil }
+    }
+
+    /// A merchant name fit for a hint or the export: nil for a person, card and account digits cut out.
+    static func safeName(_ name: String) -> String? {
+        guard !looksLikePerson(name) else { return nil }
+        let cut = name
+            .replacingOccurrences(of: #"[\d*][\d*\s-]{2,}[\d*]"#, with: "…", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        guard !cut.isEmpty, cut != "…" else { return nil }
+        return cut
     }
 
     static func counted(_ state: FinanceState) -> [FinanceRecord] {
