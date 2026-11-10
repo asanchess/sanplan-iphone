@@ -207,7 +207,7 @@ final class WorkoutStoreHistoryTests: XCTestCase {
         legacy.saveRecord(record(id: "legacy", start: t0), now: t0)
 
         let store = makeStore(owner: .device, remember: true)
-        store.switchOwner(to: .account(email: "a@example.com"), now: t0)
+        store.switchOwner(to: .account("a@example.com"), now: t0)
         XCTAssertEqual(store.records.map { $0.id }, ["legacy"], "the first account takes over the shared files")
         store.saveRecord(record(id: "a1", start: t0 + 86_400_000), now: t0)
         store.startWorkout(day: day(), now: t0 + 100_000)
@@ -220,10 +220,10 @@ final class WorkoutStoreHistoryTests: XCTestCase {
         store.saveRecord(record(id: "nobody", start: t0), now: t0)
         XCTAssertTrue(store.records.isEmpty, "nothing is saved while signed out")
 
-        store.switchOwner(to: .account(email: "b@example.com"), now: t0 + 300_000)
+        store.switchOwner(to: .account("b@example.com"), now: t0 + 300_000)
         XCTAssertTrue(store.records.isEmpty, "a second account does not see the first one's workouts")
 
-        store.switchOwner(to: .account(email: " A@Example.com "), now: t0 + 400_000)
+        store.switchOwner(to: .account(" A@Example.com "), now: t0 + 400_000)
         XCTAssertEqual(Set(store.records.map { $0.id }), ["legacy", "a1"])
         XCTAssertNotNil(store.activeSession, "a workout in progress waits for its account")
 
