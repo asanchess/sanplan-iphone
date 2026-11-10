@@ -157,12 +157,13 @@ public struct RootView: View {
     #if DEBUG
     /// Debug screenshots only: a few weeks of made-up workouts for the history screen.
     private func seedScreenshotHistory(now: Int64) {
-        guard model.workouts.records.isEmpty else { return }
+        // Fixed ids, so a later run replaces them instead of adding more; workouts left by UI tests stay beside them.
         let day: Int64 = 86_400_000
         for offset in [1, 3, 6, 8, 10, 13, 15, 17, 20, 22, 27, 29] {
             let start = now - Int64(offset) * day - 3_600_000
             let sets = (0..<4).map { WorkoutRecordSet(done: $0 < 4 - offset % 2, weightKg: 60 - Double(offset / 7) * 2.5, reps: 8) }
             let record = WorkoutRecord(
+                id: "screenshot-\(offset)",
                 startedAt: start,
                 endedAt: start + Int64(48 + offset % 5 * 4) * 60_000,
                 weekday: WorkoutProgram.weekday(of: WorkoutHistory.date(start)),

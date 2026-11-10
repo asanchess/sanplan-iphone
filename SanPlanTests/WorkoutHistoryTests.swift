@@ -180,6 +180,13 @@ final class WorkoutHistoryTests: XCTestCase {
         XCTAssertEqual(WorkoutSessionEdit.roundWeight(61.3), 61.25)
     }
 
+    func testLastTimeLineGroupsAlikeSets() {
+        XCTAssertEqual(WorkoutFormat.sets(Array(repeating: (60.0, 8), count: 4), bodyweight: false), "4 × 8 · 60 кг")
+        XCTAssertEqual(WorkoutFormat.sets([(60, 8), (60, 6)], bodyweight: false), "60 кг × 8 · 60 кг × 6")
+        XCTAssertEqual(WorkoutFormat.sets(Array(repeating: (nil, 10), count: 3), bodyweight: true), "3 × 10 · свой вес")
+        XCTAssertEqual(WorkoutFormat.sets([(62.5, 8)], bodyweight: false), "62,5 кг × 8")
+    }
+
     // MARK: - Records
 
     func testRecordNeedsAtLeastOneSetDone() throws {

@@ -390,6 +390,19 @@ enum WorkoutFormat {
     }
 
     /// One logged set: «60 кг × 8», «+10 кг × 8», «12 повт.».
+    /// Several sets in one line: «4 × 8 по 60 кг» when they are all alike, else each set in turn.
+    static func sets(_ sets: [(weightKg: Double?, reps: Int?)], bodyweight: Bool) -> String {
+        guard let first = sets.first else { return "" }
+        let alike = sets.allSatisfy { $0.weightKg == first.weightKg && $0.reps == first.reps }
+        guard alike, sets.count > 1 else {
+            return sets.map { set(weight: $0.weightKg, reps: $0.reps, bodyweight: bodyweight) }.joined(separator: " · ")
+        }
+        let reps = first.reps.map(String.init) ?? "—"
+        let load = weight(first.weightKg, bodyweight: bodyweight)
+        if first.weightKg == nil && !bodyweight { return "\(sets.count) × \(reps)" }
+        return "\(sets.count) × \(reps) · \(load)"
+    }
+
     static func set(weight: Double?, reps: Int?, bodyweight: Bool) -> String {
         let repsText = reps.map(String.init) ?? "—"
         if bodyweight {

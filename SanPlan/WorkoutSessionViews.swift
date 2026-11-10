@@ -245,8 +245,7 @@ struct CurrentSetCard: View {
 
     private func lastTimeText(_ exercise: SessionExercise) -> String? {
         guard let last = exercise.lastTime?.filter(\.done), !last.isEmpty else { return nil }
-        return last.map { WorkoutFormat.set(weight: $0.weightKg, reps: $0.reps, bodyweight: exercise.bodyweight ?? false) }
-            .joined(separator: " · ")
+        return WorkoutFormat.sets(last.map { ($0.weightKg, $0.reps) }, bodyweight: exercise.bodyweight ?? false)
     }
 
     private func progressionText(_ exercise: SessionExercise) -> String {
