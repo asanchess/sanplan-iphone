@@ -10,7 +10,6 @@ struct WorkoutBuilderView: View {
     @State private var showLibrary = false
     @State private var renaming: RenameTarget?
     @State private var renameText = ""
-    @State private var deleting: RenameTarget?
     @State private var titleDraft = ""
 
     private struct RenameTarget: Identifiable {
@@ -68,7 +67,7 @@ struct WorkoutBuilderView: View {
         .onChange(of: weekday) { _, _ in titleDraft = day?.title ?? "" }
         .sheet(isPresented: $showLibrary) {
             ExerciseLibrarySheet { name in
-                store.updateProgram { try WorkoutProgram.addExercise($0, weekday: weekday, name: name) }
+                store.updateProgram(label: "Упражнение добавлено") { try WorkoutProgram.addExercise($0, weekday: weekday, name: name) }
             }
         }
         .alert("Название упражнения", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -76,24 +75,11 @@ struct WorkoutBuilderView: View {
             Button("Сохранить") {
                 if let target = renaming {
                     let name = renameText
-                    store.updateProgram { try WorkoutProgram.updateExercise($0, weekday: weekday, id: target.id) { $0.name = name } }
+                    store.updateProgram(label: "Упражнение переименовано") { try WorkoutProgram.updateExercise($0, weekday: weekday, id: target.id) { $0.name = name } }
                 }
                 renaming = nil
             }
             Button("Отмена", role: .cancel) { renaming = nil }
-        }
-        .confirmationDialog(
-            "Удалить «\(deleting?.name ?? "")»?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Удалить", role: .destructive) {
-                if let target = deleting {
-                    store.updateProgram { try WorkoutProgram.deleteExercise($0, weekday: weekday, id: target.id) }
-                }
-                deleting = nil
-            }
-            Button("Отмена", role: .cancel) { deleting = nil }
         }
     }
 
@@ -139,7 +125,8 @@ struct WorkoutBuilderView: View {
                 .foregroundColor(DS.Colors.textPrimary)
                 .submitLabel(.done)
                 .onChange(of: titleDraft) { _, text in
-                    store.updateProgram { WorkoutProgram.setDayTitle($0, weekday: weekday, title: text) }
+                    // Each typed letter is too small a change to offer «Отменить».
+                    store.updateProgram(label: nil) { WorkoutProgram.setDayTitle($0, weekday: weekday, title: text) }
                 }
         }
     }
@@ -155,7 +142,7 @@ struct WorkoutBuilderView: View {
                     Button { renameText = exercise.name; renaming = RenameTarget(id: id, name: exercise.name) } label: {
                         Label("Переименовать", systemImage: "pencil")
                     }
-                    Button { store.updateProgram { try WorkoutProgram.duplicateExercise($0, weekday: weekday, id: id) } } label: {
+                    Button { store.updateProgram(label: "Упражнение продублировано") { try WorkoutProgram.duplicateExercise($0, weekday: weekday, id: id) } } label: {
                         Label("Дублировать", systemImage: "plus.square.on.square")
                     }
                     if !isFirst {
@@ -168,7 +155,10 @@ struct WorkoutBuilderView: View {
                             Label("Ниже", systemImage: "arrow.down")
                         }
                     }
-                    Button(role: .destructive) { deleting = RenameTarget(id: id, name: exercise.name) } label: {
+                    // No question first: the toast offers «Отменить».
+                    Button(role: .destructive) {
+                        store.updateProgram(label: "Упражнение удалено") { try WorkoutProgram.deleteExercise($0, weekday: weekday, id: id) }
+                    } label: {
                         Label("Удалить", systemImage: "trash")
                     }
                 } label: {
@@ -220,7 +210,46 @@ struct WorkoutBuilderView: View {
             .font(.subheadline)
             .foregroundColor(DS.Colors.textPrimary)
             .tint(DS.Colors.controlTint)
+            Toggle("Свой вес", isOn: Binding(
+                get: { exercise.bodyweight ?? false },
+                set: { value in edit(id) { $0.bodyweight = value } }
+            ))
+            .font(.subheadline)
+            .foregroundColor(DS.Colors.textPrimary)
+            .tint(DS.Colors.controlTint)
+            weightRows(exercise, id: id)
         }
+    }
+
+    /// Working weight (added load for a bodyweight exercise) and the step the progression hint adds.
+    @ViewBuilder
+    private func weightRows(_ exercise: WorkoutExercisePlan, id: String) -> some View {
+        let bodyweight = exercise.bodyweight ?? false
+        let step = exercise.weightStepKg ?? WorkoutSessionEdit.defaultStepKg
+        let weight = exercise.weightKg
+        ValueStepperRow(
+            title: bodyweight ? "Доп. вес" : "Вес",
+            value: WorkoutFormat.weight(weight, bodyweight: bodyweight),
+            canDecrease: (weight ?? 0) > 0,
+            canIncrease: (weight ?? 0) < WorkoutSessionEdit.weightRange.upperBound,
+            onDecrease: {
+                edit(id) {
+                    let next = WorkoutSessionEdit.roundWeight(($0.weightKg ?? 0) - step)
+                    $0.weightKg = next <= 0 ? (bodyweight ? nil : 0) : next
+                }
+            },
+            onIncrease: {
+                edit(id) { $0.weightKg = WorkoutSessionEdit.roundWeight(min(($0.weightKg ?? 0) + step, WorkoutSessionEdit.weightRange.upperBound)) }
+            }
+        )
+        ValueStepperRow(
+            title: "Шаг прибавки",
+            value: WorkoutFormat.kilograms(step),
+            canDecrease: step > (WorkoutFormat.steps.first ?? step),
+            canIncrease: step < (WorkoutFormat.steps.last ?? step),
+            onDecrease: { edit(id) { $0.weightStepKg = WorkoutFormat.steps.last(where: { $0 < step }) ?? step } },
+            onIncrease: { edit(id) { $0.weightStepKg = WorkoutFormat.steps.first(where: { $0 > step }) ?? step } }
+        )
     }
 
     private func edit(_ id: String, _ change: @escaping (inout WorkoutExercisePlan) -> Void) {
@@ -327,6 +356,68 @@ enum WorkoutFormat {
     }
 
     static func exerciseSummary(_ exercise: WorkoutExercisePlan) -> String {
-        "\(exercise.sets) × \(exercise.reps)\(exercise.perSide ? " на сторону" : "") · отдых \(rest(exercise.restSeconds))"
+        var text = "\(exercise.sets) × \(exercise.reps)\(exercise.perSide ? " на сторону" : "")"
+        if let weight = exercise.weightKg, weight > 0 {
+            text += (exercise.bodyweight == true ? " · +" : " · ") + kilograms(weight)
+        }
+        return text + " · отдых \(rest(exercise.restSeconds))"
     }
+
+    /// Steps the progression hint can add, in kilograms.
+    static let steps: [Double] = [0.5, 1, 1.25, 2.5, 5, 10]
+
+    /// 60 → «60 кг», 57.5 → «57,5 кг».
+    static func kilograms(_ value: Double) -> String {
+        number(value) + " кг"
+    }
+
+    static func number(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? String(value)
+    }
+
+    /// The weight of a target: «свой вес», «+10 кг» on top of it, «60 кг», or «—» when not set.
+    static func weight(_ value: Double?, bodyweight: Bool) -> String {
+        if bodyweight {
+            guard let value, value > 0 else { return "свой вес" }
+            return "+" + kilograms(value)
+        }
+        guard let value else { return "—" }
+        return kilograms(value)
+    }
+
+    /// One logged set: «60 кг × 8», «+10 кг × 8», «12 повт.».
+    static func set(weight: Double?, reps: Int?, bodyweight: Bool) -> String {
+        let repsText = reps.map(String.init) ?? "—"
+        if bodyweight {
+            guard let weight, weight > 0 else { return "\(repsText) повт." }
+            return "+\(number(weight)) кг × \(repsText)"
+        }
+        guard let weight else { return "\(repsText) повт." }
+        return "\(number(weight)) кг × \(repsText)"
+    }
+
+    /// 754 s → «12:34», 4000 s → «1:06:40».
+    static func clock(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        if s >= 3600 { return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) }
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    /// 754 s → «13 мин», 4000 s → «1 ч 7 мин».
+    static func duration(_ seconds: Int) -> String {
+        let minutes = Int((Double(max(0, seconds)) / 60).rounded())
+        if minutes < 60 { return "\(minutes) мин" }
+        return minutes % 60 == 0 ? "\(minutes / 60) ч" : "\(minutes / 60) ч \(minutes % 60) мин"
+    }
+
+    /// 1234.5 → «1,2 т», 850 → «850 кг».
+    static func tonnage(_ kg: Double) -> String {
+        kg >= 1000 ? number((kg / 100).rounded() / 10) + " т" : number(kg.rounded()) + " кг"
+    }
+
+    static let weekdayNames = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
 }

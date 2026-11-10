@@ -24,6 +24,12 @@ public struct WorkoutExercisePlan: Codable, Equatable, Hashable {
     public var id: String?
     /// Rest after the last set, before the next exercise. Nil uses `restSeconds`.
     public var restAfterExercise: Int?
+    /// Working weight in kilograms. Nil: not set yet, or a bodyweight exercise without added load.
+    public var weightKg: Double?
+    /// True for exercises with the body's own weight (pull-ups, push-ups); `weightKg` is then the added load.
+    public var bodyweight: Bool?
+    /// How much the progression hint adds once every set reached its reps. Nil uses 2.5 kg.
+    public var weightStepKg: Double?
 
     public init(
         name: String,
@@ -34,8 +40,14 @@ public struct WorkoutExercisePlan: Codable, Equatable, Hashable {
         restAfterSets: [Int]? = nil,
         needsClarification: Bool? = nil,
         id: String? = nil,
-        restAfterExercise: Int? = nil
+        restAfterExercise: Int? = nil,
+        weightKg: Double? = nil,
+        bodyweight: Bool? = nil,
+        weightStepKg: Double? = nil
     ) {
+        self.weightKg = weightKg
+        self.bodyweight = bodyweight
+        self.weightStepKg = weightStepKg
         self.id = id
         self.restAfterExercise = restAfterExercise
         self.name = name
@@ -61,13 +73,117 @@ public struct WorkoutDayPlan: Codable, Equatable, Hashable {
     }
 }
 
-public struct SessionExercise: Codable, Equatable, Hashable {
-    public var name: String
-    public var rests: [Int]
+/// One set as it was actually done. Values are filled when the set is marked done and can be changed afterwards.
+public struct SetLog: Codable, Equatable, Hashable {
+    public var done: Bool
+    public var weightKg: Double?
+    public var reps: Int?
+    /// When the set was marked done.
+    public var at: Int64?
 
-    public init(name: String, rests: [Int]) {
+    public init(done: Bool = false, weightKg: Double? = nil, reps: Int? = nil, at: Int64? = nil) {
+        self.done = done
+        self.weightKg = weightKg
+        self.reps = reps
+        self.at = at
+    }
+}
+
+public struct SessionExercise: Codable, Equatable, Hashable {
+    /// What the screen and the lock screen show, for example «Жим лёжа · 10».
+    public var name: String
+    /// Rest after each set; its length is the number of sets.
+    public var rests: [Int]
+    /// The plan exercise this came from, so history and «в прошлый раз» survive a rename. Nil before 2.2.
+    public var exerciseId: String?
+    /// The exercise name without the reps. Nil before 2.2.
+    public var title: String?
+    /// Target reps per set.
+    public var reps: Int?
+    public var perSide: Bool?
+    /// Target weight for today, possibly raised by the progression hint.
+    public var weightKg: Double?
+    /// The weight the plan has, to tell an edit of the plan from today's progression.
+    public var planWeightKg: Double?
+    public var bodyweight: Bool?
+    public var weightStepKg: Double?
+    /// One entry per set, parallel to `rests`. Nil or short in sessions saved before 2.2.
+    public var log: [SetLog]?
+    /// The sets done last time, for «в прошлый раз».
+    public var lastTime: [SetLog]?
+    /// True when today's weight or reps were raised from last time.
+    public var progressed: Bool?
+
+    public init(
+        name: String,
+        rests: [Int],
+        exerciseId: String? = nil,
+        title: String? = nil,
+        reps: Int? = nil,
+        perSide: Bool? = nil,
+        weightKg: Double? = nil,
+        planWeightKg: Double? = nil,
+        bodyweight: Bool? = nil,
+        weightStepKg: Double? = nil,
+        log: [SetLog]? = nil,
+        lastTime: [SetLog]? = nil,
+        progressed: Bool? = nil
+    ) {
         self.name = name
         self.rests = rests
+        self.exerciseId = exerciseId
+        self.title = title
+        self.reps = reps
+        self.perSide = perSide
+        self.weightKg = weightKg
+        self.planWeightKg = planWeightKg
+        self.bodyweight = bodyweight
+        self.weightStepKg = weightStepKg
+        self.log = log
+        self.lastTime = lastTime
+        self.progressed = progressed
+    }
+
+    /// The log padded or cut to the number of sets.
+    public var sets: [SetLog] {
+        var result = Array((log ?? []).prefix(rests.count))
+        if result.count < rests.count {
+            result.append(contentsOf: Array(repeating: SetLog(), count: rests.count - result.count))
+        }
+        return result
+    }
+
+    public var doneCount: Int { sets.filter { $0.done }.count }
+
+    /// The name without the reps: the title, or the shown name cut at « · ».
+    public var baseName: String {
+        if let title, !title.isEmpty { return title }
+        return name.components(separatedBy: " · ").first ?? name
+    }
+
+    /// Rebuilds the shown name after the reps or title changed.
+    public mutating func refreshName() {
+        guard let reps else { return }
+        name = "\(baseName) · \(reps)\(perSide == true ? " на каждую сторону" : "")"
+    }
+
+    /// Marks a set done with the values the screen suggests, keeping values already entered for it.
+    public mutating func markDone(_ index: Int, at now: Int64) {
+        guard rests.indices.contains(index) else { return }
+        var entries = sets
+        let suggested = suggestedValues(for: index)
+        entries[index].done = true
+        entries[index].at = now
+        if entries[index].weightKg == nil { entries[index].weightKg = suggested.weightKg }
+        if entries[index].reps == nil { entries[index].reps = suggested.reps }
+        log = entries
+    }
+
+    /// What a set starts with: the weight of the last earlier set done today, else today's target; the target reps.
+    public func suggestedValues(for index: Int) -> (weightKg: Double?, reps: Int?) {
+        let entries = sets
+        let earlier = entries.prefix(max(0, min(index, entries.count))).last(where: { $0.done })
+        return (earlier?.weightKg ?? weightKg, reps)
     }
 }
 
@@ -145,6 +261,11 @@ public struct WorkoutCommand: Equatable {
         WorkoutCommand(type: "finish", id: id)
     }
 
+    /// Ends the workout after its last set: the set in progress counts as done.
+    public static func finishSet(id: String? = nil) -> WorkoutCommand {
+        WorkoutCommand(type: "finishSet", id: id)
+    }
+
     public static func skipRest(id: String? = nil) -> WorkoutCommand {
         WorkoutCommand(type: "skipRest", id: id)
     }
@@ -167,6 +288,14 @@ public struct WorkoutSessionState: Codable, Equatable {
     public var commandHistory: [WorkoutCommandRecord]
     /// When the current set began (working) or the rest ran out (alerting). Absent in sessions saved before 2.1.
     public var workStartedAt: Int64?
+    /// When the workout began, for its total duration. Absent in sessions saved before 2.2.
+    public var startedAt: Int64?
+    /// When the workout ended.
+    public var endedAt: Int64?
+    /// The plan day it was started from, to offer saving changes made during the workout.
+    public var planDay: WorkoutDayPlan?
+    /// The history entry written when it ended, so it is written once.
+    public var recordId: String?
 
     public init(
         version: Int = 1,
@@ -179,9 +308,17 @@ public struct WorkoutSessionState: Codable, Equatable {
         pausedRemainingMs: Int64? = nil,
         lastNow: Int64,
         commandHistory: [WorkoutCommandRecord] = [],
-        workStartedAt: Int64? = nil
+        workStartedAt: Int64? = nil,
+        startedAt: Int64? = nil,
+        endedAt: Int64? = nil,
+        planDay: WorkoutDayPlan? = nil,
+        recordId: String? = nil
     ) {
         self.workStartedAt = workStartedAt
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.planDay = planDay
+        self.recordId = recordId
         self.version = version
         self.revision = revision
         self.phase = phase
@@ -330,7 +467,18 @@ public enum WorkoutDomain {
             }
 
             let formattedName = "\(name) · \(reps)\(perSide ? " на каждую сторону" : "")"
-            result.append(SessionExercise(name: formattedName, rests: rests))
+            result.append(SessionExercise(
+                name: formattedName,
+                rests: rests,
+                exerciseId: exercise.id,
+                title: name,
+                reps: reps,
+                perSide: perSide,
+                weightKg: exercise.weightKg,
+                planWeightKg: exercise.weightKg,
+                bodyweight: exercise.bodyweight,
+                weightStepKg: exercise.weightStepKg
+            ))
         }
         return result
     }
@@ -356,7 +504,9 @@ public enum WorkoutDomain {
                     throw WorkoutDomainError("Exercise at index \(i) rest at index \(r) must be a positive integer <= 3600")
                 }
             }
-            copiedExercises.append(SessionExercise(name: name, rests: ex.rests))
+            var copy = ex
+            copy.name = name
+            copiedExercises.append(copy)
         }
 
         return WorkoutSessionState(
@@ -369,7 +519,8 @@ public enum WorkoutDomain {
             deadline: now + 30000,
             pausedRemainingMs: nil,
             lastNow: now,
-            commandHistory: []
+            commandHistory: [],
+            startedAt: now
         )
     }
 
@@ -468,6 +619,7 @@ public enum WorkoutDomain {
                 throw WorkoutDomainError("startRest command is not valid during a rest")
             }
             if newPhase == .complete { break }
+            newExercises[restExerciseIndex].markDone(restSetIndex, at: now)
             let restSeconds = state.exercises[restExerciseIndex].rests[restSetIndex]
             newExerciseIndex = restExerciseIndex
             newSetIndex = restSetIndex
@@ -490,6 +642,7 @@ public enum WorkoutDomain {
             } else {
                 rests.removeLast(rests.count - count)
             }
+            newExercises[state.exerciseIndex].log = Array(newExercises[state.exerciseIndex].sets.prefix(rests.count))
             newExercises[state.exerciseIndex].rests = rests
 
         case "pause":
@@ -589,6 +742,22 @@ public enum WorkoutDomain {
             newPausedRemainingMs = nil
             newWorkStartedAt = nil
 
+        case "finishSet":
+            if state.phase == .complete {
+                return state
+            }
+            if state.phase == .preparing || state.phase == .working {
+                newExercises[state.exerciseIndex].markDone(state.setIndex, at: now)
+            } else if state.phase == .alerting, let next = nextSet(state) {
+                newExercises[next.exercise].markDone(next.set, at: now)
+                newExerciseIndex = next.exercise
+                newSetIndex = next.set
+            }
+            newPhase = .complete
+            newDeadline = nil
+            newPausedRemainingMs = nil
+            newWorkStartedAt = nil
+
         case "skipRest":
             if state.phase != .resting && state.phase != .paused {
                 throw WorkoutDomainError("skipRest command is only valid in resting or paused phase")
@@ -645,8 +814,19 @@ public enum WorkoutDomain {
             pausedRemainingMs: newPausedRemainingMs,
             lastNow: now,
             commandHistory: nextHistory,
-            workStartedAt: (newPhase == .working || newPhase == .alerting) ? newWorkStartedAt : nil
+            workStartedAt: (newPhase == .working || newPhase == .alerting) ? newWorkStartedAt : nil,
+            startedAt: state.startedAt,
+            endedAt: newPhase == .complete ? (state.endedAt ?? now) : nil,
+            planDay: state.planDay,
+            recordId: state.recordId
         )
+    }
+
+    /// Whole seconds since the workout began; nil for sessions saved before 2.2. Stops at the end.
+    public static func totalElapsedSeconds(state: WorkoutSessionState, now: Int64) -> Int? {
+        guard let started = state.startedAt else { return nil }
+        let end = state.endedAt ?? now
+        return Int(max(0, end - started) / 1000)
     }
 
     /// The set after the current one, or nil when the current set is the last of the workout.

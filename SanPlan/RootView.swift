@@ -116,13 +116,21 @@ public struct RootView: View {
     /// Debug screenshots only: an in-memory workout in the phase named after the flag. Saved only if a later command runs.
     private func seedScreenshotWorkout() {
         #if DEBUG
-        guard isScreenshotSignedInMode, ProcessInfo.processInfo.arguments.contains("--screenshot-active-workout") else { return }
+        guard isScreenshotSignedInMode else { return }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let exercises = [
-            SessionExercise(name: "Жим лёжа", rests: [90, 90, 90, 90]),
-            SessionExercise(name: "Тяга в наклоне", rests: [90, 90, 90])
-        ]
         let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--screenshot-workout-history") {
+            seedScreenshotHistory(now: now)
+        }
+        guard arguments.contains("--screenshot-active-workout") else { return }
+        var bench = (try? WorkoutSessionEdit.newExercise(name: "Жим лёжа", sets: 4, reps: 8, restSeconds: 90, restAfterExercise: 90, weightKg: 62.5))
+            ?? SessionExercise(name: "Жим лёжа", rests: [90, 90, 90, 90])
+        bench.lastTime = [SetLog(done: true, weightKg: 60, reps: 8), SetLog(done: true, weightKg: 60, reps: 8),
+                          SetLog(done: true, weightKg: 60, reps: 8), SetLog(done: true, weightKg: 60, reps: 8)]
+        bench.progressed = true
+        let row = (try? WorkoutSessionEdit.newExercise(name: "Тяга в наклоне", sets: 3, reps: 10, restSeconds: 90, restAfterExercise: 90, weightKg: 50))
+            ?? SessionExercise(name: "Тяга в наклоне", rests: [90, 90, 90])
+        let exercises = [bench, row]
         let flag = arguments.firstIndex(of: "--screenshot-active-workout")!
         let phase = flag + 1 < arguments.count ? arguments[flag + 1] : "working"
         guard let created = try? WorkoutDomain.createWorkout(exercises: exercises, now: now - 10_000) else { return }
@@ -145,6 +153,31 @@ public struct RootView: View {
         model.workouts.activeSession = session
         #endif
     }
+
+    #if DEBUG
+    /// Debug screenshots only: a few weeks of made-up workouts for the history screen.
+    private func seedScreenshotHistory(now: Int64) {
+        guard model.workouts.records.isEmpty else { return }
+        let day: Int64 = 86_400_000
+        for offset in [1, 3, 6, 8, 10, 13, 15, 17, 20, 22, 27, 29] {
+            let start = now - Int64(offset) * day - 3_600_000
+            let sets = (0..<4).map { WorkoutRecordSet(done: $0 < 4 - offset % 2, weightKg: 60 - Double(offset / 7) * 2.5, reps: 8) }
+            let record = WorkoutRecord(
+                startedAt: start,
+                endedAt: start + Int64(48 + offset % 5 * 4) * 60_000,
+                weekday: WorkoutProgram.weekday(of: WorkoutHistory.date(start)),
+                title: offset % 2 == 0 ? "Верх" : "Ноги",
+                exercises: [
+                    WorkoutRecordExercise(name: "Жим лёжа", targetReps: 8, sets: sets),
+                    WorkoutRecordExercise(name: "Подтягивания", bodyweight: true, targetReps: 10,
+                                          sets: Array(repeating: WorkoutRecordSet(done: true, reps: 10), count: 3))
+                ]
+            )
+            model.workouts.saveRecord(record, now: now)
+        }
+        model.workouts.dismissUndo(model.workouts.undoOffer?.id ?? UUID())
+    }
+    #endif
 
     /// A long plan title does not fit on the alarm screen, so the alarm's button opens it here.
     private func openPendingAlarmText() {

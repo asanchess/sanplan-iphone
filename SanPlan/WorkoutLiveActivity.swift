@@ -51,7 +51,8 @@ public enum WorkoutLiveState {
         case (.skipRest, .alerting), (.nextSet, .alerting): return .acknowledge()
         case (.addThirty, .resting), (.addThirty, .paused): return .adjust(seconds: 30)
         case (.resume, .paused): return .resume()
-        case (.finish, _) where phase != .complete: return .finish()
+        // The lock screen offers «Завершить» on the last set: that set counts as done.
+        case (.finish, _) where phase != .complete: return .finishSet()
         default: return nil
         }
     }
