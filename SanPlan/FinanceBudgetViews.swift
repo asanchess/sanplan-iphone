@@ -1753,6 +1753,7 @@ struct ManualEditSheet: View {
     @State private var category = ""
     @State private var frequency = "monthly"
     @State private var note = ""
+    @State private var excluded = false
     @State private var error: String?
 
     private var isFlow: Bool { record.kind == "income" || record.kind == "expense" }
@@ -1780,6 +1781,7 @@ struct ManualEditSheet: View {
                     if hasDate {
                         DatePicker("Дата", selection: $date, displayedComponents: .date)
                             .environment(\.locale, Locale(identifier: "ru_RU"))
+                            .environment(\.timeZone, TimeZone(identifier: "Asia/Qyzylorda") ?? .current)
                     }
                     if hasFrequency {
                         Picker("Как часто", selection: $frequency) {
@@ -1803,6 +1805,9 @@ struct ManualEditSheet: View {
                 }
                 Section {
                     TextField("Заметка", text: $note, axis: .vertical)
+                    if hasDate {
+                        Toggle("Не учитывать в итогах", isOn: $excluded)
+                    }
                 }
                 if let error {
                     Section {
@@ -1837,6 +1842,7 @@ struct ManualEditSheet: View {
         category = record.category ?? "Без категории"
         frequency = record.frequency ?? "monthly"
         note = record.note ?? ""
+        excluded = record.excluded == true
     }
 
     private func save() {
@@ -1852,7 +1858,8 @@ struct ManualEditSheet: View {
             date: hasDate ? Self.ymd.string(from: date) : nil,
             category: isFlow ? category : nil,
             frequency: hasFrequency ? frequency : nil,
-            note: note
+            note: note,
+            excluded: hasDate ? excluded : nil
         )
         error = onSave(edit)
     }

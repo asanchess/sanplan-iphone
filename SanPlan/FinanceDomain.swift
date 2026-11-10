@@ -758,9 +758,13 @@ public func commitFinance(
             }
 
             if let idx = existingIdx {
-                let oldId = nextRecords[idx].id
+                let old = nextRecords[idx]
                 var updated = rec
-                updated.id = oldId
+                updated.id = old.id
+                // A phrase about an existing envelope or payment changes what it says, not what it leaves out.
+                if updated.outsideMinor == nil { updated.outsideMinor = old.outsideMinor }
+                if updated.dueDate == nil { updated.dueDate = old.dueDate }
+                if updated.note == nil { updated.note = old.note }
                 nextRecords[idx] = updated
                 continue
             }

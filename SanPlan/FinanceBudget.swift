@@ -1026,8 +1026,10 @@ extension FinanceBudgeting {
         public var category: String?
         public var frequency: String?
         public var note: String
+        /// Income, expense and balance only; nil keeps the record as it is.
+        public var excluded: Bool?
 
-        public init(kind: String, title: String, amountMinor: Int64, date: String? = nil, category: String? = nil, frequency: String? = nil, note: String = "") {
+        public init(kind: String, title: String, amountMinor: Int64, date: String? = nil, category: String? = nil, frequency: String? = nil, note: String = "", excluded: Bool? = nil) {
             self.kind = kind
             self.title = title
             self.amountMinor = amountMinor
@@ -1035,6 +1037,7 @@ extension FinanceBudgeting {
             self.category = category
             self.frequency = frequency
             self.note = note
+            self.excluded = excluded
         }
     }
 
@@ -1079,6 +1082,10 @@ extension FinanceBudgeting {
         if kind != "expense" { r.obligationId = nil }
         let note = edit.note.trimmingCharacters(in: .whitespacesAndNewlines)
         r.note = note.isEmpty ? nil : note
+        if let excluded = edit.excluded, ["income", "expense", "balance"].contains(kind) {
+            r.excluded = excluded ? true : nil
+            if !excluded { r.pairedWith = nil }
+        }
         next.records[index] = r
         StatementImport.rebuildBalance(&next)
         return try validateFinance(next)

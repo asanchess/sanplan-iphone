@@ -19,6 +19,8 @@ public struct FinanceScreen: View {
     @State private var errorMessage: String? = nil
     @State private var statusMessage: String? = nil
     @State private var isParsing = false
+    /// Only the answer to the latest request is shown.
+    @State private var parseToken = UUID()
     /// How the last phrase was read, shown above the drafts.
     @State private var parseNote: String? = nil
 
@@ -432,7 +434,7 @@ public struct FinanceScreen: View {
 
                 Text(client == nil
                      ? "Текст разбирается на устройстве."
-                     : "Фразу читает Gemini через сервер ARNA и ничего не сохраняет. Остатки и история остаются на телефоне.")
+                     : "Фразу читает Gemini (Google) через сервер ARNA. Сервер её не хранит, Google может хранить по своим правилам. Остатки и история остаются на телефоне.")
                     .font(.caption2)
                     .foregroundColor(DS.Colors.textSecondary)
             }
@@ -452,8 +454,13 @@ public struct FinanceScreen: View {
         }
         guard !isParsing else { return }
         isParsing = true
+        // Old drafts go away while the new phrase is read, so nothing stale can be confirmed meanwhile.
+        drafts = []
+        parseNote = nil
+        let token = UUID()
+        parseToken = token
         Task { @MainActor in
-            defer { isParsing = false }
+            defer { if parseToken == token { isParsing = false } }
             var result: [FinanceDraft] = []
             var note: String? = nil
             if let client {
@@ -464,6 +471,8 @@ public struct FinanceScreen: View {
                     note = "Gemini недоступен, разобрано по правилам на телефоне. Проверь поля."
                 }
             }
+            // The phrase changed or was confirmed while Gemini was answering: drop the answer.
+            guard parseToken == token, textInput == text else { return }
             if result.isEmpty {
                 do {
                     result = try parseFinanceText(text, today: today, kindHint: hint.isEmpty ? nil : hint)

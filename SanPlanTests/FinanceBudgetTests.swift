@@ -627,4 +627,30 @@ final class FinanceBudgetTests: XCTestCase {
         state = try FinanceBudgeting.editManual(state, id: "b1", .init(kind: "balance", title: "Остаток", amountMinor: 0, date: "2026-11-02"))
         XCTAssertEqual(state.records.first { $0.id == "b1" }?.date, "2026-11-02")
     }
+
+    func testAHandEnteredRecordCanLeaveTheTotalsAndComeBack() throws {
+        var state = november()
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 300_000_00)
+        state = try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "expense", title: "Кофе", amountMinor: 20_000_00, date: "2026-11-05", excluded: true))
+        XCTAssertEqual(state.records.first { $0.id == "cafe1" }?.excluded, true)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 320_000_00)
+        state = try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "expense", title: "Кофе", amountMinor: 20_000_00, date: "2026-11-05", excluded: false))
+        XCTAssertNil(state.records.first { $0.id == "cafe1" }?.excluded)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 300_000_00)
+    }
+
+    /// «Коплю на подушку 600к» about an envelope that already exists keeps its outside part and note.
+    func testAPhraseAboutAnExistingEnvelopeKeepsWhatItDidNotSay() throws {
+        var state = try FinanceBudgeting.setAside(november(), amountMinor: 30_000_00, goalId: "cushion", outsideAccounts: true)
+        let i = try XCTUnwrap(state.records.firstIndex { $0.id == "cushion" })
+        state.records[i].note = "наличные дома"
+        let draft = FinanceDraft(kind: "goal", title: "подушка", amountMinor: 600_000_00, savedMinor: 80_000_00)
+        state = try commitFinance(state: state, drafts: [draft], batchId: "phrase", nowDate: "2026-11-10")
+        let cushion = try XCTUnwrap(state.records.first { $0.id == "cushion" })
+        XCTAssertEqual(state.records.filter { $0.kind == "goal" }.count, 1)
+        XCTAssertEqual(cushion.amountMinor, 600_000_00)
+        XCTAssertEqual(cushion.outsideMinor, 30_000_00)
+        XCTAssertEqual(cushion.note, "наличные дома")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, 70_000_00)
+    }
 }
