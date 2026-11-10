@@ -220,12 +220,15 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(text("Рабочий подход").waitForExistence(timeout: 15), "Working set did not start")
         XCTAssertTrue(exactButton("Завершить досрочно").exists)
 
-        let startRest = button("Начать отдых")
+        let startRest = button("Подход сделан, отдых")
         if !startRest.waitForExistence(timeout: 3) {
             // A one-set exercise has no rest; add a set so one follows.
-            exactButton("Добавить подход").tap()
+            let addSet = button("Добавить подход")
+            scrollTo(addSet)
+            addSet.tap()
+            scrollTo(startRest)
         }
-        XCTAssertTrue(startRest.waitForExistence(timeout: 5), "«Начать отдых» missing during a working set")
+        XCTAssertTrue(startRest.waitForExistence(timeout: 5), "«Подход сделан, отдых» missing during a working set")
         startRest.tap()
         dismissSystemAlertIfPresent(timeout: 5) // AlarmKit asks on the first rest.
 
@@ -259,7 +262,10 @@ final class ARNAUITests: XCTestCase {
 
         finishWorkoutEarly()
         XCTAssertTrue(text("Тренировка завершена").waitForExistence(timeout: 5), "Summary did not appear after finishing")
-        button("Вернуться к списку").tap()
+        // The first set was ticked by «Подход сделан, отдых», so the workout is kept and the summary closes with «Готово».
+        let close = exactButton("Готово")
+        scrollTo(close)
+        close.tap()
         XCTAssertTrue(button("Начать тренировку").waitForExistence(timeout: 5), "Program overview did not return")
     }
 
@@ -270,11 +276,11 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(text("Рабочий подход").waitForExistence(timeout: 10), "Seeded working phase not shown")
         XCTAssertTrue(text("Жим лёжа").exists, "Seeded exercise name missing")
         XCTAssertTrue(text("Подход 1 из 4").exists, "Set counter missing")
-        XCTAssertTrue(text("Всего подходов: 4").exists, "Set total missing")
         XCTAssertTrue(text("Время подхода").exists, "Set stopwatch caption missing")
-        XCTAssertTrue(exactButton("Убрать подход").exists)
-        XCTAssertTrue(exactButton("Добавить подход").exists)
-        XCTAssertTrue(button("Начать отдых").exists, "«Начать отдых» missing")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "В прошлый раз")).firstMatch.exists,
+                      "«В прошлый раз» missing")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Добавить подход")).firstMatch.exists, "Add-set control missing")
+        XCTAssertTrue(button("Подход сделан, отдых").exists, "«Подход сделан, отдых» missing")
 
         // The finish dialog opens and can be cancelled without changing the workout.
         let finish = exactButton("Завершить досрочно")
@@ -609,9 +615,11 @@ final class ARNAUITests: XCTestCase {
         if exactButton("Завершить досрочно").exists {
             finishWorkoutEarly()
         }
-        let back = button("Вернуться к списку")
-        if back.waitForExistence(timeout: 2) {
-            back.tap()
+        // A finished summary closes with «Готово», or «Закрыть без сохранения» when nothing was ticked.
+        if text("Тренировка завершена").waitForExistence(timeout: 2) {
+            let close = exactButton("Готово").exists ? exactButton("Готово") : exactButton("Закрыть без сохранения")
+            scrollTo(close)
+            close.tap()
         }
     }
 

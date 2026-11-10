@@ -34,6 +34,8 @@ public final class AppModel: ObservableObject {
         self.finance = FinanceStore(owner: screenshots ? .device : .none)
         self.workouts = WorkoutStore.shared
         WorkoutStore.shared.health = WorkoutHealthExport.shared
+        // Screenshots run signed in without an account, so their workouts live in the phone's shared folder too.
+        if screenshots { WorkoutStore.shared.switchOwner(to: .device) }
         let inputs = InputDrafts()
         self.inputs = inputs
         self.dictation = SpeechDictation(drafts: inputs)

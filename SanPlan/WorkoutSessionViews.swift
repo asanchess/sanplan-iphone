@@ -169,6 +169,11 @@ struct WorkoutTimerCard: View {
                             .padding(.bottom, DS.Metrics.spacing4)
                     }
                     .frame(maxWidth: .infinity)
+                    if elapsed != nil {
+                        Text("Время подхода")
+                            .font(.caption)
+                            .foregroundColor(DS.Colors.textSecondary)
+                    }
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -434,6 +439,7 @@ struct ExerciseSetsCard: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(minHeight: DS.Metrics.minHitTarget)
                 }
+                .accessibilityLabel("Добавить подход: \(exercise.baseName)")
                 .foregroundColor(DS.Colors.accent)
                 .disabled(exercise.rests.count >= 100)
             }
