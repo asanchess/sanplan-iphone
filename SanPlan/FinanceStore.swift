@@ -182,3 +182,26 @@ public final class FinanceStore: ObservableObject {
         try? fileManager.moveItem(at: storageURL, to: destination)
     }
 }
+
+// MARK: - Reading a phrase through the server
+
+struct FinanceParseRequest: Encodable {
+    let text: String
+    let today: String
+    let kindHint: String?
+}
+
+struct FinanceParseResponse: Decodable {
+    let drafts: [FinanceDraft]?
+    let source: String?
+}
+
+/// Sends only the typed or dictated phrase and today's date to ARNA's server, which asks Gemini to read it.
+/// Balances, history and other records never leave the phone; the server does not keep the phrase.
+public enum FinanceAPI {
+    public static func parse(client: APIClient, text: String, today: String, kindHint: String?) async throws -> [FinanceDraft] {
+        let body = FinanceParseRequest(text: text, today: today, kindHint: kindHint)
+        let response: FinanceParseResponse = try await client.post(path: "/api/finance/parse", body: body)
+        return response.drafts ?? []
+    }
+}

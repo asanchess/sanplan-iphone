@@ -1003,3 +1003,84 @@ public enum FinanceBudgeting {
         Dictionary((state.imports ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 }
+
+// MARK: - Hand-entered records
+
+extension FinanceBudgeting {
+    /// Everything the owner typed or dictated, the last added first. Statement operations, the statement balance
+    /// and reconciliations have their own places and are left out.
+    public static func manualEntries(_ state: FinanceState) -> [FinanceRecord] {
+        state.records.filter { r in
+            r.importId == nil
+                && r.id != StatementImport.balanceRecordId
+                && !(r.kind == "balance" && r.title == reconcileTitle)
+        }.reversed()
+    }
+
+    /// A change to a hand-entered record. Spending and income can swap; other kinds keep theirs.
+    public struct ManualEdit: Equatable {
+        public var kind: String
+        public var title: String
+        public var amountMinor: Int64
+        public var date: String?
+        public var category: String?
+        public var frequency: String?
+        public var note: String
+
+        public init(kind: String, title: String, amountMinor: Int64, date: String? = nil, category: String? = nil, frequency: String? = nil, note: String = "") {
+            self.kind = kind
+            self.title = title
+            self.amountMinor = amountMinor
+            self.date = date
+            self.category = category
+            self.frequency = frequency
+            self.note = note
+        }
+    }
+
+    public static func editManual(_ state: FinanceState, id: String, _ edit: ManualEdit) throws -> FinanceState {
+        var next = try validateFinance(state)
+        guard let index = next.records.firstIndex(where: { $0.id == id }), next.records[index].importId == nil else {
+            throw FinanceError.invalidDraft("Запись не найдена.")
+        }
+        var r = next.records[index]
+        let title = edit.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw FinanceError.invalidDraft("Введите название.") }
+        let flows: Set<String> = ["income", "expense"]
+        let kind = flows.contains(r.kind) && flows.contains(edit.kind) ? edit.kind : r.kind
+        guard isValidMoney(edit.amountMinor, allowZero: kind == "balance") else {
+            throw FinanceError.invalidDraft(kind == "balance" ? "Введите сумму числом." : "Введите сумму больше нуля.")
+        }
+        switch kind {
+        case "balance", "income", "expense":
+            guard let date = edit.date, isValidDateString(date) else { throw FinanceError.invalidDraft("Неверная дата.") }
+            r.date = date
+        case "obligation", "planned_income":
+            if let frequency = edit.frequency {
+                guard FinanceConstants.allowedFrequencies.contains(frequency) else { throw FinanceError.invalidDraft("Выберите, как часто.") }
+                r.frequency = frequency
+            }
+        case "goal":
+            let saved = r.savedMinor ?? 0
+            guard edit.amountMinor >= saved else {
+                throw FinanceError.invalidDraft("Цель не может быть меньше уже отложенного: \(money(saved)).")
+            }
+        default:
+            break
+        }
+        r.kind = kind
+        r.title = String(title.prefix(FinanceConstants.maxTitleLen))
+        r.amountMinor = edit.amountMinor
+        if flows.contains(kind) {
+            let category = edit.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            r.category = category.isEmpty ? (r.category ?? "Без категории") : category
+        }
+        // Only spending can pay a planned payment; income turned from spending unmarks it.
+        if kind != "expense" { r.obligationId = nil }
+        let note = edit.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        r.note = note.isEmpty ? nil : note
+        next.records[index] = r
+        StatementImport.rebuildBalance(&next)
+        return try validateFinance(next)
+    }
+}

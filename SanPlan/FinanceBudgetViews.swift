@@ -1615,3 +1615,245 @@ struct ReconcileSheet: View {
         if let failure { error = failure } else { onClose() }
     }
 }
+
+// MARK: - Hand-entered history
+
+enum ManualKind {
+    static func title(_ kind: String) -> String {
+        switch kind {
+        case "balance": return "Остаток"
+        case "income": return "Доход"
+        case "expense": return "Расход"
+        case "obligation": return "Регулярный платёж"
+        case "planned_income": return "Ожидаемый доход"
+        case "goal": return "Конверт"
+        default: return "Запись"
+        }
+    }
+
+    static func frequency(_ value: String?) -> String? {
+        switch value {
+        case "monthly": return "каждый месяц"
+        case "weekly": return "каждую неделю"
+        default: return nil
+        }
+    }
+}
+
+/// What the owner added by «+», voice or text, the last added first; a tap opens it for a fix or removal.
+struct ManualEntriesCard: View {
+    let state: FinanceState
+    let onEdit: (FinanceRecord) -> Void
+
+    @State private var showsAll = false
+    private static let shortList = 5
+
+    var body: some View {
+        let entries = FinanceBudgeting.manualEntries(state)
+        let shown = showsAll ? entries : Array(entries.prefix(Self.shortList))
+        if !entries.isEmpty {
+            Card {
+                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                    SectionHeader("Добавлено вручную · \(entries.count)")
+                    ForEach(shown, id: \.id) { record in
+                        ManualEntryRow(record: record) { onEdit(record) }
+                        if record.id != shown.last?.id {
+                            Divider()
+                        }
+                    }
+                    if entries.count > Self.shortList {
+                        Button(showsAll ? "Свернуть" : "Показать все (\(entries.count))") {
+                            withAnimation(.easeInOut(duration: 0.2)) { showsAll.toggle() }
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(DS.Colors.accent)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
+                        .accessibilityIdentifier("manual-entries-toggle")
+                    }
+                }
+            }
+            .accessibilityIdentifier("manual-entries")
+        }
+    }
+}
+
+struct ManualEntryRow: View {
+    let record: FinanceRecord
+    let onTap: () -> Void
+
+    private var subtitle: String {
+        var parts = [ManualKind.title(record.kind)]
+        switch record.kind {
+        case "income", "expense":
+            if let c = record.category { parts.append(c) }
+            if let d = record.date { parts.append(FinanceText.dayMonth(d)) }
+            if record.excluded == true { parts.append("не учитывается") }
+        case "balance":
+            if let d = record.date { parts.append("на " + FinanceText.dayMonth(d)) }
+        case "obligation", "planned_income":
+            if let f = ManualKind.frequency(record.frequency) { parts.append(f) }
+        case "goal":
+            parts.append("отложено " + FinanceText.money(record.savedMinor ?? 0))
+        default:
+            break
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var amount: String {
+        let value = record.amountMinor ?? 0
+        switch record.kind {
+        case "income": return "+" + FinanceText.money(value)
+        case "expense": return "−" + FinanceText.money(value)
+        default: return FinanceText.money(value)
+        }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .center, spacing: DS.Metrics.spacing12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(record.title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .lineLimit(2)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Text(amount)
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundColor(record.kind == "income" ? DS.Colors.positive : DS.Colors.textPrimary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .frame(minHeight: DS.Metrics.minHitTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Изменить или удалить")
+    }
+}
+
+/// Fix or remove a hand-entered record; «Чистыми», the plan and the envelopes recount at once.
+struct ManualEditSheet: View {
+    let record: FinanceRecord
+    /// Nil when saved; otherwise the reason, and the sheet stays open.
+    let onSave: (FinanceBudgeting.ManualEdit) -> String?
+    let onDelete: () -> Void
+    let onCancel: () -> Void
+
+    @State private var kind = ""
+    @State private var title = ""
+    @State private var amount = ""
+    @State private var date = Date()
+    @State private var category = ""
+    @State private var frequency = "monthly"
+    @State private var note = ""
+    @State private var error: String?
+
+    private var isFlow: Bool { record.kind == "income" || record.kind == "expense" }
+    private var hasDate: Bool { isFlow || record.kind == "balance" }
+    private var hasFrequency: Bool { record.kind == "obligation" || record.kind == "planned_income" }
+
+    private static let ymd = PlanDateTime.formatter("yyyy-MM-dd", timeZone: "Asia/Qyzylorda")
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if isFlow {
+                        Picker("Тип", selection: $kind) {
+                            Text("Расход").tag("expense")
+                            Text("Доход").tag("income")
+                        }
+                        .pickerStyle(.segmented)
+                    } else {
+                        LabeledContent("Тип", value: ManualKind.title(record.kind))
+                    }
+                    TextField("Название", text: $title)
+                    TextField(record.kind == "goal" ? "Цель, ₸" : "Сумма, ₸", text: $amount)
+                        .keyboardType(.decimalPad)
+                    if hasDate {
+                        DatePicker("Дата", selection: $date, displayedComponents: .date)
+                            .environment(\.locale, Locale(identifier: "ru_RU"))
+                    }
+                    if hasFrequency {
+                        Picker("Как часто", selection: $frequency) {
+                            Text("Каждый месяц").tag("monthly")
+                            Text("Каждую неделю").tag("weekly")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    if record.kind == "goal" {
+                        Text("Отложено \(FinanceText.money(record.savedMinor ?? 0)). Положить или забрать деньги можно в самом конверте на вкладке «План».")
+                            .font(.caption)
+                            .foregroundColor(DS.Colors.textSecondary)
+                    }
+                }
+                if isFlow {
+                    Section("Категория") {
+                        Picker("Категория", selection: $category) {
+                            ForEach(categoryOptions, id: \.self) { Text($0).tag($0) }
+                        }
+                    }
+                }
+                Section {
+                    TextField("Заметка", text: $note, axis: .vertical)
+                }
+                if let error {
+                    Section {
+                        Text(error).font(.footnote).foregroundColor(DS.Colors.destructive)
+                    }
+                }
+                Section {
+                    Button("Удалить запись", role: .destructive, action: onDelete)
+                }
+            }
+            .navigationTitle("Запись")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена", action: onCancel) }
+                ToolbarItem(placement: .confirmationAction) { Button("Сохранить", action: save).bold() }
+            }
+            .onAppear(perform: load)
+        }
+    }
+
+    private var categoryOptions: [String] {
+        var options = MerchantCategories.all
+        if let current = record.category, !options.contains(current) { options.insert(current, at: 0) }
+        return options
+    }
+
+    private func load() {
+        kind = record.kind
+        title = record.title
+        amount = record.amountMinor.map { String(format: "%.2f", Double($0) / 100).replacingOccurrences(of: ".00", with: "") } ?? ""
+        if let day = record.date, let parsed = Self.ymd.date(from: day) { date = parsed }
+        category = record.category ?? "Без категории"
+        frequency = record.frequency ?? "monthly"
+        note = record.note ?? ""
+    }
+
+    private func save() {
+        let typed = amount.replacingOccurrences(of: ",", with: ".").filter { !$0.isWhitespace }
+        guard let minor = try? parseKzt(typed) else {
+            error = "Введите сумму числом."
+            return
+        }
+        let edit = FinanceBudgeting.ManualEdit(
+            kind: kind,
+            title: title,
+            amountMinor: minor,
+            date: hasDate ? Self.ymd.string(from: date) : nil,
+            category: isFlow ? category : nil,
+            frequency: hasFrequency ? frequency : nil,
+            note: note
+        )
+        error = onSave(edit)
+    }
+}

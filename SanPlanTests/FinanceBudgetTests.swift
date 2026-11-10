@@ -580,4 +580,51 @@ final class FinanceBudgetTests: XCTestCase {
         state.records[i].savedMinor = 4_000_00
         XCTAssertEqual(try validateFinance(state).records[i].outsideMinor, 4_000_00)
     }
+
+    // MARK: Hand-entered history
+
+    func testManualHistoryListsWhatWasTypedLastFirstWithoutStatementsOrReconciliations() {
+        var state = november()
+        state.records.append(op("imported", "expense", 5_000, "2026-11-06", importId: "kaspi-1"))
+        state.records.append(FinanceRecord(id: StatementImport.balanceRecordId, kind: "balance", title: "Остаток по выпискам", amountMinor: 1_00, date: "2026-11-06"))
+        state.records.append(FinanceRecord(id: "rec", kind: "balance", title: FinanceBudgeting.reconcileTitle, amountMinor: 1_00, date: "2026-11-07"))
+        XCTAssertEqual(FinanceBudgeting.manualEntries(state).map(\.id), ["rent", "cushion", "cafe1", "b1"])
+    }
+
+    func testEditingAHandEnteredRecordRecountsTheBalanceAndClean() throws {
+        var state = november()
+        state = try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "expense", title: "Кофе", amountMinor: 30_000_00, date: "2026-11-05", category: "Кафе и рестораны"))
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 290_000_00)
+        XCTAssertEqual(state.records.first { $0.id == "cafe1" }?.title, "Кофе")
+
+        state.records[1].obligationId = "rent"
+        state = try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "income", title: "Возврат", amountMinor: 30_000_00, date: "2026-11-05", category: "Пополнения", note: " вернули "))
+        let fixed = try XCTUnwrap(state.records.first { $0.id == "cafe1" })
+        XCTAssertEqual(fixed.kind, "income")
+        XCTAssertNil(fixed.obligationId, "income never pays a planned payment")
+        XCTAssertEqual(fixed.note, "вернули")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 350_000_00)
+
+        state = try removeFinanceRecord(state: state, id: "cafe1")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 320_000_00)
+    }
+
+    func testEditingKeepsKindsAndRefusesWhatCannotBeRight() throws {
+        var state = november()
+        state.records.append(op("imported", "expense", 5_000, "2026-11-06", importId: "kaspi-1"))
+        XCTAssertThrowsError(try FinanceBudgeting.editManual(state, id: "imported", .init(kind: "expense", title: "x", amountMinor: 1_00, date: "2026-11-06")))
+        XCTAssertThrowsError(try FinanceBudgeting.editManual(state, id: "cushion", .init(kind: "goal", title: "Подушка", amountMinor: 40_000_00)),
+                             "a target below what is already saved")
+        XCTAssertThrowsError(try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "expense", title: "  ", amountMinor: 1_00, date: "2026-11-05")))
+        XCTAssertThrowsError(try FinanceBudgeting.editManual(state, id: "cafe1", .init(kind: "expense", title: "Кофе", amountMinor: 0, date: "2026-11-05")))
+
+        state = try FinanceBudgeting.editManual(state, id: "rent", .init(kind: "income", title: "Аренда", amountMinor: 130_000_00, frequency: "weekly"))
+        let rent = try XCTUnwrap(state.records.first { $0.id == "rent" })
+        XCTAssertEqual(rent.kind, "obligation", "only spending and income swap")
+        XCTAssertEqual(rent.frequency, "weekly")
+        XCTAssertEqual(rent.amountMinor, 130_000_00)
+
+        state = try FinanceBudgeting.editManual(state, id: "b1", .init(kind: "balance", title: "Остаток", amountMinor: 0, date: "2026-11-02"))
+        XCTAssertEqual(state.records.first { $0.id == "b1" }?.date, "2026-11-02")
+    }
 }

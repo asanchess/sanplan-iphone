@@ -6,6 +6,8 @@ public struct FinanceScreen: View {
     @ObservedObject private var store: FinanceStore
     @ObservedObject private var inputs: InputDrafts
     @ObservedObject private var dictation: SpeechDictation
+    /// Reads phrases through the server's Gemini; nil keeps everything on the phone's own rules.
+    private let client: APIClient?
 
     /// The composer text lives above the tabs, so it survives switching tabs during dictation.
     private var textInput: String { inputs.money }
@@ -16,6 +18,9 @@ public struct FinanceScreen: View {
     @State private var draftEdited: Bool = false
     @State private var errorMessage: String? = nil
     @State private var statusMessage: String? = nil
+    @State private var isParsing = false
+    /// How the last phrase was read, shown above the drafts.
+    @State private var parseNote: String? = nil
 
     // Composer & stats visibility
     @State private var showComposer: Bool = false
@@ -44,10 +49,11 @@ public struct FinanceScreen: View {
     @State private var pendingImportState: FinanceState? = nil
     @State private var exportedDocument: EncryptedVaultDocument? = nil
 
-    public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, showSettings: Binding<Bool>) {
+    public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, client: APIClient? = nil, showSettings: Binding<Bool>) {
         self.store = store
         self.inputs = inputs
         self.dictation = dictation
+        self.client = client
         self._showSettings = showSettings
     }
 
@@ -177,6 +183,21 @@ public struct FinanceScreen: View {
             Text("Запись будет удалена, а статистика пересчитана.")
         }
         .sheet(item: $recordToEdit) { record in
+            if record.importId == nil {
+                ManualEditSheet(
+                    record: record,
+                    onSave: { edit in
+                        let failure = applyChange("Запись обновлена.") { try FinanceBudgeting.editManual($0, id: record.id, edit) }
+                        if failure == nil { recordToEdit = nil }
+                        return failure
+                    },
+                    onDelete: {
+                        recordToEdit = nil
+                        recordToDelete = record
+                    },
+                    onCancel: { recordToEdit = nil }
+                )
+            } else {
             RecordEditSheet(
                 record: record,
                 onSave: { edit in
@@ -194,6 +215,7 @@ public struct FinanceScreen: View {
                 },
                 onCancel: { recordToEdit = nil }
             )
+            }
         }
         .sheet(isPresented: $showBreakdown) {
             CleanBreakdownSheet(snapshot: snapshot, onSetLimits: {
@@ -238,6 +260,7 @@ public struct FinanceScreen: View {
         case .plan:
             FinancePlanTab(store: store, today: todayString, apply: financeApply)
         case .operations:
+            ManualEntriesCard(state: store.state) { recordToEdit = $0 }
             OperationsFeed(store: store, filter: $ledgerFilter, expanded: $feedExpanded) { recordToEdit = $0 }
             ReconcileCard(snapshot: snapshot) { showReconcile = true }
             statementsSection
@@ -381,11 +404,13 @@ public struct FinanceScreen: View {
                     text: Binding(get: { inputs.money }, set: { inputs.edit($0, for: .money) }),
                     isListening: dictation.isListening(to: .money),
                     level: dictation.level,
+                    isBusy: isParsing,
+                    parseTitle: isParsing ? "Разбираю…" : "Разобрать",
                     onMic: {
                         if dictation.isListening(to: .money) {
                             dictation.stop()
                         } else {
-                            // Money never goes to the server: without Apple Speech there is no dictation here.
+                            // Speech becomes text on the phone (Apple Speech); only the text is read by the server.
                             Task { await dictation.start(into: .money) }
                         }
                     },
@@ -405,29 +430,61 @@ public struct FinanceScreen: View {
                         .foregroundColor(DS.Colors.warning)
                 }
 
-                Text("Текст разбирается на устройстве. Финансовые данные не передаются на сервер.")
+                Text(client == nil
+                     ? "Текст разбирается на устройстве."
+                     : "Фразу читает Gemini через сервер ARNA и ничего не сохраняет. Остатки и история остаются на телефоне.")
                     .font(.caption2)
                     .foregroundColor(DS.Colors.textSecondary)
             }
         }
     }
 
+    /// Gemini reads the phrase first, like in plans; without the network or quota the phone's own rules do.
     private func parseEnteredText() {
         errorMessage = nil
-        do {
-            let result = try parseFinanceText(textInput, today: todayString, kindHint: kindHint.isEmpty ? nil : kindHint)
-            guard !result.isEmpty else {
-                throw FinanceError.invalidDraft("Расскажи хотя бы об одной сумме.")
+        statusMessage = nil
+        let text = textInput
+        let hint = kindHint
+        let today = todayString
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "Расскажи хотя бы об одной сумме."
+            return
+        }
+        guard !isParsing else { return }
+        isParsing = true
+        Task { @MainActor in
+            defer { isParsing = false }
+            var result: [FinanceDraft] = []
+            var note: String? = nil
+            if let client {
+                do {
+                    result = try await FinanceAPI.parse(client: client, text: text, today: today, kindHint: hint.isEmpty ? nil : hint)
+                    if result.isEmpty { note = "Gemini не нашёл сумм, разобрано по правилам на телефоне." }
+                } catch {
+                    note = "Gemini недоступен, разобрано по правилам на телефоне. Проверь поля."
+                }
             }
-            if result.count > 50 {
-                throw FinanceError.invalidDraft("Добавляй не больше 50 записей за один раз.")
+            if result.isEmpty {
+                do {
+                    result = try parseFinanceText(text, today: today, kindHint: hint.isEmpty ? nil : hint)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    return
+                }
+            }
+            guard !result.isEmpty else {
+                errorMessage = "Не нашёл суммы. Напиши, например: «потратил 2500 на обед»."
+                return
+            }
+            guard result.count <= 50 else {
+                errorMessage = "Добавляй не больше 50 записей за один раз."
+                return
             }
             self.drafts = result
-            self.sourceText = textInput
-            self.sourceHint = kindHint
+            self.sourceText = text
+            self.sourceHint = hint
             self.draftEdited = false
-        } catch {
-            errorMessage = error.localizedDescription
+            self.parseNote = note
         }
     }
 
@@ -437,6 +494,12 @@ public struct FinanceScreen: View {
         Card {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                 SectionHeader("Проверь перед добавлением")
+
+                if let parseNote {
+                    Text(parseNote)
+                        .font(.caption)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
 
                 if isDraftStale {
                     Text("Текст изменён после разбора. Нажми «Разобрать» заново.")
@@ -593,15 +656,21 @@ public struct FinanceScreen: View {
     private func confirmDrafts() {
         errorMessage = nil
         do {
+            let count = drafts.count
             try store.commit(drafts: drafts, today: todayString)
             self.drafts = []
+            self.parseNote = nil
+            // What was just added shows first in «Добавлено вручную» on the operations tab.
+            self.tab = .operations
             inputs.clear(.money)
             self.sourceText = ""
             self.kindHint = ""
             self.sourceHint = ""
             self.draftEdited = false
             self.showComposer = false
-            statusMessage = "Записи успешно добавлены."
+            statusMessage = count == 1
+                ? "Добавлено. Запись — первая в «Добавлено вручную», её можно изменить или удалить."
+                : "Добавлено записей: \(count). Они первые в «Добавлено вручную», их можно изменить или удалить."
         } catch {
             errorMessage = error.localizedDescription
         }
