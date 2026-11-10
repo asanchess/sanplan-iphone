@@ -165,7 +165,7 @@ public struct RootView: View {
             .tabItem { Label(MainTab.today.title, systemImage: MainTab.today.icon) }
             .tag(MainTab.today)
 
-            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, client: model.auth.client, showSettings: $showSettingsSheet)
+            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
                 .keyboardDismissBar()
                 .tabItem { Label(MainTab.money.title, systemImage: MainTab.money.icon) }
                 .tag(MainTab.money)

@@ -122,7 +122,10 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(confirm.isEnabled, "Confirm is disabled: the parsed draft still has open questions")
         confirm.tap()
 
-        XCTAssertTrue(text("Записи успешно добавлены.").waitForExistence(timeout: 5), "No success message after confirming")
+        let added = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Добавлено.")).firstMatch
+        XCTAssertTrue(added.waitForExistence(timeout: 10), "No success message after confirming")
+        // Confirming opens «Операции», where «Добавлено вручную» lists the record before the feed is even opened.
+        XCTAssertTrue(recordRow(token).waitForExistence(timeout: 5), "The new expense is not in «Добавлено вручную»")
         openMoneySection("Операции")
         expandOperationsFeed()
         let record = recordRow(token)
