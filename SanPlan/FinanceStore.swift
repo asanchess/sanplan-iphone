@@ -47,7 +47,7 @@ public final class FinanceStore: ObservableObject {
     private var sharedURL: URL { arnaDir.appendingPathComponent("finance_state.json") }
 
     /// A folder per account, named by a hash of the email so the address itself is not written to disk.
-    static func accountFolderName(_ email: String) -> String {
+    nonisolated static func accountFolderName(_ email: String) -> String {
         let normalized = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let digest = SHA256.hash(data: Data(normalized.utf8))
         return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
