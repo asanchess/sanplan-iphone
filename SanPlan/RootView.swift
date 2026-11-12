@@ -207,6 +207,7 @@ public struct RootView: View {
                     notes: model.notes,
                     reviewsVault: model.reviewsVault,
                     inputs: model.inputs,
+                    appStreak: { [model] day in model.appStreak(today: day) },
                     dictation: model.dictation,
                     reviewRequest: reviewNotifications.dayReviewRequests
                 )
@@ -222,7 +223,8 @@ public struct RootView: View {
                     dictation: model.dictation,
                     workouts: model.workouts,
                     showSettings: $showSettingsSheet,
-                    onOpenWorkout: { selectedTab = .workout }
+                    onOpenWorkout: { selectedTab = .workout },
+                    streakSources: model.streakSources
                 )
                 .keyboardDismissBar()
             }

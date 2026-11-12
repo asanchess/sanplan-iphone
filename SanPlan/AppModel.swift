@@ -187,6 +187,11 @@ public final class AppModel: ObservableObject {
         if case .signedIn = auth.phase {
             Task { await plans.reload() }
             notes.syncNow()
+            // Another device may have changed money, workouts, reviews or habits while ARNA was in the background.
+            financeVault.syncNow()
+            trainingVault.syncNow()
+            reviewsVault.syncNow()
+            habitsVault.syncNow()
         }
     }
 }

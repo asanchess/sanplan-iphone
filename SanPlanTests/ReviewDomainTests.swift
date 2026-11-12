@@ -181,4 +181,11 @@ final class ReviewDomainTests: XCTestCase {
         XCTAssertNil(CanSpendLine.make(spend: nil, gap: "Задайте лимиты", hasData: false))
         XCTAssertNil(CanSpendLine.make(spend: nil, gap: nil, hasData: true))
     }
+
+    func testStreakLineStatesDaysAndRestDays() {
+        XCTAssertEqual(StreakLine.text(StreakState(days: 5, restDaysLeft: 2)), "Серия: 5 дней · отдыха осталось 2")
+        XCTAssertEqual(StreakLine.text(StreakState(days: 1, restDaysLeft: 0)), "Серия: 1 день · дней отдыха не осталось")
+        XCTAssertNil(StreakLine.text(StreakState(days: 0, restDaysLeft: 2)))
+        XCTAssertNil(StreakLine.text(nil))
+    }
 }

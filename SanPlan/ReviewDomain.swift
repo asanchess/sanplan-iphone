@@ -410,6 +410,15 @@ public struct ReviewReminderSettings: Codable, Equatable {
 
 // MARK: - Formatting shared by review and answers
 
+public enum StreakLine {
+    /// «Серия: 5 дней · отдыха осталось 2»; nil, когда показывать нечего.
+    public static func text(_ streak: StreakState?) -> String? {
+        guard let streak, streak.days > 0 else { return nil }
+        let head = "Серия: " + ReviewFormat.plural(streak.days, "день", "дня", "дней")
+        return head + " · " + (streak.restDaysLeft > 0 ? "отдыха осталось (streak.restDaysLeft)" : "дней отдыха не осталось")
+    }
+}
+
 public enum ReviewFormat {
     /// «1 234 ₸» from tiyn.
     public static func tenge(_ minor: Int64) -> String {

@@ -48,6 +48,8 @@ enum HabitText {
 struct HabitsSection: View {
     @ObservedObject var habits: HabitStore
     let today: String
+    /// Источники активности всех разделов для общей серии; без них серия не показывается.
+    var streakSources: [StreakEngine.ActivitySource] = []
     @State private var editorTarget: HabitEditorTarget?
 
     private var due: [Habit] { habits.dueHabits(on: today) }
@@ -67,6 +69,13 @@ struct HabitsSection: View {
                         .foregroundColor(DS.Colors.textSecondary)
                         .accessibilityLabel("Выполнено \(s.done) из \(s.total)")
                 }
+            }
+
+            if !streakSources.isEmpty {
+                let streak = habits.appStreak(today: today, sources: streakSources)
+                Text("Серия \(streak.days) дн. · дней отдыха в месяце: \(streak.restDaysLeft)")
+                    .font(.subheadline)
+                    .foregroundColor(DS.Colors.textSecondary)
             }
 
             if habits.activeHabits.isEmpty {

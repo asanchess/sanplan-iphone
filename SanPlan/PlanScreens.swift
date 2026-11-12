@@ -9,6 +9,7 @@ public struct PlanScreen: View {
     @Binding public var showSettings: Bool
     @ObservedObject private var habits = HabitStore.shared
     private let onOpenWorkout: () -> Void
+    private let streakSources: [StreakEngine.ActivitySource]
 
     @State private var viewMode: ViewMode = .day
     @State private var isShowingAlarms: Bool = false
@@ -30,7 +31,8 @@ public struct PlanScreen: View {
         dictation: SpeechDictation,
         workouts: WorkoutStore,
         showSettings: Binding<Bool>,
-        onOpenWorkout: @escaping () -> Void = {}
+        onOpenWorkout: @escaping () -> Void = {},
+        streakSources: [StreakEngine.ActivitySource] = []
     ) {
         self.store = store
         self.recorder = recorder
@@ -39,6 +41,7 @@ public struct PlanScreen: View {
         self.workouts = workouts
         self._showSettings = showSettings
         self.onOpenWorkout = onOpenWorkout
+        self.streakSources = streakSources
     }
 
     public var body: some View {
@@ -102,7 +105,7 @@ public struct PlanScreen: View {
                         case .upcoming:
                             upcomingList
                         case .habits:
-                            HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone))
+                            HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone), streakSources: streakSources)
                         }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)

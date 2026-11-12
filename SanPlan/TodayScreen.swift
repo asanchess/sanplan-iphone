@@ -13,6 +13,8 @@ public struct TodayScreen: View {
     var reviewsVault: VaultCollection<ReviewDayRecord>? = nil
     /// Voice input for the review line; nil: typing only.
     var inputs: InputDrafts? = nil
+    /// The app-wide streak for a day; nil hides the line.
+    var appStreak: ((String) -> StreakState)? = nil
     var dictation: SpeechDictation? = nil
     /// Grows when the day-review reminder is tapped (ReviewNotifications); opens the day review.
     var reviewRequest: Int = 0
@@ -35,6 +37,12 @@ public struct TodayScreen: View {
                             CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") {
                                 showSettings = true
                             }
+                        }
+                        if let line = StreakLine.text(appStreak?(reviewDay)) {
+                            Text(line)
+                                .font(.subheadline)
+                                .foregroundColor(DS.Colors.textSecondary)
+                                .accessibilityLabel(line)
                         }
                         reviewCard
                         workoutCard
