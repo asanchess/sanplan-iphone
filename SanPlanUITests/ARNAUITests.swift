@@ -131,7 +131,8 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(recordRow(token).waitForExistence(timeout: 5), "The new expense is not in «Добавлено вручную»")
         openMoneySection("Операции")
         expandOperationsFeed()
-        let record = recordRow(token)
+        // The feed row itself, not the «Добавлено вручную» card whose label also carries the token.
+        let record = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ AND identifier != %@", token, "manual-entries")).firstMatch
         XCTAssertTrue(record.waitForExistence(timeout: 5), "Saved expense is not in the operations feed")
         scrollTo(record)
 

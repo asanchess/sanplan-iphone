@@ -64,6 +64,7 @@ public final class WorkoutStore: ObservableObject {
     private(set) var vault: VaultCollection<WorkoutVaultEntry>?
     /// Программа сверена с сервером после первой синхронизации; до этого локальные правки программы не выгружаются.
     private(set) var programReconciled = false
+    private var programReconcileRunning = false
     private var vaultObservation: AnyCancellable?
     private var migrationRunning = false
 
@@ -382,6 +383,7 @@ public final class WorkoutStore: ObservableObject {
         vaultObservation = nil
         vault = nil
         programReconciled = false
+        programReconcileRunning = false
         migrationRunning = false
         vaultStatus = .idle
     }
@@ -398,6 +400,7 @@ public final class WorkoutStore: ObservableObject {
         mergeVault(vault)
         uploadMissing(vault)
         if programReconciled { mergeProgram(vault) }
+        else if vault.syncState == .idle { reconcileProgramAfterSync(vault) }
         if autoMigrate, vaultStatus == .idle, !migrationRunning {
             Task { @MainActor in _ = await self.migrateHistory() }
         }
@@ -444,9 +447,20 @@ public final class WorkoutStore: ObservableObject {
 
     /// Первая сверка программы — только после синхронизации, чтобы старый кэш не затёр план с другого устройства.
     private func reconcileProgramAfterSync(_ collection: VaultCollection<WorkoutVaultEntry>) {
+        guard !programReconciled, !programReconcileRunning else { return }
+        programReconcileRunning = true
         Task { @MainActor in
-            let synced = await collection.whenSynced()
-            guard self.vault === collection, synced, !self.isUnavailable else { return }
+            defer { if self.vault === collection { self.programReconcileRunning = false } }
+            // `whenSynced()` отвечает «да» сразу, если нечего отправлять, — до того как коллекция забрала записи сервера.
+            // Поэтому ждём настоящей синхронизации: она сначала отправляет, потом забирает.
+            await collection.sync()
+            var waited = 0
+            while collection.syncState == .syncing, waited < 500 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                waited += 1
+            }
+            // Нет связи или вход устарел — программу сверим позже, когда синхронизация пройдёт.
+            guard self.vault === collection, collection.syncState == .idle, !self.isUnavailable else { return }
             self.mergeProgram(collection)
             self.programReconciled = true
             self.pushProgram()
