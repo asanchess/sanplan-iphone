@@ -142,6 +142,8 @@ struct CaptureSheet: View {
     let onMakePlan: (String) -> Void
     let onMakeExpense: (String) -> Void
     let onSaved: () -> Void
+    /// Answers questions typed into «+» from the other sections' data (nil: no answers offered).
+    var askData: (() -> AskData)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
@@ -208,6 +210,7 @@ struct CaptureSheet: View {
         if hasText {
             let hints = NoteText.hints(text)
             VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                if let askData { AskOffer(text: text, data: askData) }
                 if hints.looksLikePlan || hints.looksLikeExpense {
                     Text("Похоже на").font(.footnote).foregroundColor(DS.Colors.textSecondary)
                 }

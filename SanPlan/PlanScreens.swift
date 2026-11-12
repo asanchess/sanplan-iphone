@@ -7,6 +7,7 @@ public struct PlanScreen: View {
     @ObservedObject public var dictation: SpeechDictation
     @ObservedObject public var workouts: WorkoutStore
     @Binding public var showSettings: Bool
+    @ObservedObject private var habits = HabitStore.shared
     private let onOpenWorkout: () -> Void
 
     @State private var viewMode: ViewMode = .day
@@ -18,6 +19,7 @@ public struct PlanScreen: View {
         case day = "Сегодня"
         case week = "Неделя"
         case upcoming = "Все"
+        case habits = "Привычки"
         public var id: String { rawValue }
     }
 
@@ -99,6 +101,8 @@ public struct PlanScreen: View {
                             weekView
                         case .upcoming:
                             upcomingList
+                        case .habits:
+                            HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone))
                         }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)

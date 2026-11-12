@@ -540,6 +540,10 @@ struct ExerciseSetsCard: View {
                     .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
             }
             .buttonStyle(.plain)
+            .sensoryFeedback(trigger: entry.done) { _, isDone in
+                let tap: SensoryFeedback = isDone ? .impact(weight: .light, intensity: 0.8) : .selection
+                return tap
+            }
             .accessibilityLabel(entry.done ? "Подход \(set + 1) сделан, снять отметку" : "Отметить подход \(set + 1)")
 
             Button {

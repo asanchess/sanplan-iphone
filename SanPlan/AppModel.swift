@@ -38,6 +38,17 @@ public final class AppModel: ObservableObject {
         WorkoutStore.shared.health = WorkoutHealthExport.shared
         // Screenshots run signed in without an account, so their workouts live in the phone's shared folder too.
         if screenshots { WorkoutStore.shared.switchOwner(to: .device) }
+        // Habits read the neighbours only through their day summaries (docs/contracts/DOMAINS.md §2).
+        let finance = self.finance
+        HabitStore.shared.context = HabitContext(
+            trainingDay: { day in HabitTrainingDay(completed: WorkoutStore.shared.daySummary(for: day).completed) },
+            financeDay: { day in
+                let s = finance.daySummary(for: day)
+                return HabitFinanceDay(spent: Int(s.spent), byCategory: s.byCategory.mapValues { Int($0) })
+            }
+        )
+        if screenshots { HabitStore.shared.switchOwner(to: .device) }
+        ReviewNotifications.shared.install()
         let inputs = InputDrafts()
         self.inputs = inputs
         self.dictation = SpeechDictation(drafts: inputs)
@@ -84,11 +95,16 @@ public final class AppModel: ObservableObject {
         inputs.clear(.plans)
         inputs.clear(.money)
         inputs.clear(.notes)
+        if dictation.isListening(to: .review) { dictation.stop() }
+        inputs.clear(.review)
         notes.detach()
         vault.reset()
         plans.resetForSignOut()
         finance.switchOwner(to: .none)
         workouts.switchOwner(to: .none)
+        HabitStore.shared.switchOwner(to: .none)
+        // The 21:00 review reminder belongs to the account that set it.
+        ReviewReminder.cancel()
     }
 
     /// Loads the money and workouts of the account that just signed in. A different account never sees the previous one's draft.
@@ -104,6 +120,7 @@ public final class AppModel: ObservableObject {
         }
         let next = FinanceStore.Owner.account(email)
         workouts.switchOwner(to: next)
+        HabitStore.shared.switchOwner(to: next)
         guard finance.owner != next else { return }
         if case .account = finance.owner {
             if dictation.isListening(to: .money) { dictation.stop() }

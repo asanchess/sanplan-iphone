@@ -80,7 +80,17 @@ struct WorkoutHistoryView: View {
                             .foregroundColor(DS.Colors.textSecondary)
                             .padding(.top, DS.Metrics.spacing4)
                         ForEach(group.records) { record in
-                            recordRow(record)
+                            WorkoutSwipeRow(actions: [
+                                WorkoutSwipeAction(id: "repeat", title: "Повторить", icon: "arrow.counterclockwise", color: DS.Colors.accent) {
+                                    store.repeatWorkout(from: record)
+                                },
+                                WorkoutSwipeAction(id: "delete", title: "Удалить", icon: "trash", color: DS.Colors.destructive) {
+                                    // Без вопроса: внизу экрана появится «Отменить».
+                                    store.deleteRecord(id: record.id)
+                                },
+                            ]) {
+                                recordRow(record)
+                            }
                         }
                     }
                 }
@@ -276,8 +286,11 @@ struct WorkoutHistoryView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button { store.repeatWorkout(from: record) } label: { Label("Повторить", systemImage: "arrow.counterclockwise") }
             Button(role: .destructive) { deleting = record } label: { Label("Удалить", systemImage: "trash") }
         }
+        .accessibilityAction(named: "Повторить") { store.repeatWorkout(from: record) }
+        .accessibilityAction(named: "Удалить") { store.deleteRecord(id: record.id) }
     }
 
     static let dayFormatter: DateFormatter = {

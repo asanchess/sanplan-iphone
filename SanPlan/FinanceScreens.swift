@@ -29,6 +29,7 @@ public struct FinanceScreen: View {
     @State private var horizonDays: Int = 30
     @State private var recordToDelete: FinanceRecord? = nil
     @State private var recordToEdit: FinanceRecord? = nil
+    @State private var recordToCategorize: FinanceRecord? = nil
 
     // Tabs, pinned header and the operations feed
     @State private var tab: FinanceTab = .overview
@@ -97,6 +98,7 @@ public struct FinanceScreen: View {
                     if !store.state.records.isEmpty {
                         VStack(spacing: DS.Metrics.spacing12) {
                             CleanHeader(snapshot: snapshot) { showBreakdown = true }
+                            CanSpendTodayCard(result: store.canSpendToday(on: todayString))
                             Picker("Раздел", selection: $tab) {
                                 ForEach(FinanceTab.allCases) { Text($0.title).tag($0) }
                             }
@@ -184,6 +186,19 @@ public struct FinanceScreen: View {
         } message: {
             Text("Запись будет удалена, а статистика пересчитана.")
         }
+        .confirmationDialog(
+            "Категория операции",
+            isPresented: Binding(get: { recordToCategorize != nil }, set: { if !$0 { recordToCategorize = nil } }),
+            titleVisibility: .visible,
+            presenting: recordToCategorize
+        ) { record in
+            ForEach(MerchantCategories.all, id: \.self) { category in
+                Button(category) { setCategory(category, for: record) }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { record in
+            Text(record.title)
+        }
         .sheet(item: $recordToEdit) { record in
             if record.importId == nil {
                 ManualEditSheet(
@@ -263,7 +278,12 @@ public struct FinanceScreen: View {
             FinancePlanTab(store: store, today: todayString, apply: financeApply)
         case .operations:
             ManualEntriesCard(state: store.state) { recordToEdit = $0 }
-            OperationsFeed(store: store, filter: $ledgerFilter, expanded: $feedExpanded) { recordToEdit = $0 }
+            OperationsFeed(
+                store: store, filter: $ledgerFilter, expanded: $feedExpanded,
+                onEdit: { recordToEdit = $0 },
+                onDelete: { recordToDelete = $0 },
+                onCategory: { recordToCategorize = $0 }
+            )
             ReconcileCard(snapshot: snapshot) { showReconcile = true }
             statementsSection
             vaultActionsSection
@@ -322,6 +342,13 @@ public struct FinanceScreen: View {
     }
 
     private var financeApply: FinanceApply { FinanceApply(run: applyChange) }
+
+    private func setCategory(_ category: String, for record: FinanceRecord) {
+        recordToCategorize = nil
+        if applyChange("Категория: \(category).", { try StatementImport.recategorize(record.id, to: category, in: $0) }) == nil {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
 
     // MARK: - Header Bar
 

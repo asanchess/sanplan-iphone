@@ -1306,6 +1306,8 @@ struct OperationsFeed: View {
     @Binding var filter: LedgerFilter
     @Binding var expanded: Bool
     let onEdit: (FinanceRecord) -> Void
+    let onDelete: (FinanceRecord) -> Void
+    let onCategory: (FinanceRecord) -> Void
 
     @State private var pageSize = 60
 
@@ -1350,7 +1352,9 @@ struct OperationsFeed: View {
                     ForEach(paged(days)) { day in
                         dayHeader(day)
                         ForEach(day.entries) { entry in
-                            LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
+                            FinanceSwipeRow(actions: swipeActions(for: entry)) {
+                                LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
+                            }
                         }
                     }
                     if totals.count > pageSize {
@@ -1363,6 +1367,17 @@ struct OperationsFeed: View {
             }
         }
         .onChange(of: filter) { _, _ in pageSize = Self.page }
+    }
+
+    /// Swipe left: change the category (income and spending only) or delete.
+    private func swipeActions(for entry: LedgerEntry) -> [FinanceSwipeAction] {
+        let record = entry.record
+        var actions: [FinanceSwipeAction] = []
+        if record.kind == "income" || record.kind == "expense" {
+            actions.append(FinanceSwipeAction(id: "category", title: "Категория", systemImage: "tag") { onCategory(record) })
+        }
+        actions.append(FinanceSwipeAction(id: "delete", title: "Удалить", systemImage: "trash", isDestructive: true) { onDelete(record) })
+        return actions
     }
 
     private var periodTitle: String {

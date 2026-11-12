@@ -4,13 +4,15 @@ import Foundation
 @MainActor
 public final class InputDrafts: ObservableObject {
     public enum Target: String, CaseIterable {
-        case plans, money, notes
+        case plans, money, notes, review
     }
 
     @Published public private(set) var plans: String = ""
     @Published public private(set) var money: String = ""
     /// The «+» capture field.
     @Published public private(set) var notes: String = ""
+    /// The line of the day review (Итоги дня).
+    @Published public private(set) var review: String = ""
 
     /// The text that was in the field when dictation started; live speech is appended after it.
     private var dictationBase: [Target: String] = [:]
@@ -24,6 +26,7 @@ public final class InputDrafts: ObservableObject {
         case .plans: return plans
         case .money: return money
         case .notes: return notes
+        case .review: return review
         }
     }
 
@@ -110,6 +113,7 @@ public final class InputDrafts: ObservableObject {
         case .plans: if plans != text { plans = text }
         case .money: if money != text { money = text }
         case .notes: if notes != text { notes = text }
+        case .review: if review != text { review = text }
         }
     }
 }

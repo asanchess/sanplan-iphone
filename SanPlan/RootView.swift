@@ -40,6 +40,7 @@ public struct RootView: View {
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
+    @ObservedObject private var reviewNotifications = ReviewNotifications.shared
 
     private var isScreenshotSignedInMode: Bool {
         #if DEBUG
@@ -202,7 +203,9 @@ public struct RootView: View {
                     finance: model.finance,
                     workouts: model.workouts,
                     selectedTab: $selectedTab,
-                    showSettings: $showSettingsSheet
+                    showSettings: $showSettingsSheet,
+                    notes: model.notes,
+                    reviewRequest: reviewNotifications.dayReviewRequests
                 )
                 .captureButton(action: openCapture)
             }
@@ -253,6 +256,7 @@ public struct RootView: View {
             .keyboardShortcut("n", modifiers: .command)
         }
         .tint(DS.Colors.accent)
+        .onChange(of: reviewNotifications.dayReviewRequests) { _, _ in selectedTab = .today }
         .sheet(isPresented: $showCapture) {
             CaptureSheet(
                 inputs: model.inputs,
@@ -260,7 +264,8 @@ public struct RootView: View {
                 notes: model.notes,
                 onMakePlan: { handOff($0, to: .plans) },
                 onMakeExpense: { handOff($0, to: .money) },
-                onSaved: {}
+                onSaved: {},
+                askData: { [model] in AskData.current(plans: model.plans, finance: model.finance, workouts: model.workouts) }
             )
         }
     }

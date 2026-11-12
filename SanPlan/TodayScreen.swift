@@ -7,7 +7,18 @@ public struct TodayScreen: View {
     @ObservedObject var workouts: WorkoutStore
     @Binding var selectedTab: MainTab
     @Binding var showSettings: Bool
+    /// Notes feed the week summary and the streak; nil until the root view passes them.
+    var notes: NotesStore? = nil
+    /// Grows when the day-review reminder is tapped (ReviewNotifications); opens the day review.
+    var reviewRequest: Int = 0
+    @StateObject private var review = ReviewStore()
+    @State private var reviewSheet: ReviewSheet?
     @State private var isShowingAlarms = false
+
+    private enum ReviewSheet: String, Identifiable {
+        case day, week, history
+        var id: String { rawValue }
+    }
 
     public var body: some View {
         NavigationStack {
@@ -20,6 +31,7 @@ public struct TodayScreen: View {
                                 showSettings = true
                             }
                         }
+                        reviewCard
                         workoutCard
                         plansCard
                         moneyCard
@@ -31,13 +43,67 @@ public struct TodayScreen: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .onChange(of: reviewRequest) { _, _ in reviewSheet = .day }
         .sheet(isPresented: $isShowingAlarms) {
             AlarmsScreen(store: plans)
         }
+        .sheet(item: $reviewSheet) { sheet in
+            switch sheet {
+            case .day:
+                DayReviewSheet(review: review, day: reviewDay, sources: reviewSources, moveOpen: { await moveOpenToTomorrow($0) })
+            case .week:
+                WeekReviewSheet(review: review, day: reviewDay, sources: reviewSources, spheres: ReviewSphere.defaults)
+            case .history:
+                ReviewHistorySheet(review: review)
+            }
+        }
         .task {
+            syncReviewOwner()
             finance.refreshSummary(today: PlanDomain.today())
             await plans.reload()
         }
+        // Reviews follow the signed-in account: money switches owner on sign-in and sign-out.
+        .onChange(of: finance.state) { _, _ in syncReviewOwner() }
+    }
+
+    private var reviewDay: String { PlanDomain.today(timeZone: plans.timeZone) }
+
+    private var reviewCard: some View {
+        ReviewCard(review: review, today: reviewDay,
+                   onDay: { reviewSheet = .day }, onWeek: { reviewSheet = .week }, onHistory: { reviewSheet = .history })
+    }
+
+    private func reviewSources() -> ReviewSources {
+        ReviewSources.current(plans: plans, finance: finance, workouts: workouts, notes: notes)
+    }
+
+    private func syncReviewOwner() {
+        let before = review.owner
+        review.switchOwner(to: finance.owner)
+        guard review.owner != before else { return }
+        if review.owner == .none {
+            ReviewReminder.cancel()
+        } else {
+            let settings = review.reminder
+            Task { await ReviewReminder.apply(settings) }
+        }
+    }
+
+    /// TEMP until Plans ships `PlanStore.moveOpenToTomorrow(_:)`: saves the same tasks again one day later.
+    /// Open drafts are set aside for the save and put back afterwards.
+    private func moveOpenToTomorrow(_ ids: [String]) async -> Bool {
+        let tomorrow = PlanDomain.addDays(dateStr: reviewDay, days: 1)
+        let moved = plans.plans.filter { ids.contains($0.id) && $0.completed != true }.map { plan -> PlanItem in
+            var copy = plan
+            copy.date = tomorrow
+            return copy
+        }
+        guard !moved.isEmpty else { return true }
+        let setAside = plans.draftPlans
+        plans.setDraftPlans(moved)
+        let saved = await plans.saveDrafts()
+        plans.setDraftPlans(setAside)
+        return saved
     }
 
     private var plansCard: some View {

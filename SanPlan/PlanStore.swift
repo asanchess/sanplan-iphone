@@ -350,6 +350,36 @@ public final class PlanStore: ObservableObject {
         }
     }
 
+    /// «Перенести незакрытое на завтра»: сохраняет задачи с датой +1 день. Возвращает false при отказе сервера.
+    @discardableResult
+    public func moveOpenToTomorrow(_ ids: [String]) async -> Bool {
+        let moved = PlanSummary.movedToNextDay(plans: plans, ids: ids)
+        guard !moved.isEmpty else { return true }
+        let started = generation
+        do {
+            let response = try await PlanAPI.savePlans(client: client, plans: moved, confirmed: true, keepConflicts: true)
+            guard started == generation else { return false }
+            let refused = (response.results ?? []).filter { $0.status != "saved" }
+            if let all = response.plans {
+                plans = all
+                onPlansChanged(all)
+            }
+            if !refused.isEmpty {
+                errorMessage = refused.compactMap(\.message).joined(separator: " ")
+                return false
+            }
+            return true
+        } catch let err as APIError {
+            guard started == generation else { return false }
+            handleAPIError(err)
+            return false
+        } catch {
+            guard started == generation else { return false }
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     public func exportPlanToGoogle(_ item: PlanItem) async {
         let started = generation
         googlePendingId = item.id
