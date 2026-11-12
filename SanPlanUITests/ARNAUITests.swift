@@ -550,9 +550,10 @@ final class ARNAUITests: XCTestCase {
         var drags = 0
         while !isOnScreen(element) && drags < maxDrags {
             if element.frame.minY < visibleTop() {
-                drag(from: 0.35, to: 0.65)
+                // Below a pinned header (Money keeps balance, «Можно потратить сегодня» and tabs on top, ~40% of the screen).
+                drag(from: 0.50, to: 0.80)
             } else {
-                drag(from: 0.65, to: 0.35)
+                drag(from: 0.80, to: 0.50)
             }
             drags += 1
         }
