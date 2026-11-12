@@ -473,6 +473,37 @@ final class WorkoutHistoryTests: XCTestCase {
         XCTAssertEqual(PeriodSummary.empty.averageSeconds, 0)
     }
 
+    func testTypedNumbersAcceptCommaOrDot() {
+        XCTAssertEqual(ValueStepperRow.number("62,5"), 62.5)
+        XCTAssertEqual(ValueStepperRow.number(" 60 "), 60)
+        XCTAssertEqual(ValueStepperRow.number("62.5"), 62.5)
+        XCTAssertNil(ValueStepperRow.number("шесть"))
+        XCTAssertNil(ValueStepperRow.number(""))
+    }
+
+    func testPeriodsCompareOnlyTheSameStretchOfTheLastWeek() {
+        let calendar = utc()
+        // Last week: Monday and Thursday. Today is Wednesday noon, so only Monday counts against this week.
+        let records = [
+            record(start: ms(2026, 11, 2, 9)), record(start: ms(2026, 11, 5, 9)),
+            record(start: ms(2026, 11, 9, 9))
+        ]
+        let now = WorkoutHistory.date(ms(2026, 11, 11, 12))
+        let week = WorkoutHistory.periods(records, component: .weekOfYear, now: now, calendar: calendar)
+        XCTAssertEqual(week.current.workouts, 1)
+        XCTAssertEqual(week.previous.workouts, 1)
+
+        // On Sunday night the whole last week is in.
+        let sunday = WorkoutHistory.periods(records, component: .weekOfYear, now: WorkoutHistory.date(ms(2026, 11, 15, 23)), calendar: calendar)
+        XCTAssertEqual(sunday.previous.workouts, 2)
+
+        // A short month never reaches into this one: 31 March compares with all of February.
+        let march = [record(start: ms(2026, 2, 27, 9)), record(start: ms(2026, 3, 2, 9))]
+        let month = WorkoutHistory.periods(march, component: .month, now: WorkoutHistory.date(ms(2026, 3, 31, 12)), calendar: calendar)
+        XCTAssertEqual(month.previous.workouts, 1)
+        XCTAssertEqual(month.current.workouts, 1)
+    }
+
     func testActiveDaysCountWorkoutsPerDay() {
         let calendar = utc()
         let days = WorkoutHistory.activeDays([

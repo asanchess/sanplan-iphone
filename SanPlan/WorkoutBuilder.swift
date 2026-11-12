@@ -265,6 +265,12 @@ struct ValueStepperRow: View {
     let canIncrease: Bool
     let onDecrease: () -> Void
     let onIncrease: () -> Void
+    /// When set, a tap on the value opens a field for typing it; the closure returns false for a number it cannot take.
+    var onEnter: ((String) -> Bool)? = nil
+    var allowsDecimal = false
+
+    @State private var entering = false
+    @State private var typed = ""
 
     var body: some View {
         HStack(spacing: DS.Metrics.spacing8) {
@@ -273,16 +279,48 @@ struct ValueStepperRow: View {
                 .foregroundColor(DS.Colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             stepButton("minus", label: "Меньше: \(title)", enabled: canDecrease, action: onDecrease)
-            Text(value)
-                .font(.body.weight(.semibold).monospacedDigit())
-                .foregroundColor(DS.Colors.textPrimary)
-                .contentTransition(.numericText())
-                .frame(minWidth: 52)
-                .animation(.snappy, value: value)
+            valueView
             stepButton("plus", label: "Больше: \(title)", enabled: canIncrease, action: onIncrease)
         }
         .sensoryFeedback(.selection, trigger: value)
         .accessibilityElement(children: .contain)
+        .alert(title, isPresented: $entering) {
+            TextField(title, text: $typed)
+                .keyboardType(allowsDecimal ? .decimalPad : .numberPad)
+            Button("Готово") { _ = onEnter?(typed) }
+            Button("Отмена", role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder private var valueView: some View {
+        let text = Text(value)
+            .font(.body.weight(.semibold).monospacedDigit())
+            .foregroundColor(DS.Colors.textPrimary)
+            .contentTransition(.numericText())
+            .frame(minWidth: 52)
+            .animation(.snappy, value: value)
+        if onEnter != nil {
+            Button {
+                typed = ""
+                entering = true
+            } label: {
+                text
+                    .padding(.vertical, DS.Metrics.spacing4)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(DS.Colors.textSecondary.opacity(0.35)).frame(height: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title): \(value)")
+            .accessibilityHint("Ввести число")
+        } else {
+            text
+        }
+    }
+
+    /// «62,5» or «62.5» → 62.5; nil for anything that is not a number.
+    static func number(_ text: String) -> Double? {
+        Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
     }
 
     private func stepButton(_ icon: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {

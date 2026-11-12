@@ -122,7 +122,7 @@ struct WorkoutHistoryView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("Эта неделя: \(streak.thisWeek) из \(streak.goal)")
+                    Text(weekProgressText(streak))
                         .font(.subheadline.monospacedDigit())
                         .foregroundColor(DS.Colors.textPrimary)
                     HStack(spacing: 4) {
@@ -138,8 +138,27 @@ struct WorkoutHistoryView: View {
         }
     }
 
+    /// «Эта неделя: 1 из 3»; past the goal it says so instead of «2 из 1».
+    private func weekProgressText(_ streak: WeekStreak) -> String {
+        streak.thisWeek > streak.goal
+            ? "Эта неделя: \(streak.thisWeek), цель \(streak.goal) выполнена"
+            : "Эта неделя: \(streak.thisWeek) из \(streak.goal)"
+    }
+
     private func totalsGrid(_ current: PeriodSummary, previous: PeriodSummary) -> some View {
         let against = period == .week ? "к прошлой неделе" : "к прошлому месяцу"
+        let footnote = period == .week
+            ? "Сравнение с прошлой неделей по этот же день"
+            : "Сравнение с прошлым месяцем по это же число"
+        return VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
+            statTiles(current, previous: previous, against: against)
+            Text(footnote)
+                .font(.caption)
+                .foregroundColor(DS.Colors.textSecondary)
+        }
+    }
+
+    private func statTiles(_ current: PeriodSummary, previous: PeriodSummary, against: String) -> some View {
         let columns = [GridItem(.flexible(), spacing: DS.Metrics.spacing8), GridItem(.flexible(), spacing: DS.Metrics.spacing8)]
         return LazyVGrid(columns: columns, spacing: DS.Metrics.spacing8) {
             WorkoutStatTile(

@@ -143,7 +143,7 @@ struct WorkoutTimerCard: View {
                             .foregroundColor(DS.Colors.textSecondary)
                             .accessibilityLabel("Идёт тренировка: \(total.map(WorkoutFormat.duration) ?? "—")")
                         Spacer()
-                        Text("Подход \(session.setIndex + 1) из \(exercise.rests.count)")
+                        Text(setHeader(exercise))
                             .font(.subheadline.weight(.semibold).monospacedDigit())
                             .foregroundColor(DS.Colors.textSecondary)
                     }
@@ -170,7 +170,7 @@ struct WorkoutTimerCard: View {
                     }
                     .frame(maxWidth: .infinity)
                     if elapsed != nil {
-                        Text("Время подхода")
+                        Text(session.phase == .alerting ? "Следующий подход уже идёт" : "Время подхода")
                             .font(.caption)
                             .foregroundColor(DS.Colors.textSecondary)
                     }
@@ -184,6 +184,17 @@ struct WorkoutTimerCard: View {
                 }
             }
         }
+    }
+
+    /// «Подход 2 из 4». Once the rest has run out the clock already counts the next set, so the header names that one.
+    private func setHeader(_ exercise: SessionExercise) -> String {
+        guard session.phase == .alerting, let next = WorkoutDomain.nextSet(session) else {
+            return "Подход \(session.setIndex + 1) из \(exercise.rests.count)"
+        }
+        guard next.exercise == session.exerciseIndex else {
+            return "Далее: \(session.exercises[next.exercise].baseName)"
+        }
+        return "Подход \(next.set + 1) из \(exercise.rests.count)"
     }
 
     private func timerText(seconds: Int, hasStopwatch: Bool) -> String {
@@ -271,7 +282,8 @@ struct SetValueSteppers: View {
             let entry = item.sets[set]
             let suggested = item.suggestedValues(for: set)
             let weight = entry.weightKg ?? suggested.weightKg
-            let reps = entry.reps ?? suggested.reps ?? 0
+            let knownReps = entry.reps ?? suggested.reps
+            let reps = knownReps ?? 0
             let bodyweight = item.bodyweight ?? false
             let step = item.weightStepKg ?? WorkoutSessionEdit.defaultStepKg
             VStack(spacing: DS.Metrics.spacing4) {
@@ -281,15 +293,26 @@ struct SetValueSteppers: View {
                     canDecrease: (weight ?? 0) > 0,
                     canIncrease: (weight ?? 0) < WorkoutSessionEdit.weightRange.upperBound,
                     onDecrease: { setWeight(max(0, (weight ?? 0) - step)) },
-                    onIncrease: { setWeight(min(WorkoutSessionEdit.weightRange.upperBound, (weight ?? 0) + step)) }
+                    onIncrease: { setWeight(min(WorkoutSessionEdit.weightRange.upperBound, (weight ?? 0) + step)) },
+                    onEnter: { text in
+                        guard let value = ValueStepperRow.number(text), WorkoutSessionEdit.weightRange.contains(value) else { return false }
+                        setWeight(value)
+                        return true
+                    },
+                    allowsDecimal: true
                 )
                 ValueStepperRow(
                     title: "Повторы",
-                    value: "\(reps)",
+                    value: knownReps.map(String.init) ?? "—",
                     canDecrease: reps > 0,
                     canIncrease: reps < WorkoutSessionEdit.repsRange.upperBound,
                     onDecrease: { setReps(reps - 1) },
-                    onIncrease: { setReps(reps + 1) }
+                    onIncrease: { setReps(reps + 1) },
+                    onEnter: { text in
+                        guard let value = Int(text.trimmingCharacters(in: .whitespaces)), WorkoutSessionEdit.repsRange.contains(value) else { return false }
+                        setReps(value)
+                        return true
+                    }
                 )
             }
         }

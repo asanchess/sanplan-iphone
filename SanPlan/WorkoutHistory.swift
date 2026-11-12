@@ -389,7 +389,8 @@ public enum WorkoutHistory {
         )
     }
 
-    /// This week or month and the one before it, for «итоги» with a comparison.
+    /// This week or month and the same stretch of the one before it, for «итоги» with a comparison.
+    /// On a Tuesday the previous week counts Monday and Tuesday only, so an unfinished week is not behind by design.
     public static func periods(
         _ records: [WorkoutRecord],
         component: Calendar.Component,
@@ -397,12 +398,13 @@ public enum WorkoutHistory {
         calendar: Calendar
     ) -> (current: PeriodSummary, previous: PeriodSummary) {
         guard let interval = calendar.dateInterval(of: component, for: now),
-              let previousStart = calendar.date(byAdding: component, value: -1, to: interval.start) else {
+              let previousStart = calendar.date(byAdding: component, value: -1, to: interval.start),
+              let sameMoment = calendar.date(byAdding: component, value: -1, to: now) else {
             return (.empty, .empty)
         }
         return (
             summary(records, from: interval.start, to: interval.end),
-            summary(records, from: previousStart, to: interval.start)
+            summary(records, from: previousStart, to: min(sameMoment, interval.start))
         )
     }
 
