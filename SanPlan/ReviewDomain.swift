@@ -293,6 +293,18 @@ public enum ReviewVault {
     }
 }
 
+/// What the Money card says about «Можно потратить сегодня»: the sum, what is missing for it, or nothing.
+public enum CanSpendLine: Equatable {
+    case amount(Int64, basis: String)
+    case gap(String)
+
+    public static func make(spend: CanSpendToday?, gap: String?, hasData: Bool) -> CanSpendLine? {
+        if let spend { return .amount(spend.amount, basis: spend.basis) }
+        if hasData, let gap { return .gap(gap) }
+        return nil
+    }
+}
+
 public enum ReviewMood {
     public static let labels: [Int: String] = [1: "Тяжело", 2: "Так себе", 3: "Нормально", 4: "Хорошо", 5: "Отлично"]
     public static func label(_ mood: Int) -> String { labels[mood] ?? "" }

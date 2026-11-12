@@ -444,6 +444,11 @@ struct ExerciseSetsCard: View {
                         Text(targetText)
                             .font(.caption.monospacedDigit())
                             .foregroundColor(DS.Colors.textSecondary)
+                        if let best = store.bestWeight(exercise: exercise.baseName) {
+                            Text("Рекорд: \(WorkoutFormat.kilograms(best))")
+                                .font(.caption.monospacedDigit())
+                                .foregroundColor(DS.Colors.textSecondary)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     Text("\(exercise.doneCount)/\(exercise.rests.count)")

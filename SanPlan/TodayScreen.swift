@@ -145,16 +145,26 @@ public struct TodayScreen: View {
                     .font(.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
             }
-            if let spend = finance.canSpendToday(on: reviewDay) {
+            switch CanSpendLine.make(spend: finance.canSpendToday(on: reviewDay), gap: finance.canSpendGap(on: reviewDay), hasData: !finance.state.records.isEmpty) {
+            case .amount(let amount, let basis):
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Можно потратить сегодня: \(ReviewFormat.tenge(spend.amount * 100))")
+                    Text("Можно потратить сегодня: (ReviewFormat.tenge(amount * 100))")
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(DS.Colors.textPrimary)
-                    Text(spend.basis)
+                    Text(basis)
                         .font(.footnote)
                         .foregroundColor(DS.Colors.textSecondary)
                 }
                 .accessibilityElement(children: .combine)
+            case .gap(let text):
+                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundColor(DS.Colors.textSecondary)
+                    PillButton("Открыть деньги", style: .secondary) { selectedTab = .money }
+                }
+            case nil:
+                EmptyView()
             }
             PillButton((finance.summary?.spendableMinor ?? finance.summary?.balanceMinor) == nil ? "Добавить первую запись" : "Открыть деньги", style: .secondary) { selectedTab = .money }
         }

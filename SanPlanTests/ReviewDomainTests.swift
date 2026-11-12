@@ -174,4 +174,11 @@ final class ReviewDomainTests: XCTestCase {
         XCTAssertEqual(ReviewFormat.plural(11, "трата", "траты", "трат"), "11 трат")
         XCTAssertEqual(ReviewFormat.plural(21, "трата", "траты", "трат"), "21 трата")
     }
+
+    func testCanSpendLinePicksAmountGapOrNothing() {
+        XCTAssertEqual(CanSpendLine.make(spend: CanSpendToday(amount: 5000, basis: "b"), gap: nil, hasData: true), .amount(5000, basis: "b"))
+        XCTAssertEqual(CanSpendLine.make(spend: nil, gap: "Задайте лимиты", hasData: true), .gap("Задайте лимиты"))
+        XCTAssertNil(CanSpendLine.make(spend: nil, gap: "Задайте лимиты", hasData: false))
+        XCTAssertNil(CanSpendLine.make(spend: nil, gap: nil, hasData: true))
+    }
 }
