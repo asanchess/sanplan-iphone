@@ -202,7 +202,7 @@ final class WorkoutBuilderAndLibraryTests: XCTestCase {
         XCTAssertEqual(types(.nextSet), [nil, nil, nil, nil, "acknowledge", nil])
         XCTAssertEqual(types(.addThirty), [nil, nil, "adjust", "adjust", nil, nil])
         XCTAssertEqual(types(.resume), [nil, nil, nil, "resume", nil, nil])
-        XCTAssertEqual(types(.finish), ["finish", "finish", "finish", "finish", "finish", nil])
+        XCTAssertEqual(types(.finish), ["finishSet", "finishSet", "finishSet", "finishSet", "finishSet", nil])
         XCTAssertEqual(WorkoutLiveState.command(for: .addThirty, phase: .paused)?.seconds, 30)
     }
 

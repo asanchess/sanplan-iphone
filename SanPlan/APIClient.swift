@@ -126,6 +126,23 @@ public final class APIClient: @unchecked Sendable {
         return try await perform(request)
     }
 
+    /// For endpoints whose error bodies carry data (a 409 with the current version). 401 still throws.
+    public func send(method: String, path: String, body: (any Encodable)? = nil) async throws -> (status: Int, data: Data) {
+        let bodyData = try body.map { try JSONEncoder().encode($0) }
+        let request = try buildRequest(path: path, query: nil, method: method, bodyData: bodyData)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIError.transport(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        if data.count > Self.maxResponseBytes { throw APIError.responseTooLarge }
+        if http.statusCode == 401 { throw APIError.unauthorized }
+        return (http.statusCode, data)
+    }
+
     private func buildRequest(
         path: String,
         query: [String: String]?,

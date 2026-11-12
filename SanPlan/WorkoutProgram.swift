@@ -158,6 +158,36 @@ public enum WorkoutProgram {
         return (sundayFirst + 5) % 7 + 1
     }
 
+    /// Puts a whole day back, as a workout ended up after «Сохранить изменения в план». Numbers are clamped to the
+    /// builder's ranges; weights are kept to 0.25 kg.
+    public static func replaceDay(_ plan: WorkoutTrainingPlan, with day: WorkoutDayPlan) throws -> WorkoutTrainingPlan {
+        guard (1...7).contains(day.weekday) else { throw WorkoutDomainError("Неверный день недели") }
+        guard !day.exercises.isEmpty else { throw WorkoutDomainError("В дне должно быть хотя бы одно упражнение") }
+        var clean = day
+        for i in clean.exercises.indices {
+            var exercise = clean.exercises[i]
+            exercise.name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !exercise.name.isEmpty else { throw WorkoutDomainError("Введите название упражнения") }
+            exercise.sets = clamp(exercise.sets, setsRange)
+            exercise.reps = clamp(exercise.reps, repsRange)
+            exercise.restSeconds = clamp(exercise.restSeconds, restRange)
+            exercise.restAfterExercise = exercise.restAfterExercise.map { clamp($0, restRange) }
+            exercise.restAfterSets = nil
+            exercise.weightKg = exercise.weightKg.map { WorkoutSessionEdit.roundWeight(min(max($0, 0), 1000)) }
+            if exercise.id == nil { exercise.id = UUID().uuidString }
+            clean.exercises[i] = exercise
+        }
+        var next = plan
+        if let index = next.days.firstIndex(where: { $0.weekday == day.weekday }) {
+            next.days[index] = clean
+        } else {
+            next.days.append(clean)
+            next.days.sort { $0.weekday < $1.weekday }
+        }
+        next.version = currentVersion
+        return next
+    }
+
     // MARK: - Helpers
 
     /// Exercises saved without an id get one, so the builder can address them.

@@ -51,7 +51,7 @@ jobs:
             sleep 3
             xcrun simctl io "$simulator" screenshot "artifacts/login-$scheme.png"
             tab=0
-            for name in today money plans workout; do
+            for name in today money plans workout notes; do
               xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-tab "$tab"
               sleep 3
               xcrun simctl io "$simulator" screenshot "artifacts/$name-$scheme.png"

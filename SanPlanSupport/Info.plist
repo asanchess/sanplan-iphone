@@ -37,6 +37,10 @@
     <string>26.0</string>
     <key>NSAlarmKitUsageDescription</key>
     <string>ARNA ставит системные будильники для планов и конца отдыха на тренировке.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>ARNA записывает в «Здоровье» тренировки из истории: время, длительность и вид.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>ARNA проверяет в «Здоровье» тренировки, которые записала сама, чтобы обновлять и удалять их вместе с историей.</string>
     <key>NSSupportsLiveActivities</key>
     <true/>
     <key>NSSpeechRecognitionUsageDescription</key>
