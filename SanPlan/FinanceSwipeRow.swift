@@ -18,7 +18,6 @@ struct FinanceSwipeRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var offset: CGFloat = 0
-    @State private var dragStartedHorizontal: Bool? = nil
 
     private let buttonWidth: CGFloat = 76
     private var revealWidth: CGFloat { buttonWidth * CGFloat(actions.count) }
@@ -54,7 +53,7 @@ struct FinanceSwipeRow<Content: View>: View {
             content()
                 .background(DS.Colors.surface)
                 .offset(x: offset)
-                .simultaneousGesture(drag)
+                .gesture(swipe)
         }
         .clipped()
         .accessibilityElement(children: .contain)
@@ -65,23 +64,18 @@ struct FinanceSwipeRow<Content: View>: View {
         }
     }
 
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 16)
-            .onChanged { value in
-                if dragStartedHorizontal == nil {
-                    dragStartedHorizontal = abs(value.translation.width) > abs(value.translation.height)
-                }
-                guard dragStartedHorizontal == true else { return }
+    private var swipe: HorizontalSwipe {
+        HorizontalSwipe(
+            onChanged: { dx in
                 let base: CGFloat = offset <= -revealWidth ? -revealWidth : 0
-                offset = min(0, max(-revealWidth - 24, base + value.translation.width))
-            }
-            .onEnded { value in
-                defer { dragStartedHorizontal = nil }
-                guard dragStartedHorizontal == true else { return }
-                let wasOpen = offset <= -revealWidth / 2 && value.translation.width < 0 || (offset < 0 && value.predictedEndTranslation.width < -80)
+                offset = min(0, max(-revealWidth - 24, base + dx))
+            },
+            onEnded: { dx, predicted in
+                let wasOpen = offset <= -revealWidth / 2 && dx < 0 || (offset < 0 && predicted < -80)
                 withAnimation(.easeOut(duration: 0.18)) { offset = wasOpen ? -revealWidth : 0 }
                 if wasOpen { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
             }
+        )
     }
 
     private func close() {

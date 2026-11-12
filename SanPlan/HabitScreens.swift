@@ -224,18 +224,18 @@ struct HabitRowView: View {
                 .opacity(min(1, Double(dragX / swipeThreshold)))
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
-                .onChanged { value in
-                    guard !done, !auto, value.translation.width > 0,
-                          value.translation.width > abs(value.translation.height) * 1.5 else { return }
-                    dragX = min(value.translation.width, 120)
-                }
-                .onEnded { value in
-                    let reached = value.translation.width >= swipeThreshold && !done && !auto
+        .gesture(
+            HorizontalSwipe(
+                onChanged: { dx in
+                    guard !done, !auto, dx > 0 else { return }
+                    dragX = min(dx, 120)
+                },
+                onEnded: { dx, _ in
+                    let reached = dx >= swipeThreshold && !done && !auto
                     if reached { habits.complete(habit, on: today) }
                     withAnimation(reduceMotion ? nil : .snappy) { dragX = 0 }
                 }
+            )
         )
         .sensoryFeedback(trigger: amount) { (old: Int, new: Int) -> SensoryFeedback? in
             guard new > old else { return nil }

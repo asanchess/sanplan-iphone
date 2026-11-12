@@ -99,21 +99,20 @@ struct WorkoutSwipeRow<Content: View>: View {
                             .onTapGesture { close() }
                     }
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 16)
-                        .onChanged { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                .gesture(
+                    HorizontalSwipe(
+                        onChanged: { dx in
                             let base: CGFloat = open ? -total : 0
-                            offset = min(0, max(-total, base + value.translation.width))
-                        }
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            offset = min(0, max(-total, base + dx))
+                        },
+                        onEnded: { _, _ in
                             let shouldOpen = offset < -total / 2
                             withAnimation(.snappy) {
                                 open = shouldOpen
                                 offset = shouldOpen ? -total : 0
                             }
                         }
+                    )
                 )
         }
         .sensoryFeedback(.selection, trigger: open)

@@ -415,7 +415,7 @@ public enum StreakLine {
     public static func text(_ streak: StreakState?) -> String? {
         guard let streak, streak.days > 0 else { return nil }
         let head = "Серия: " + ReviewFormat.plural(streak.days, "день", "дня", "дней")
-        return head + " · " + (streak.restDaysLeft > 0 ? "отдыха осталось (streak.restDaysLeft)" : "дней отдыха не осталось")
+        return head + " · " + (streak.restDaysLeft > 0 ? "отдыха осталось \(streak.restDaysLeft)" : "дней отдыха не осталось")
     }
 }
 
