@@ -66,4 +66,12 @@ final class StreakEngineTests: XCTestCase {
     func testActiveDaysUnionsSections() {
         XCTAssertEqual(StreakEngine.activeDays([["2026-11-01"], ["2026-11-01", "2026-11-02"], []]), ["2026-11-01", "2026-11-02"])
     }
+
+    func testSourcesAreMergedAndWindowed() {
+        let plans: StreakEngine.ActivitySource = { _, _ in ["2026-11-10", "2026-11-11"] }
+        let money: StreakEngine.ActivitySource = { from, to in ["2026-11-12", "2020-01-01"].filter { $0 >= from && $0 <= to } }
+        let s = StreakEngine.current(today: "2026-11-12", sources: [plans, money])
+        XCTAssertEqual(s.days, 3)
+        XCTAssertEqual(StreakEngine.current(today: "2026-11-12", sources: []).days, 0)
+    }
 }

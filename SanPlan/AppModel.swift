@@ -18,6 +18,7 @@ public final class AppModel: ObservableObject {
     public let trainingVault = VaultCollection<WorkoutRecord>(collection: "training", policy: .newest, idPrefix: "t")
     /// Day reviews: free text, so both versions survive a conflict and ReviewStore merges them.
     public let reviewsVault = VaultCollection<ReviewDayRecord>(collection: "reviews", policy: .copy, idPrefix: "r")
+    public let habitsVault = VaultCollection<HabitPayload>(collection: "habits", policy: .newest, idPrefix: "h")
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -79,6 +80,8 @@ public final class AppModel: ObservableObject {
                 self.financeVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.trainingVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.reviewsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                self.habitsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                HabitStore.shared.attach(collection: self.habitsVault)
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -152,6 +155,25 @@ public final class AppModel: ObservableObject {
         financeVault.detach()
         trainingVault.detach()
         reviewsVault.detach()
+        HabitStore.shared.detach()
+        habitsVault.detach()
+    }
+
+    /// Days with a real action in every section (DOMAINS.md §2), for the app streak; habit marks are added by HabitStore.
+    public var streakSources: [StreakEngine.ActivitySource] {
+        let plans = plans, finance = finance, workouts = workouts, notes = notes, reviews = reviewsVault
+        return [
+            { from, to in plans.activityDays(from: from, to: to) },
+            { from, to in finance.activityDays(from: from, to: to) },
+            { from, to in workouts.activityDays(from: from, to: to) },
+            { from, to in notes.activityDays(from: from, to: to) },
+            { from, to in reviews.items.compactMap { $0.data?.day }.filter { $0 >= from && $0 <= to } }
+        ]
+    }
+
+    /// The app streak shown on Today and in Plans.
+    public func appStreak(today: String) -> StreakState {
+        HabitStore.shared.appStreak(today: today, sources: streakSources)
     }
 
     public func launched() async {

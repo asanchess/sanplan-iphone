@@ -1,7 +1,7 @@
 import Foundation
 
 /// Настройки дней отдыха (RESEARCH-MYLIFE §7.5): по умолчанию 4 в месяц и до 2 постоянных выходных в неделю.
-public struct StreakSettings: Codable, Equatable {
+public struct StreakSettings: Codable, Equatable, Sendable {
     public static let maxWeeklyOff = 2
     public static let maxMonthlyRest = 31
 
@@ -66,5 +66,21 @@ public enum StreakEngine {
             steps += 1
         }
         return StreakState(days: streak, restDaysLeft: max(0, settings.restDaysPerMonth - usedByMonth[month, default: 0]))
+    }
+
+    /// Дни действия одного раздела за период: `PlanStore.activityDays`, `FinanceStore.activityDays`,
+    /// `WorkoutStore.activityDays`, `NotesStore.activityDays`, `ReviewStore.activityDays`, привычки.
+    public typealias ActivitySource = (_ from: String, _ to: String) -> [String]
+
+    /// Единый сборщик: берёт источники разделов параметрами, окно — `lookbackDays` до сегодня.
+    public static func current(
+        today: String,
+        sources: [ActivitySource],
+        settings: StreakSettings = .standard,
+        lookbackDays: Int = 400
+    ) -> StreakState {
+        let from = PlanDomain.addDays(dateStr: today, days: -max(1, lookbackDays))
+        let days = activeDays(sources.map { $0(from, today) })
+        return current(today: today, activeDays: days, settings: settings)
     }
 }

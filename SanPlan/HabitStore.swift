@@ -1,7 +1,8 @@
+import Combine
 import Foundation
 
-/// Состояние привычек. Пока хранится локально (UserDefaults); перенос в зашифрованную коллекцию `habits`
-/// начнётся, когда координатор выдаст общий магазин коллекции.
+/// Состояние привычек. Без ключа данных хранится локально (UserDefaults); после `attach(collection:)` один раз
+/// переезжает в зашифрованную коллекцию `habits` (HabitCloud), дальше источник — коллекция.
 @MainActor
 public final class HabitStore: ObservableObject {
     @Published public private(set) var habits: [Habit] = []
@@ -24,7 +25,15 @@ public final class HabitStore: ObservableObject {
         var habits: [Habit]
         var marks: [String: [String: Int]]
         var streak: StreakSettings
+        /// Когда снимок записан (мс): с этим временем он идёт в коллекцию, чтобы более свежие правки сервера не затирались.
+        var savedAtMs: Int64?
     }
+
+    private var collection: VaultCollection<HabitPayload>?
+    private var collectionObserver: AnyCancellable?
+    /// true — источник данных коллекция, локальный снимок уже удалён.
+    public private(set) var usesCloud = false
+    private var knownRecordIDs: Set<String> = []
 
     /// Без владельца (`.none`) привычек нет: состояние пустое, ничего не читается и не пишется.
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "arna.habits.v1", owner: FinanceStore.Owner = .none) {
@@ -47,6 +56,10 @@ public final class HabitStore: ObservableObject {
     public func switchOwner(to next: FinanceStore.Owner) {
         guard next != owner else { return }
         owner = next
+        collectionObserver = nil
+        collection = nil
+        usesCloud = false
+        knownRecordIDs = []
         load() // load() сначала очищает память под isLoading, поэтому пустой снимок не пишется
     }
 
@@ -148,6 +161,12 @@ public final class HabitStore: ObservableObject {
         return days.sorted()
     }
 
+    /// Общая серия приложения из источников всех разделов; ручные отметки привычек добавляются сами.
+    public func appStreak(today: String, sources: [StreakEngine.ActivitySource]) -> StreakState {
+        StreakEngine.current(today: today, sources: sources + [{ [self] from, to in self.activityDays(from: from, to: to) }],
+                             settings: streakSettings)
+    }
+
     /// Общая серия приложения по дням действия всех разделов (`*ActivityDays`).
     public func appStreak(today: String, activitySources: [[String]]) -> StreakState {
         StreakEngine.current(today: today, activeDays: StreakEngine.activeDays(activitySources), settings: streakSettings)
@@ -156,8 +175,11 @@ public final class HabitStore: ObservableObject {
     // MARK: Хранение
 
     private func save() {
-        guard !isLoading, let key else { return }
-        let snapshot = Snapshot(habits: habits, marks: marks, streak: streakSettings)
+        guard !isLoading else { return }
+        if usesCloud { persistToCollection(); return }
+        guard let key else { return }
+        let snapshot = Snapshot(habits: habits, marks: marks, streak: streakSettings,
+                                savedAtMs: Int64(Date().timeIntervalSince1970 * 1000))
         if let data = try? JSONEncoder().encode(snapshot) { defaults.set(data, forKey: key) }
     }
 
@@ -171,5 +193,82 @@ public final class HabitStore: ObservableObject {
         habits = s.habits
         marks = s.marks
         streakSettings = s.streak
+    }
+
+    // MARK: Зашифрованная коллекция
+
+    private func localSnapshot() -> Snapshot? {
+        guard let key, let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(Snapshot.self, from: data)
+    }
+
+    /// Вызывает координатор после `collection.attach`. Привычки с телефона переезжают в коллекцию один раз.
+    public func attach(collection: VaultCollection<HabitPayload>) {
+        detach()
+        self.collection = collection
+        collectionObserver = collection.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.collectionChanged() }
+        }
+        Task { await self.moveToCollectionIfNeeded() }
+    }
+
+    /// Выход или блокировка ключа: назад к локальному состоянию, расшифрованное в памяти не остаётся.
+    public func detach() {
+        collectionObserver = nil
+        collection = nil
+        knownRecordIDs = []
+        if usesCloud {
+            usesCloud = false
+            load()
+        }
+    }
+
+    private func collectionChanged() {
+        guard usesCloud, let collection, collection.isAvailable else { return }
+        applyCollection(collection)
+    }
+
+    private func applyCollection(_ collection: VaultCollection<HabitPayload>) {
+        let rebuilt = HabitCloud.state(from: collection.items)
+        knownRecordIDs = Set(collection.items.map(\.id))
+        guard rebuilt.habits != habits || rebuilt.marks != marks || rebuilt.streak != streakSettings else { return }
+        isLoading = true
+        habits = rebuilt.habits
+        marks = rebuilt.marks
+        streakSettings = rebuilt.streak
+        isLoading = false
+    }
+
+    /// Шаги переезда: загрузка (повтор безопасен: id выведены из локальных), ожидание сервера, сверка, и только потом
+    /// удаление локального снимка.
+    func moveToCollectionIfNeeded() async {
+        guard let collection, collection.isAvailable, owner != .none, !usesCloud else { return }
+        if let local = localSnapshot(), !(local.habits.isEmpty && local.marks.isEmpty) {
+            let stamp = local.savedAtMs ?? Int64(Date().timeIntervalSince1970 * 1000)
+            let entries = HabitCloud.records(habits: local.habits, marks: local.marks, streak: local.streak)
+                .map { (id: $0.id, data: $0.payload, updatedAt: stamp) }
+            _ = collection.importMany(entries)
+            let synced = await collection.whenSynced()
+            guard synced, self.collection === collection, collection.isAvailable else { return }
+            let rebuilt = HabitCloud.state(from: collection.items)
+            let present = Set(rebuilt.habits.map(\.id))
+            let migratable = Set(local.habits.map(\.id).filter { HabitCloud.isValidID(HabitCloud.habitRecordID($0)) })
+            guard migratable.isSubset(of: present) else { return }
+            // Привычки с id короче допустимого остаются на телефоне: локальный снимок тогда не удаляется.
+            if migratable.count == local.habits.count, let key { defaults.removeObject(forKey: key) }
+        }
+        usesCloud = true
+        applyCollection(collection)
+    }
+
+    private func persistToCollection() {
+        guard let collection, collection.isAvailable else { return }
+        let desired = HabitCloud.records(habits: habits, marks: marks, streak: streakSettings)
+        let desiredIDs = Set(desired.map(\.id))
+        for entry in desired where collection.item(entry.id)?.data != entry.payload {
+            _ = collection.put(entry.id, entry.payload)
+        }
+        for id in knownRecordIDs.subtracting(desiredIDs) { _ = collection.remove(id) }
+        knownRecordIDs = desiredIDs
     }
 }

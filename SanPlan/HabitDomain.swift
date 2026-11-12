@@ -45,8 +45,8 @@ public enum HabitCalendar {
     }
 }
 
-public struct HabitSchedule: Codable, Equatable, Hashable {
-    public enum Kind: String, Codable { case weekdays, timesPerWeek }
+public struct HabitSchedule: Codable, Equatable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable { case weekdays, timesPerWeek }
     public var kind: Kind
     /// Для `.weekdays`: дни недели 1…7.
     public var weekdays: Set<Int>
@@ -65,7 +65,7 @@ public struct HabitSchedule: Codable, Equatable, Hashable {
 }
 
 /// Норма за день: один раз или количество («8 стаканов»).
-public struct HabitTarget: Codable, Equatable, Hashable {
+public struct HabitTarget: Codable, Equatable, Hashable, Sendable {
     public var amount: Int
     public var unit: String
 
@@ -79,8 +79,8 @@ public struct HabitTarget: Codable, Equatable, Hashable {
 }
 
 /// Правило автоотметки. Проверяется на устройстве по сводкам соседних разделов.
-public struct HabitRule: Codable, Equatable, Hashable {
-    public enum Kind: String, Codable {
+public struct HabitRule: Codable, Equatable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable {
         case training      // завершена тренировка
         case noSpend       // нет трат (в категории, если она указана)
         case spendAtMost   // потрачено не больше `limit` тенге (в категории, если указана)
@@ -102,7 +102,7 @@ public struct HabitRule: Codable, Equatable, Hashable {
     }
 }
 
-public struct Habit: Codable, Identifiable, Equatable, Hashable {
+public struct Habit: Codable, Identifiable, Equatable, Hashable, Sendable {
     public var id: String
     public var title: String
     public var schedule: HabitSchedule
