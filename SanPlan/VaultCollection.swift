@@ -49,7 +49,7 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     }
 
     /// The server's id rule (cloud/vault.mjs). Migrations derive ids from local ones, e.g. "t-<localId>".
-    public static func isValidID(_ id: String) -> Bool {
+    public nonisolated static func isValidID(_ id: String) -> Bool {
         (8...64).contains(id.count) && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
     }
 

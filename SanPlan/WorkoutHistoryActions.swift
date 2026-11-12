@@ -4,7 +4,7 @@ extension WorkoutStore {
     /// План дня, собранный из прошедшей тренировки: те же упражнения, число подходов и повторов.
     /// Вес не задаётся: «в прошлый раз» и подсказка нагрузки берутся из истории при старте.
     /// Паузы — из настроек плана. Пустые упражнения (без подходов) пропускаются.
-    static func dayPlan(repeating record: WorkoutRecord, defaults: WorkoutDefaults, today: Int) -> WorkoutDayPlan? {
+    nonisolated static func dayPlan(repeating record: WorkoutRecord, defaults: WorkoutDefaults, today: Int) -> WorkoutDayPlan? {
         let exercises = record.exercises.compactMap { exercise -> WorkoutExercisePlan? in
             guard !exercise.sets.isEmpty else { return nil }
             let doneReps = exercise.doneSets.compactMap(\.reps).filter { $0 > 0 }
