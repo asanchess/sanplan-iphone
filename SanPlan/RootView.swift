@@ -205,6 +205,9 @@ public struct RootView: View {
                     selectedTab: $selectedTab,
                     showSettings: $showSettingsSheet,
                     notes: model.notes,
+                    reviewsVault: model.reviewsVault,
+                    inputs: model.inputs,
+                    dictation: model.dictation,
                     reviewRequest: reviewNotifications.dayReviewRequests
                 )
                 .captureButton(action: openCapture)

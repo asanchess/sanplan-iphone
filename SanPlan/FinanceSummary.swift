@@ -132,7 +132,17 @@ public enum FinanceSummaries {
     }
 }
 
+extension FinanceSummaries {
+    /// Одна строка, чего не хватает для «Можно потратить сегодня»; nil, если сумма считается.
+    /// Раздел «Сегодня» показывает её с кнопкой «Открыть деньги».
+    public static func canSpendGap(_ state: FinanceState, on today: String) -> String? {
+        canSpendToday(state, on: today) == nil ? "Чтобы считать сумму на день, задайте лимиты по категориям" : nil
+    }
+}
+
 extension FinanceStore {
+    public func canSpendGap(on today: String) -> String? { FinanceSummaries.canSpendGap(state, on: today) }
+
     public func daySummary(for day: String) -> FinanceDaySummary { FinanceSummaries.day(state, day) }
 
     public func periodSummary(from: String, to: String, category: String? = nil) -> FinancePeriodSummary {

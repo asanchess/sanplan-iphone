@@ -135,6 +135,12 @@ final class FinanceSwipeTests: XCTestCase {
         XCTAssertEqual(changed.date, "2026-11-10")
     }
 
+    func testCanSpendGapNamesMissingLimits() {
+        XCTAssertNotNil(FinanceSummaries.canSpendGap(FinanceState(records: []), on: "2026-11-12"))
+        let withLimit = FinanceState(records: [], budget: FinanceBudget(limits: ["Кафе": 30_000_00]))
+        XCTAssertNil(FinanceSummaries.canSpendGap(withLimit, on: "2026-11-12"))
+    }
+
     func testRecategorizeUnknownRecordThrows() {
         XCTAssertThrowsError(try StatementImport.recategorize("zzz", to: "Кафе", in: FinanceState(records: [])))
     }

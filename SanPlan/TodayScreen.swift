@@ -9,6 +9,11 @@ public struct TodayScreen: View {
     @Binding var showSettings: Bool
     /// Notes feed the week summary and the streak; nil until the root view passes them.
     var notes: NotesStore? = nil
+    /// The account's encrypted `reviews` collection; nil while the vault is locked (reviews then stay in a local file).
+    var reviewsVault: VaultCollection<ReviewDayRecord>? = nil
+    /// Voice input for the review line; nil: typing only.
+    var inputs: InputDrafts? = nil
+    var dictation: SpeechDictation? = nil
     /// Grows when the day-review reminder is tapped (ReviewNotifications); opens the day review.
     var reviewRequest: Int = 0
     @StateObject private var review = ReviewStore()
@@ -50,7 +55,7 @@ public struct TodayScreen: View {
         .sheet(item: $reviewSheet) { sheet in
             switch sheet {
             case .day:
-                DayReviewSheet(review: review, day: reviewDay, sources: reviewSources, moveOpen: { await moveOpenToTomorrow($0) })
+                DayReviewSheet(review: review, day: reviewDay, sources: reviewSources, moveOpen: { await moveOpenToTomorrow($0) }, inputs: inputs, dictation: dictation)
             case .week:
                 WeekReviewSheet(review: review, day: reviewDay, sources: reviewSources, spheres: ReviewSphere.defaults)
             case .history:
@@ -59,11 +64,13 @@ public struct TodayScreen: View {
         }
         .task {
             syncReviewOwner()
+            review.setCollection(reviewsVault)
             finance.refreshSummary(today: PlanDomain.today())
             await plans.reload()
         }
         // Reviews follow the signed-in account: money switches owner on sign-in and sign-out.
         .onChange(of: finance.state) { _, _ in syncReviewOwner() }
+        .onChange(of: reviewsVault?.isAvailable) { _, _ in review.setCollection(reviewsVault) }
     }
 
     private var reviewDay: String { PlanDomain.today(timeZone: plans.timeZone) }

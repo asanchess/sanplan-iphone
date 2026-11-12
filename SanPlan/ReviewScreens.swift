@@ -51,6 +51,9 @@ struct DayReviewSheet: View {
     let sources: () -> ReviewSources
     /// TEMP: Plans' `moveOpenToTomorrow`; nil hides the button.
     let moveOpen: (([String]) async -> Bool)?
+    /// Voice input for the line of the day (InputDrafts.Target.review); nil: typing only.
+    var inputs: InputDrafts? = nil
+    var dictation: SpeechDictation? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var mood: Int?
@@ -143,21 +146,25 @@ struct DayReviewSheet: View {
     private var lineCard: some View {
         Card {
             SectionHeader("Одна строка о дне")
-            TextField("Что запомнилось", text: $text, axis: .vertical)
-                .lineLimit(1...3)
-                .focused($focused)
-                .submitLabel(.done)
-                .font(.body)
-                .padding(DS.Metrics.spacing12)
-                .frame(minHeight: DS.Metrics.minHitTarget)
-                .background(DS.Colors.surfaceRaised)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                .onChange(of: text) { _, value in
-                    if value.count > ReviewLimits.maxTextLength { text = String(value.prefix(ReviewLimits.maxTextLength)) }
-                }
-            Text("Голосом — кнопкой с микрофоном на клавиатуре.")
-                .font(.footnote)
-                .foregroundColor(DS.Colors.textSecondary)
+            if let inputs, let dictation {
+                ReviewVoiceLine(text: $text, inputs: inputs, dictation: dictation)
+            } else {
+                TextField("Что запомнилось", text: $text, axis: .vertical)
+                    .lineLimit(1...3)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .font(.body)
+                    .padding(DS.Metrics.spacing12)
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+                    .background(DS.Colors.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                    .onChange(of: text) { _, value in
+                        if value.count > ReviewLimits.maxTextLength { text = String(value.prefix(ReviewLimits.maxTextLength)) }
+                    }
+                Text("Голосом — кнопкой с микрофоном на клавиатуре.")
+                    .font(.footnote)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
         }
     }
 
@@ -229,13 +236,61 @@ struct DayReviewSheet: View {
     private func load() {
         digest = ReviewSummaries.digest(sources(), day: day)
         if let entry = review.day(day) { mood = entry.mood; text = entry.text }
+        // A draft kept in InputDrafts (typed or dictated before the sheet was closed) wins over the saved line.
+        if let inputs {
+            if inputs.review.isEmpty { inputs.edit(text, for: .review) } else { text = inputs.review }
+        }
         reminder = review.reminder
     }
 
     private func save() {
         guard review.saveDay(day, mood: mood, text: text) else { return }
+        if dictation?.isListening(to: .review) == true { dictation?.stop() }
+        inputs?.clear(.review)
         saved.toggle()
         dismiss()
+    }
+}
+
+/// The line of the day with a microphone: words stream into `InputDrafts.review`, nothing leaves the phone.
+struct ReviewVoiceLine: View {
+    @Binding var text: String
+    @ObservedObject var inputs: InputDrafts
+    @ObservedObject var dictation: SpeechDictation
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            HStack(alignment: .top, spacing: DS.Metrics.spacing8) {
+                TextField("Что запомнилось", text: Binding(
+                    get: { inputs.review },
+                    set: { inputs.edit(String($0.prefix(ReviewLimits.maxTextLength)), for: .review) }
+                ), axis: .vertical)
+                    .lineLimit(1...3)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .font(.body)
+                    .padding(DS.Metrics.spacing12)
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+                    .background(DS.Colors.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                Button {
+                    if dictation.isListening(to: .review) { dictation.stop() }
+                    else { Task { await dictation.start(into: .review) } }
+                } label: {
+                    Image(systemName: dictation.isListening(to: .review) ? "stop.circle.fill" : "mic.fill")
+                        .font(.title3)
+                        .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+                }
+                .accessibilityLabel(dictation.isListening(to: .review) ? "Остановить диктовку" : "Продиктовать строку о дне")
+            }
+            if let error = dictation.errorMessage {
+                Text(error).font(.footnote).foregroundColor(DS.Colors.destructive)
+            }
+        }
+        .onChange(of: inputs.review) { _, value in
+            if text != value { text = value }
+        }
     }
 }
 

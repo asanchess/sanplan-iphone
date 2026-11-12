@@ -16,6 +16,8 @@ public final class AppModel: ObservableObject {
     /// Encrypted collections of Money and Training (docs/contracts/DOMAINS.md §3); the sections write on top of them.
     public let financeVault = VaultCollection<FinancePayload>(collection: "finance", policy: .newest, idPrefix: "f")
     public let trainingVault = VaultCollection<WorkoutRecord>(collection: "training", policy: .newest, idPrefix: "t")
+    /// Day reviews: free text, so both versions survive a conflict and ReviewStore merges them.
+    public let reviewsVault = VaultCollection<ReviewDayRecord>(collection: "reviews", policy: .copy, idPrefix: "r")
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -76,6 +78,7 @@ public final class AppModel: ObservableObject {
                 guard let self, self.vault.account == account, self.vault.dataKey != nil else { return }
                 self.financeVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.trainingVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                self.reviewsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -148,6 +151,7 @@ public final class AppModel: ObservableObject {
         workouts.detachVault()
         financeVault.detach()
         trainingVault.detach()
+        reviewsVault.detach()
     }
 
     public func launched() async {

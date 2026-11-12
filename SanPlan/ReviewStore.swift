@@ -1,8 +1,10 @@
 import Foundation
 import Combine
 
-/// Итоги дня и недели, на устройстве. Пока координатор не выдал общий магазин зашифрованной коллекции `reviews`,
-/// хранилище — файл на аккаунт (имя — хэш почты, как у денег). Перенос в облако — отдельным шагом.
+/// Итоги дня и недели. Дни — в зашифрованной коллекции `reviews` (id «r-ГГГГ-ММ-ДД», политика `.copy`: строка итога
+/// не должна теряться при правке одного вечера на двух устройствах; копии сводятся в основную запись), пока
+/// хранилище закрыто — в файле на аккаунт (имя — хэш почты, как у денег); открывшись, коллекция забирает локальные дни.
+/// Итоги недели и время напоминания остаются в файле на устройстве.
 @MainActor
 public final class ReviewStore: ObservableObject {
     struct FileState: Codable, Equatable {
@@ -20,6 +22,9 @@ public final class ReviewStore: ObservableObject {
     private let fileManager: FileManager
     private let now: () -> Int64
     private var url: URL?
+    private var vault: VaultCollection<ReviewDayRecord>?
+    private var vaultSub: AnyCancellable?
+    private var settling = false
 
     public init(directory: URL? = nil, fileManager: FileManager = .default, now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) {
         self.fileManager = fileManager
@@ -46,17 +51,66 @@ public final class ReviewStore: ObservableObject {
         load()
     }
 
+    /// The account's encrypted collection, or nil while the vault is locked. The creator keeps it attached to the account.
+    public func setCollection(_ next: VaultCollection<ReviewDayRecord>?) {
+        guard next !== vault else { settle(); return }
+        vaultSub = nil
+        vault = next
+        if let next {
+            vaultSub = next.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in
+                self?.objectWillChange.send()
+                self?.settle()
+            }
+        }
+        objectWillChange.send()
+        settle()
+    }
+
+    private var vaultReady: Bool { vault?.isAvailable == true }
+
+    private func remoteDays() -> [String: MergedReviewDay] {
+        guard let vault, vault.isAvailable else { return [:] }
+        return ReviewVault.merge(vault.items)
+    }
+
+    /// Local file < collection (when newer).
+    private func dayMap() -> [String: ReviewEntry] {
+        var map = file.days
+        for (day, merged) in remoteDays() where map[day] == nil || merged.entry.updatedAt >= map[day]!.updatedAt { map[day] = merged.entry }
+        return map
+    }
+
+    /// Local days go into the collection once (idempotent by id); copies made by conflicts are merged into the primary record.
+    private func settle() {
+        guard !settling, let vault, vault.isAvailable, url != nil else { return }
+        settling = true
+        defer { settling = false }
+        if !file.days.isEmpty {
+            _ = vault.importMany(file.days.values.map { (id: ReviewVault.recordID(for: $0.day), data: ReviewDayRecord(day: $0.day, mood: $0.mood, text: $0.text), updatedAt: $0.updatedAt) })
+            var next = file
+            next.days = [:]
+            _ = commit(next)
+        }
+        for (day, merged) in remoteDays() {
+            let primary = ReviewVault.recordID(for: day)
+            let record = ReviewDayRecord(day: day, mood: merged.entry.mood, text: merged.entry.text)
+            if merged.ids == [primary], vault.item(primary)?.data == record { continue }
+            vault.put(primary, record)
+            for id in merged.ids where id != primary { vault.remove(id) }
+        }
+    }
+
     // MARK: Reading (DOMAINS.md §2: ReviewStore.day(_:))
 
-    public func day(_ day: String) -> ReviewEntry? { file.days[day] }
+    public func day(_ day: String) -> ReviewEntry? { dayMap()[day] }
     public func week(containing day: String) -> WeekReview? { file.weeks[ReviewCalendar.weekStart(day)] }
     public func previousWeek(before day: String) -> WeekReview? { file.weeks[ReviewCalendar.addDays(ReviewCalendar.weekStart(day), -7)] }
     public var reminder: ReviewReminderSettings { file.reminder }
-    public var reviewedDays: [String] { file.days.keys.sorted() }
+    public var reviewedDays: [String] { dayMap().keys.sorted() }
 
     /// Days with a saved review, for the streak.
     public func activityDays(from: String, to: String) -> [String] {
-        file.days.keys.filter { $0 >= from && $0 <= to }.sorted()
+        dayMap().keys.filter { $0 >= from && $0 <= to }.sorted()
     }
 
     // MARK: Writing
@@ -65,6 +119,15 @@ public final class ReviewStore: ObservableObject {
     public func saveDay(_ day: String, mood: Int?, text: String) -> Bool {
         guard url != nil else { return false }
         guard let entry = ReviewEntry.make(day: day, mood: mood, text: text, now: now()) else { return false }
+        if let vault, vault.isAvailable {
+            guard vault.put(ReviewVault.recordID(for: day), ReviewDayRecord(day: day, mood: entry.mood, text: entry.text), updatedAt: entry.updatedAt) != nil else { return false }
+            if file.days[day] != nil {
+                var cleaned = file
+                cleaned.days[day] = nil
+                _ = commit(cleaned)
+            }
+            return true
+        }
         var next = file
         next.days[day] = entry
         return commit(next)
@@ -72,7 +135,11 @@ public final class ReviewStore: ObservableObject {
 
     @discardableResult
     public func deleteDay(_ day: String) -> Bool {
-        guard url != nil, file.days[day] != nil else { return false }
+        guard url != nil, dayMap()[day] != nil else { return false }
+        if let ids = remoteDays()[day]?.ids, let vault {
+            for id in ids { vault.remove(id) }
+        }
+        guard file.days[day] != nil else { return true }
         var next = file
         next.days[day] = nil
         return commit(next)

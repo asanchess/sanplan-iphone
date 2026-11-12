@@ -252,6 +252,47 @@ public struct ReviewEntry: Codable, Equatable, Identifiable {
     }
 }
 
+/// The payload of a day's record in the encrypted `reviews` collection (id `r-YYYY-MM-DD`).
+public struct ReviewDayRecord: Codable, Equatable, Sendable {
+    public var day: String
+    public var mood: Int?
+    public var text: String
+    public init(day: String, mood: Int?, text: String) { self.day = day; self.mood = mood; self.text = text }
+}
+
+/// One day gathered from the primary record and any copies the `.copy` conflict policy made.
+public struct MergedReviewDay: Equatable {
+    public var entry: ReviewEntry
+    public var ids: [String]
+}
+
+public enum ReviewVault {
+    public static func recordID(for day: String) -> String { "r-\(day)" }
+
+    /// Newest mood wins; the lines of all copies are kept (oldest first, joined once). Mirrors mergeDayRecords in review-domain.mjs.
+    public static func merge(_ items: [VaultItem<ReviewDayRecord>]) -> [String: MergedReviewDay] {
+        var groups: [String: [VaultItem<ReviewDayRecord>]] = [:]
+        for item in items where !item.deleted {
+            guard let data = item.data, ReviewCalendar.isDay(data.day) else { continue }
+            groups[data.day, default: []].append(item)
+        }
+        var out: [String: MergedReviewDay] = [:]
+        for (day, list) in groups {
+            let newestFirst = list.sorted { $0.updatedAt != $1.updatedAt ? $0.updatedAt > $1.updatedAt : $0.id < $1.id }
+            let mood = newestFirst.compactMap { $0.data?.mood }.first { ReviewLimits.moodRange.contains($0) }
+            var lines: [String] = []
+            for item in newestFirst.reversed() {
+                let t = (item.data?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty, !lines.contains(t) { lines.append(t) }
+            }
+            let text = String(lines.joined(separator: " · ").prefix(ReviewLimits.maxTextLength))
+            guard mood != nil || !text.isEmpty else { continue }
+            out[day] = MergedReviewDay(entry: ReviewEntry(day: day, mood: mood, text: text, updatedAt: newestFirst[0].updatedAt), ids: list.map(\.id))
+        }
+        return out
+    }
+}
+
 public enum ReviewMood {
     public static let labels: [Int: String] = [1: "Тяжело", 2: "Так себе", 3: "Нормально", 4: "Хорошо", 5: "Отлично"]
     public static func label(_ mood: Int) -> String { labels[mood] ?? "" }
