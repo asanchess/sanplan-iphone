@@ -19,14 +19,17 @@ extension NotesStore {
 extension ReviewSources {
     /// A snapshot of what the stores hold now.
     @MainActor
-    static func current(plans: PlanStore, finance: FinanceStore, workouts: WorkoutStore, notes: NotesStore?) -> ReviewSources {
+    static func current(plans: PlanStore, finance: FinanceStore, workouts: WorkoutStore, notes: NotesStore?, habits: HabitStore = .shared) -> ReviewSources {
         ReviewSources(
             plans: plans.plans,
-            finance: finance.state.records,
+            finance: finance.state,
             workouts: workouts.history.records,
             noteMoments: notes?.creationMoments ?? [],
             timeZone: plans.timeZone,
-            habitsDay: nil // TEMP: HabitStore.daySummary(for:) from Plans
+            habitsDay: { day in
+                let s = habits.daySummary(for: day)
+                return s.total > 0 ? HabitsSummary(done: s.done, total: s.total) : nil
+            }
         )
     }
 }

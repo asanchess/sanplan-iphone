@@ -21,10 +21,10 @@ final class AskDomainTests: XCTestCase {
                 PlanItem(id: "p2", kind: "task", title: "Купить билеты", date: "2026-11-13"),
                 PlanItem(id: "p3", kind: "event", title: "Сегодняшнее", date: today, time: "09:00")
             ],
-            finance: [
+            finance: FinanceState(records: [
                 expense("a", "2026-11-03", 12_000, "Продукты"), expense("b", "2026-11-09", 3_000, "Кафе и рестораны"),
                 expense("c", "2026-11-05", 4_000, "Транспорт"), expense("old", "2026-10-30", 9_999, "Продукты")
-            ],
+            ]),
             workouts: [
                 WorkoutRecord(id: "w1", startedAt: noon("2026-11-10"), endedAt: noon("2026-11-10") + 3_000_000, title: "Верх",
                               exercises: [WorkoutRecordExercise(name: "Жим", sets: [WorkoutRecordSet(done: true, weightKg: 50, reps: 8)])]),
@@ -33,7 +33,7 @@ final class AskDomainTests: XCTestCase {
                 WorkoutRecord(id: "w0", startedAt: noon("2026-11-02"), endedAt: noon("2026-11-02") + 3_000_000, title: "Прошлая",
                               exercises: [WorkoutRecordExercise(name: "Жим", sets: [WorkoutRecordSet(done: true, weightKg: 50, reps: 8)])])
             ],
-            dailyMinor: 1_250_000)
+            canSpend: CanSpendToday(amount: 12_500, basis: "Остаток лимитов"))
     }
 
     // MARK: Parsing — the supported set
@@ -139,7 +139,7 @@ final class AskDomainTests: XCTestCase {
     func testCanSpendToday() {
         XCTAssertTrue(AskEngine.answer("Сколько можно потратить сегодня?", data: data()).text.contains("12"))
         var noMoney = data()
-        noMoney.dailyMinor = nil
+        noMoney.canSpend = nil
         XCTAssertTrue(AskEngine.answer("Сколько можно потратить сегодня?", data: noMoney).text.hasPrefix("Не хватает данных"))
     }
 

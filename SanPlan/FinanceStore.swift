@@ -20,6 +20,17 @@ public final class FinanceStore: ObservableObject {
     }
 
     public private(set) var owner: Owner
+
+    /// Where money is kept now: the phone's file, or the encrypted collection `finance` once it is attached and the
+    /// move has been checked (docs/contracts/FINANCE-MIGRATION.md).
+    public enum Storage: Equatable {
+        case local
+        case migrating
+        case cloud
+    }
+    @Published public private(set) var storage: Storage = .local
+    private var collection: VaultCollection<FinancePayload>?
+    private var collectionObserver: AnyCancellable?
     private var isUnavailable = false
     private let fileManager: FileManager
     private let arnaDir: URL
@@ -83,6 +94,88 @@ public final class FinanceStore: ObservableObject {
         loadInitialState()
     }
 
+    // MARK: - Encrypted collection
+
+    /// Called by the coordinator after the data key is unlocked and `collection.attach` has run.
+    /// Money from the phone's file moves into the collection once; after that the collection is the source.
+    public func attach(collection: VaultCollection<FinancePayload>) {
+        detach()
+        self.collection = collection
+        collectionObserver = collection.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.collectionChanged() }
+        }
+        Task { await self.moveToCollectionIfNeeded() }
+    }
+
+    /// Signed out or key locked: back to the local file; nothing of the collection stays in memory here.
+    public func detach() {
+        collectionObserver = nil
+        collection = nil
+        if storage != .local {
+            storage = .local
+            let current = owner
+            switchOwner(to: current, force: true)
+        }
+    }
+
+    private func collectionChanged() {
+        guard storage == .cloud, let collection, collection.isAvailable else { return }
+        let rebuilt = FinanceCloud.state(from: collection.items)
+        let clean = (try? validateFinance(rebuilt)) ?? rebuilt
+        if clean != state {
+            state = clean
+            refreshSummary(today: FinanceText.today())
+        }
+    }
+
+    /// Steps of the move: upload (idempotent), wait for the server, compare, and only then delete the file.
+    func moveToCollectionIfNeeded() async {
+        guard let collection, collection.isAvailable, storage == .local, owner != .none else { return }
+        reloadIfUnavailable()
+        if isUnavailable { return }
+        let hasLocal = fileManager.fileExists(atPath: storageURL.path) && !isEmpty(state)
+        if !hasLocal {
+            if fileManager.fileExists(atPath: storageURL.path) { try? fileManager.removeItem(at: storageURL) }
+            storage = .cloud
+            collectionChanged()
+            return
+        }
+        storage = .migrating
+        let local = state
+        let stamp = Int64(Date().timeIntervalSince1970 * 1000)
+        _ = collection.importMany(FinanceCloud.entries(local, updatedAt: stamp))
+        guard await collection.whenSynced(), self.collection === collection else {
+            storage = .local
+            notice = "Финансы пока не выгружены в облако: нет связи. Данные остаются на телефоне."
+            return
+        }
+        let remote = FinanceCloud.state(from: collection.items)
+        guard FinanceCloud.isVerified(local: local, remote: remote) else {
+            storage = .local
+            notice = "Не удалось сверить финансы с облаком. Данные остаются на телефоне, ничего не удалено."
+            return
+        }
+        try? fileManager.removeItem(at: storageURL)
+        storage = .cloud
+        notice = nil
+        collectionChanged()
+    }
+
+    private func isEmpty(_ s: FinanceState) -> Bool {
+        s.records.isEmpty && (s.imports ?? []).isEmpty && s.budget == nil && (s.merchantCategories ?? [:]).isEmpty
+    }
+
+    /// Writes the difference between the collection and `next`.
+    private func writeToCollection(_ next: FinanceState, _ collection: VaultCollection<FinancePayload>) throws {
+        let plan = FinanceCloud.plan(existing: FinanceCloud.existing(collection.items), state: next)
+        for entry in plan.puts {
+            guard collection.put(entry.id, entry.data) != nil else {
+                throw FinanceError.invalidState("Не удалось сохранить в облачное хранилище.")
+            }
+        }
+        for id in plan.removes { _ = collection.remove(id) }
+    }
+
     // MARK: - State Management
 
     public func refreshSummary(today: String, horizonDays: Int = 30) {
@@ -110,6 +203,9 @@ public final class FinanceStore: ObservableObject {
     }
 
     public func reset() {
+        if storage == .cloud, let collection, collection.isAvailable {
+            try? writeToCollection(emptyFinance(), collection)
+        }
         self.state = emptyFinance()
         self.summary = nil
         self.notice = nil
@@ -124,6 +220,17 @@ public final class FinanceStore: ObservableObject {
         reloadIfUnavailable()
         if isUnavailable {
             throw FinanceVaultError.decryptionFailed("Финансы недоступны, пока телефон заблокирован.")
+        }
+        if storage == .migrating {
+            throw FinanceError.invalidState("Идёт перенос финансов в облако, подождите несколько секунд.")
+        }
+        if storage == .cloud, let collection, collection.isAvailable {
+            let clean = try validateFinance(newState)
+            try writeToCollection(clean, collection)
+            self.state = clean
+            refreshSummary(today: today)
+            self.notice = nil
+            return
         }
         let clean = try validateFinance(newState)
         let encoder = JSONEncoder()
@@ -140,7 +247,10 @@ public final class FinanceStore: ObservableObject {
 
     /// Call when the app becomes active, in case the first load happened while the phone was locked.
     public func reloadIfUnavailable() {
-        if isUnavailable && owner != .none { loadInitialState() }
+        if isUnavailable && owner != .none {
+            loadInitialState()
+            if collection != nil { Task { await self.moveToCollectionIfNeeded() } }
+        }
     }
 
     private func loadInitialState() {

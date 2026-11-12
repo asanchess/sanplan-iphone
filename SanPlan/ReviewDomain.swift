@@ -126,59 +126,73 @@ public struct PeriodDigest: Equatable {
 /// Everything the digest reads, as plain values: stores hand over snapshots, tests build them directly.
 public struct ReviewSources {
     public var plans: [PlanItem]
-    public var finance: [FinanceRecord]
+    public var finance: FinanceState
     public var workouts: [WorkoutRecord]
     public var noteMoments: [Int64]
     public var timeZone: String
-    /// TEMP: Plans owns `habitsDay`. Until it ships the closure stays nil and the line is hidden.
+    /// Plans' HabitStore.daySummary; nil hides the line.
     public var habitsDay: ((String) -> HabitsSummary?)?
 
-    public init(plans: [PlanItem] = [], finance: [FinanceRecord] = [], workouts: [WorkoutRecord] = [], noteMoments: [Int64] = [], timeZone: String = PlanDomain.defaultTimeZone, habitsDay: ((String) -> HabitsSummary?)? = nil) {
+    public init(plans: [PlanItem] = [], finance: FinanceState = FinanceState(), workouts: [WorkoutRecord] = [], noteMoments: [Int64] = [], timeZone: String = PlanDomain.defaultTimeZone, habitsDay: ((String) -> HabitsSummary?)? = nil) {
         self.plans = plans; self.finance = finance; self.workouts = workouts; self.noteMoments = noteMoments; self.timeZone = timeZone; self.habitsDay = habitsDay
     }
 }
 
 public enum ReviewSummaries {
-    // TEMP (DOMAINS.md §2): these stand in for PlanStore.daySummary / FinanceStore.daySummary / WorkoutStore.daySummary
-    // until the owners' branches are merged. The coordinator replaces the bodies with calls to the real ones.
+    // Owners' summaries (DOMAINS.md §2): PlanSummary, FinanceSummaries, WorkoutSummary. Money there is WHOLE tenge;
+    // MoneySummary keeps minor units, so the conversion lives here and nowhere else.
 
-    /// Tasks of the day: those marked done and the rest.
+    /// Tasks of the period: Plans' day summary summed over the days.
     public static func plansPeriod(_ plans: [PlanItem], from: String, to: String) -> PlansSummary {
-        let tasks = PlanDomain.visibleItems(plans).filter { $0.kind == "task" && ($0.date ?? "") >= from && ($0.date ?? "") <= to }
-        let open = tasks.filter { $0.completed != true }
-        return PlansSummary(done: tasks.count - open.count, total: tasks.count, open: open.map { OpenPlan(id: $0.id, title: $0.title) })
+        var done = 0, total = 0
+        var open: [OpenPlan] = []
+        for day in ReviewCalendar.days(from: from, to: to) {
+            let s = PlanSummary.day(plans: plans, day: day)
+            done += s.done; total += s.total
+            open += s.open.map { OpenPlan(id: $0.id, title: $0.title) }
+        }
+        return PlansSummary(done: done, total: total, open: open)
     }
 
     public static func plansDay(_ plans: [PlanItem], day: String) -> PlansSummary {
         plansPeriod(plans, from: day, to: day)
     }
 
-    public static func financePeriod(_ records: [FinanceRecord], from: String, to: String, categories: Set<String>? = nil) -> MoneySummary {
-        let spent = records.filter {
-            $0.kind == "expense" && $0.excluded != true && ($0.date ?? "") >= from && ($0.date ?? "") <= to
-                && (categories == nil || categories!.contains($0.category ?? "Без категории"))
+    /// Spending of the period from the Money state; `categories` limits it to those category names.
+    public static func financePeriod(_ state: FinanceState, from: String, to: String, categories: Set<String>? = nil) -> MoneySummary {
+        var spent: Int64 = 0
+        var count = 0
+        var by: [String: Int64] = [:]
+        if let categories {
+            for name in categories {
+                let p = FinanceSummaries.period(state, from: from, to: to, category: name)
+                spent += p.spent; count += p.count
+                if p.count > 0 { by[name] = p.spent }
+            }
+        } else {
+            let p = FinanceSummaries.period(state, from: from, to: to)
+            spent = p.spent; count = p.count; by = p.byCategory
         }
-        var totals: [String: Int64] = [:]
-        for record in spent { totals[record.category ?? "Без категории", default: 0] += record.amountMinor ?? 0 }
-        let breakdown = totals.map { FinanceCategoryBreakdown(name: $0.key, amountMinor: $0.value) }
+        let breakdown = by.map { FinanceCategoryBreakdown(name: $0.key, amountMinor: $0.value * 100) }
             .sorted { $0.amountMinor != $1.amountMinor ? $0.amountMinor > $1.amountMinor : $0.name < $1.name }
-        return MoneySummary(spentMinor: spent.reduce(0) { $0 + ($1.amountMinor ?? 0) }, count: spent.count, byCategory: breakdown)
+        return MoneySummary(spentMinor: spent * 100, count: count, byCategory: breakdown)
     }
 
-    public static func financeDay(_ records: [FinanceRecord], day: String) -> MoneySummary {
-        financePeriod(records, from: day, to: day)
+    public static func financeDay(_ state: FinanceState, day: String) -> MoneySummary {
+        financePeriod(state, from: day, to: day)
     }
 
-    public static func trainingPeriod(_ records: [WorkoutRecord], from: String, to: String, timeZone: String = PlanDomain.defaultTimeZone) -> TrainingSummary {
-        let inRange = records.filter {
-            let day = ReviewCalendar.day(ofMilliseconds: $0.startedAt, timeZone: timeZone)
-            return day >= from && day <= to && $0.doneSetCount > 0
-        }.sorted { $0.startedAt < $1.startedAt }
-        return TrainingSummary(completed: inRange.count, titles: inRange.map { $0.title ?? "Тренировка" })
+    /// Finished workouts of the period. Day boundaries are Training's own (Asia/Qyzylorda).
+    public static func trainingPeriod(_ records: [WorkoutRecord], from: String, to: String) -> TrainingSummary {
+        var titles: [String] = []
+        for day in ReviewCalendar.days(from: from, to: to) {
+            titles += WorkoutSummary.day(records, day).sessions.map { $0.title ?? "Тренировка" }
+        }
+        return TrainingSummary(completed: WorkoutSummary.period(records, from: from, to: to).completed, titles: titles)
     }
 
-    public static func trainingDay(_ records: [WorkoutRecord], day: String, timeZone: String = PlanDomain.defaultTimeZone) -> TrainingSummary {
-        trainingPeriod(records, from: day, to: day, timeZone: timeZone)
+    public static func trainingDay(_ records: [WorkoutRecord], day: String) -> TrainingSummary {
+        trainingPeriod(records, from: day, to: day)
     }
 
     public static func notesCount(_ moments: [Int64], from: String, to: String, timeZone: String = PlanDomain.defaultTimeZone) -> Int {
@@ -197,7 +211,7 @@ public enum ReviewSummaries {
         return PeriodDigest(
             plans: plansPeriod(sources.plans, from: from, to: to),
             money: financePeriod(sources.finance, from: from, to: to),
-            training: trainingPeriod(sources.workouts, from: from, to: to, timeZone: sources.timeZone),
+            training: trainingPeriod(sources.workouts, from: from, to: to),
             habits: habits,
             notes: notesCount(sources.noteMoments, from: from, to: to, timeZone: sources.timeZone)
         )

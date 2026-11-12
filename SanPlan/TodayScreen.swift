@@ -89,21 +89,8 @@ public struct TodayScreen: View {
         }
     }
 
-    /// TEMP until Plans ships `PlanStore.moveOpenToTomorrow(_:)`: saves the same tasks again one day later.
-    /// Open drafts are set aside for the save and put back afterwards.
     private func moveOpenToTomorrow(_ ids: [String]) async -> Bool {
-        let tomorrow = PlanDomain.addDays(dateStr: reviewDay, days: 1)
-        let moved = plans.plans.filter { ids.contains($0.id) && $0.completed != true }.map { plan -> PlanItem in
-            var copy = plan
-            copy.date = tomorrow
-            return copy
-        }
-        guard !moved.isEmpty else { return true }
-        let setAside = plans.draftPlans
-        plans.setDraftPlans(moved)
-        let saved = await plans.saveDrafts()
-        plans.setDraftPlans(setAside)
-        return saved
+        await plans.moveOpenToTomorrow(ids)
     }
 
     private var plansCard: some View {
@@ -150,6 +137,17 @@ public struct TodayScreen: View {
                 Text("Баланс пока не указан.")
                     .font(.subheadline)
                     .foregroundColor(DS.Colors.textSecondary)
+            }
+            if let spend = finance.canSpendToday(on: reviewDay) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Можно потратить сегодня: \(ReviewFormat.tenge(spend.amount * 100))")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(DS.Colors.textPrimary)
+                    Text(spend.basis)
+                        .font(.footnote)
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+                .accessibilityElement(children: .combine)
             }
             PillButton((finance.summary?.spendableMinor ?? finance.summary?.balanceMinor) == nil ? "Добавить первую запись" : "Открыть деньги", style: .secondary) { selectedTab = .money }
         }

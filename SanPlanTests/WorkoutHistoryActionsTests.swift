@@ -45,4 +45,22 @@ final class WorkoutHistoryActionsTests: XCTestCase {
         let empty = WorkoutRecord(id: "e", startedAt: 0, endedAt: 1000, exercises: [])
         XCTAssertNil(WorkoutStore.dayPlan(repeating: empty, defaults: .standard, today: 1))
     }
+
+    @MainActor
+    func testRepeatedWorkoutAsksBeforeReplacingTheDayOfThePlan() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("workout-repeat-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = WorkoutStore(restAlarm: RestAlarmCoordinator(service: FakeRestAlarmService()), baseDirectory: base, owner: .device)
+        let planned = WorkoutDayPlan(weekday: 2, exercises: [WorkoutExercisePlan(name: "Присед", sets: 3, reps: 5, id: "squat")], title: "Ноги")
+        store.setTrainingPlan(WorkoutTrainingPlan(days: [planned]))
+
+        // Тренировка прямо из плана: заменять нечего.
+        store.startWorkout(day: planned)
+        XCTAssertNil(store.planDayToReplace)
+        store.discardWorkout()
+
+        // Повтор другой тренировки того же дня недели: сохранение в план заменило бы «Ноги», поэтому нужно подтверждение.
+        store.repeatWorkout(from: record())
+        XCTAssertEqual(store.planDayToReplace, planned)
+    }
 }

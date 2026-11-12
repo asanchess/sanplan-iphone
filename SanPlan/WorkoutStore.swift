@@ -24,6 +24,8 @@ public final class WorkoutStore: ObservableObject {
     @Published public var errorMessage: String?
     @Published public private(set) var history = WorkoutHistoryFile()
     @Published public private(set) var undoOffer: WorkoutUndoOffer?
+    /// Перенос истории в зашифрованную коллекцию `training`.
+    @Published public private(set) var vaultStatus: WorkoutMigrationStatus = .idle
 
     public let restAlarm: RestAlarmCoordinator
     public var health: WorkoutHealthSyncing?
@@ -46,6 +48,8 @@ public final class WorkoutStore: ObservableObject {
     static let historyFile = "arna_workout_history_v1.json"
     static let ownerKey = "arna.workout.ownerFolder"
     static let undoLimit = 30
+    static let migrationFile = "arna_workout_migration_v1.json"
+    static let backupFile = "arna_workout_history_v1.premigration.json"
 
     private(set) var location: Location
     private let fileManager = FileManager.default
@@ -56,6 +60,9 @@ public final class WorkoutStore: ObservableObject {
     private var undoStack: [Snapshot] = []
     private var alarmWork: Task<Void, Never>?
     private var restAlarmObservation: AnyCancellable?
+    private(set) var vault: VaultCollection<WorkoutRecord>?
+    private var vaultObservation: AnyCancellable?
+    private var migrationRunning = false
 
     /// - Parameters:
     ///   - baseDirectory: the folder holding `ARNA`; Application Support by default, a temporary folder in tests.
@@ -113,6 +120,7 @@ public final class WorkoutStore: ObservableObject {
     public func switchOwner(to owner: FinanceStore.Owner, now: Int64 = WorkoutStore.nowMs()) {
         let next = Self.location(for: owner)
         guard next != location else { return }
+        detachVault()
         location = next
         if rememberOwner {
             switch next {
@@ -320,6 +328,7 @@ public final class WorkoutStore: ObservableObject {
         if history != before.history {
             saveHistory()
             health?.sync(previous: before.history.records, next: history.records)
+            pushHistory(from: before.history.records, to: history.records)
         }
     }
 
@@ -346,6 +355,153 @@ public final class WorkoutStore: ObservableObject {
         if let next = try? WorkoutHistory.upsert(history.records, record) {
             history.records = next
         }
+    }
+
+    // MARK: - Зашифрованная история (коллекция «training»)
+
+    /// Подключает коллекцию после разблокировки ключа. `account` — почта аккаунта: записи другого аккаунта
+    /// в эту папку не попадут. Идущую тренировку и план коллекция не касается.
+    public func attachVault(_ collection: VaultCollection<WorkoutRecord>, account: String, autoMigrate: Bool = true) {
+        detachVault()
+        guard case .account(let folder) = location, folder == FinanceStore.accountFolderName(account) else { return }
+        vault = collection
+        ensureBackup()
+        vaultObservation = collection.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.vaultChanged(autoMigrate: autoMigrate) }
+        }
+        vaultChanged(autoMigrate: autoMigrate)
+    }
+
+    /// Выход из аккаунта или смена владельца: коллекция отпускается, локальные файлы остаются.
+    public func detachVault() {
+        vaultObservation = nil
+        vault = nil
+        migrationRunning = false
+        vaultStatus = .idle
+    }
+
+    /// После ошибки сверки: пробует выгрузить и сверить снова.
+    public func retryMigration() {
+        guard vault != nil else { return }
+        vaultStatus = .idle
+        vaultChanged(autoMigrate: true)
+    }
+
+    private func vaultChanged(autoMigrate: Bool) {
+        guard let vault, vault.isAvailable, !isUnavailable else { return }
+        mergeVault(vault)
+        uploadMissing(vault)
+        if autoMigrate, vaultStatus == .idle, !migrationRunning {
+            Task { @MainActor in _ = await self.migrateHistory() }
+        }
+    }
+
+    private func mergeVault(_ vault: VaultCollection<WorkoutRecord>) {
+        let merged = WorkoutVaultMigration.merged(local: history.records, vault: vault.all)
+        guard merged != history.records else { return }
+        history.records = merged
+        // Снимки для «Отменить» старше этого слияния вернули бы удалённое или стёрли чужое.
+        undoStack = []
+        undoOffer = nil
+        if let session = activeSession, session.phase == .complete, let id = session.recordId,
+           !merged.contains(where: { $0.id == id }) {
+            activeSession = nil
+            saveTraining()
+        }
+        saveHistory()
+    }
+
+    /// Тренировки, которых в коллекции ещё нет (старая история, записанное без связи). Повтор ничего не дублирует.
+    private func uploadMissing(_ vault: VaultCollection<WorkoutRecord>) {
+        let missing = history.records.compactMap { record -> (id: String, data: WorkoutRecord, updatedAt: Int64)? in
+            let id = WorkoutVaultMigration.vaultID(for: record.id)
+            return vault.all[id] == nil ? (id, WorkoutVaultMigration.payload(record), record.endedAt) : nil
+        }
+        if !missing.isEmpty { _ = vault.importMany(missing) }
+    }
+
+    /// Правка истории на этом устройстве уходит в коллекцию сразу: добавленное и изменённое — записью, удалённое — надгробием.
+    private func pushHistory(from old: [WorkoutRecord], to new: [WorkoutRecord]) {
+        guard let vault, vault.isAvailable else { return }
+        let before = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let kept = Set(new.map(\.id))
+        for record in new where before[record.id] != record {
+            vault.put(WorkoutVaultMigration.vaultID(for: record.id), WorkoutVaultMigration.payload(record))
+        }
+        for record in old where !kept.contains(record.id) {
+            vault.remove(WorkoutVaultMigration.vaultID(for: record.id))
+        }
+    }
+
+    private var journalURL: URL? { directory?.appendingPathComponent(Self.migrationFile) }
+
+    func loadJournal() -> WorkoutMigrationJournal {
+        guard let url = journalURL, let data = try? Data(contentsOf: url),
+              let journal = try? JSONDecoder().decode(WorkoutMigrationJournal.self, from: data) else {
+            return WorkoutMigrationJournal()
+        }
+        return journal
+    }
+
+    private func saveJournal(_ journal: WorkoutMigrationJournal) {
+        guard let url = journalURL, let data = try? JSONEncoder().encode(journal) else { return }
+        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    /// Копия локальной истории до первого слияния с коллекцией; хранится 30 дней после подтверждённого переноса.
+    private func ensureBackup() {
+        guard let directory, loadJournal().confirmedAt == nil else { return }
+        let source = directory.appendingPathComponent(Self.historyFile)
+        let backup = directory.appendingPathComponent(Self.backupFile)
+        if fileManager.fileExists(atPath: source.path), !fileManager.fileExists(atPath: backup.path) {
+            try? fileManager.copyItem(at: source, to: backup)
+        }
+    }
+
+    static let backupDaysMs: Int64 = WorkoutVaultMigration.backupDays * 24 * 3_600_000
+
+    func purgeExpiredBackup(now: Int64) {
+        guard let directory, let confirmed = loadJournal().confirmedAt,
+              now - confirmed >= Self.backupDaysMs else { return }
+        try? fileManager.removeItem(at: directory.appendingPathComponent(Self.backupFile))
+    }
+
+    /// Выгружает историю, ждёт подтверждения сервера и сверяет показатели. Локальный файл не удаляется:
+    /// он остаётся кэшем, а страховочная копия до переноса живёт 30 дней.
+    @discardableResult
+    public func migrateHistory(now: Int64 = WorkoutStore.nowMs()) async -> WorkoutMigrationStatus {
+        guard let vault, vault.isAvailable, !migrationRunning else { return vaultStatus }
+        var journal = loadJournal()
+        if journal.confirmedAt != nil {
+            purgeExpiredBackup(now: now)
+            vaultStatus = .confirmed
+            return vaultStatus
+        }
+        migrationRunning = true
+        vaultStatus = .running
+        defer { migrationRunning = false }
+        mergeVault(vault)
+        uploadMissing(vault)
+        let before = WorkoutVaultMigration.report(history.records)
+        let synced = await vault.whenSynced()
+        // Аккаунт мог смениться, пока шла выгрузка.
+        guard self.vault === vault else { return vaultStatus }
+        guard synced else {
+            vaultStatus = .failed("История ещё не выгружена: нет связи. Локальные данные не тронуты.")
+            return vaultStatus
+        }
+        let after = WorkoutVaultMigration.report(vault.items.compactMap(\.data))
+        journal.before = before
+        journal.after = after
+        guard before == after else {
+            saveJournal(journal)
+            vaultStatus = .failed("Число тренировок, подходов или тоннаж до и после переноса не совпали. Локальные данные не тронуты.")
+            return vaultStatus
+        }
+        journal.confirmedAt = now
+        saveJournal(journal)
+        vaultStatus = .confirmed
+        return vaultStatus
     }
 
     // MARK: - Plan
@@ -421,6 +577,15 @@ public final class WorkoutStore: ObservableObject {
     /// The plan day as the workout ended up, when it differs from the plan.
     public var pendingPlanChanges: WorkoutDayPlan? {
         activeSession.flatMap(WorkoutHistory.planChanges)
+    }
+
+    /// День плана, который «Сохранить в план» заменил бы другой тренировкой: на этот день недели в плане уже есть
+    /// день, не совпадающий с тем, с которого началась тренировка (так бывает после «Повторить»). Nil — замены нет.
+    public var planDayToReplace: WorkoutDayPlan? {
+        guard let start = activeSession?.planDay,
+              let existing = WorkoutProgram.day(program, weekday: start.weekday),
+              existing.exercises != start.exercises else { return nil }
+        return existing
     }
 
     /// «Сохранить изменения в план»: the workout's exercises, sets, reps, rests and weights become the plan of its day.

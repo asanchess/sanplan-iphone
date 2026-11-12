@@ -13,6 +13,9 @@ public final class AppModel: ObservableObject {
     public let dictation: SpeechDictation
     public let notes: NotesStore
     public let vault: VaultKeySession
+    /// Encrypted collections of Money and Training (docs/contracts/DOMAINS.md §3); the sections write on top of them.
+    public let financeVault = VaultCollection<FinancePayload>(collection: "finance", policy: .newest, idPrefix: "f")
+    public let trainingVault = VaultCollection<WorkoutRecord>(collection: "training", policy: .newest, idPrefix: "t")
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -68,6 +71,14 @@ public final class AppModel: ObservableObject {
         vault.onReady = { [weak vault] in
             guard let vault, let account = vault.account, let key = vault.dataKey else { return }
             notes.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+            // After accountSignedIn has switched money and workouts to this account's folder.
+            Task { @MainActor [weak self] in
+                guard let self, self.vault.account == account, self.vault.dataKey != nil else { return }
+                self.financeVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                self.trainingVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                self.finance.attach(collection: self.financeVault)
+                self.workouts.attachVault(self.trainingVault, account: account)
+            }
         }
         #if DEBUG
         if screenshots { seedScreenshotNotes() }
@@ -98,6 +109,7 @@ public final class AppModel: ObservableObject {
         if dictation.isListening(to: .review) { dictation.stop() }
         inputs.clear(.review)
         notes.detach()
+        detachCollections()
         vault.reset()
         plans.resetForSignOut()
         finance.switchOwner(to: .none)
@@ -116,6 +128,7 @@ public final class AppModel: ObservableObject {
                 inputs.clear(.notes)
             }
             notes.detach()
+            detachCollections()
             vault.attach(account: email, transport: HTTPVaultTransport(client: auth.client))
         }
         let next = FinanceStore.Owner.account(email)
@@ -127,6 +140,14 @@ public final class AppModel: ObservableObject {
             inputs.clear(.money)
         }
         finance.switchOwner(to: next)
+    }
+
+    /// Money and workouts go back to their local files; nothing decrypted stays in memory.
+    private func detachCollections() {
+        finance.detach()
+        workouts.detachVault()
+        financeVault.detach()
+        trainingVault.detach()
     }
 
     public func launched() async {

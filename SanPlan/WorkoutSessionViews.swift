@@ -726,6 +726,7 @@ struct ExerciseTargetSheet: View {
 
 /// What was done, how long it took, the sets for last corrections, and «Сохранить изменения в план» when it differed.
 struct WorkoutSummaryView: View {
+    @State private var confirmingPlanReplace = false
     @ObservedObject var store: WorkoutStore
     let session: WorkoutSessionState
 
@@ -781,7 +782,9 @@ struct WorkoutSummaryView: View {
                                 .font(.subheadline)
                                 .foregroundColor(DS.Colors.textSecondary)
                             PillButton("Сохранить изменения в план", icon: "square.and.arrow.down", style: .secondary) {
-                                store.saveSessionChangesToPlan()
+                                // Разовая тренировка («Повторить») не заменяет день плана молча.
+                                if store.planDayToReplace != nil { confirmingPlanReplace = true }
+                                else { store.saveSessionChangesToPlan() }
                             }
                         }
                     }
@@ -806,6 +809,16 @@ struct WorkoutSummaryView: View {
             .padding(.horizontal, DS.Metrics.screenGutter)
             .padding(.vertical, DS.Metrics.spacing16)
             .padding(.bottom, 80)
+        }
+        .confirmationDialog(
+            "Заменить тренировку на \(store.planDayToReplace.map { $0.title ?? WorkoutFormat.weekdayNames[$0.weekday - 1] } ?? "этот день")?",
+            isPresented: $confirmingPlanReplace,
+            titleVisibility: .visible
+        ) {
+            Button("Заменить", role: .destructive) { store.saveSessionChangesToPlan() }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("В плане уже есть другая тренировка на этот день недели. Она будет заменена этой.")
         }
         .sheet(item: $editingSet) { ref in
             SetEditorSheet(store: store, ref: ref)

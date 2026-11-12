@@ -130,13 +130,13 @@ public enum AskParser {
 public struct AskData {
     public var today: String
     public var plans: [PlanItem]
-    public var finance: [FinanceRecord]
+    public var finance: FinanceState
     public var workouts: [WorkoutRecord]
-    public var dailyMinor: Int64?
+    public var canSpend: CanSpendToday?
     public var timeZone: String
 
-    public init(today: String, plans: [PlanItem] = [], finance: [FinanceRecord] = [], workouts: [WorkoutRecord] = [], dailyMinor: Int64? = nil, timeZone: String = PlanDomain.defaultTimeZone) {
-        self.today = today; self.plans = plans; self.finance = finance; self.workouts = workouts; self.dailyMinor = dailyMinor; self.timeZone = timeZone
+    public init(today: String, plans: [PlanItem] = [], finance: FinanceState = FinanceState(), workouts: [WorkoutRecord] = [], canSpend: CanSpendToday? = nil, timeZone: String = PlanDomain.defaultTimeZone) {
+        self.today = today; self.plans = plans; self.finance = finance; self.workouts = workouts; self.canSpend = canSpend; self.timeZone = timeZone
     }
 }
 
@@ -169,7 +169,7 @@ public enum AskEngine {
                 lines: Array(lines), isUnderstood: true)
         case .trainings(let period):
             let range = period.range(today: data.today)
-            let training = ReviewSummaries.trainingPeriod(data.workouts, from: range.from, to: range.to, timeZone: data.timeZone)
+            let training = ReviewSummaries.trainingPeriod(data.workouts, from: range.from, to: range.to)
             guard training.completed > 0 else {
                 return AskAnswer(text: "Тренировок \(period.phrase) нет.", lines: [], isUnderstood: true)
             }
@@ -184,10 +184,10 @@ public enum AskEngine {
             let more = items.count > 6 ? ["…и ещё \(items.count - 6)"] : []
             return AskAnswer(text: "\(period == .tomorrow ? "Завтра" : period == .yesterday ? "Вчера" : "Сегодня"): \(ReviewFormat.plural(items.count, "дело", "дела", "дел")).", lines: Array(lines) + more, isUnderstood: true)
         case .canSpendToday:
-            guard let daily = data.dailyMinor else {
-                return AskAnswer(text: "Не хватает данных: в «Деньги» нужны баланс и обязательные платежи.", lines: [], isUnderstood: true)
+            guard let spend = data.canSpend else {
+                return AskAnswer(text: "Не хватает данных: в «Деньги» нужны лимиты на месяц.", lines: [], isUnderstood: true)
             }
-            return AskAnswer(text: "Сегодня можно потратить \(ReviewFormat.tenge(max(0, daily))).", lines: [], isUnderstood: true)
+            return AskAnswer(text: "Сегодня можно потратить \(ReviewFormat.tenge(max(0, spend.amount) * 100)).", lines: [spend.basis], isUnderstood: true)
         }
     }
 }
@@ -198,9 +198,9 @@ extension AskData {
         AskData(
             today: PlanDomain.today(timeZone: plans.timeZone),
             plans: plans.plans + plans.upcomingEvents,
-            finance: finance.state.records,
+            finance: finance.state,
             workouts: workouts.history.records,
-            dailyMinor: finance.summary?.dailyMinor,
+            canSpend: finance.canSpendToday(on: PlanDomain.today(timeZone: plans.timeZone)),
             timeZone: plans.timeZone
         )
     }

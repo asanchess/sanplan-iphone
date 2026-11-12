@@ -59,7 +59,7 @@ final class ReviewDomainTests: XCTestCase {
         let records = [expense("a", today, 1500, "Продукты"), expense("b", today, 500, "Продукты"), expense("c", today, 700, "Транспорт"),
                        excluded, FinanceRecord(id: "i", kind: "income", title: "Зарплата", amountMinor: 9_000_000, date: today),
                        expense("old", "2026-11-11", 100, "Продукты")]
-        let money = ReviewSummaries.financeDay(records, day: today)
+        let money = ReviewSummaries.financeDay(FinanceState(records: records), day: today)
         XCTAssertEqual(money.spentMinor, 270_000)
         XCTAssertEqual(money.count, 3)
         XCTAssertEqual(money.byCategory.map(\.name), ["Продукты", "Транспорт"])
@@ -68,7 +68,7 @@ final class ReviewDomainTests: XCTestCase {
 
     func testFinancePeriodFiltersByCategory() {
         let records = [expense("a", "2026-11-03", 1000, "Продукты"), expense("b", "2026-11-04", 2000, "Транспорт")]
-        let food = ReviewSummaries.financePeriod(records, from: "2026-11-01", to: "2026-11-30", categories: ["Продукты"])
+        let food = ReviewSummaries.financePeriod(FinanceState(records: records), from: "2026-11-01", to: "2026-11-30", categories: ["Продукты"])
         XCTAssertEqual(food.spentMinor, 100_000)
         XCTAssertEqual(food.count, 1)
     }
@@ -83,7 +83,7 @@ final class ReviewDomainTests: XCTestCase {
     func testDigestOverAWeekCombinesSections() {
         let sources = ReviewSources(
             plans: [task("a", "2026-11-10", done: true), task("b", "2026-11-12")],
-            finance: [expense("a", "2026-11-11", 1000, "Продукты")],
+            finance: FinanceState(records: [expense("a", "2026-11-11", 1000, "Продукты")]),
             workouts: [workout("a", "2026-11-10"), workout("b", "2026-11-17")],
             noteMoments: [noon("2026-11-09"), noon("2026-11-20")],
             habitsDay: nil)
