@@ -175,7 +175,8 @@ final class WorkoutVaultTests: XCTestCase {
         // Правка плана уходит сразу.
         s.updateProgram(label: nil) { var p = $0; p.days[0].title = "Спина"; return p }
         XCTAssertEqual(c.item(WorkoutVaultMigration.programID)?.data?.program?.days.first?.title, "Спина")
-        XCTAssertTrue(await c.whenSynced())
+        let syncedc = await c.whenSynced()
+        XCTAssertTrue(syncedc)
     }
 
     func testProgramFromTheServerWinsAndLocalOneIsKept() async throws {
@@ -187,7 +188,8 @@ final class WorkoutVaultTests: XCTestCase {
         a.attach(account: email, key: key, transport: server)
         first.attachVault(a, account: email, autoMigrate: false)
         await waitUntil { first.programReconciled }
-        XCTAssertTrue(await a.whenSynced())
+        let synceda = await a.whenSynced()
+        XCTAssertTrue(synceda)
 
         // Другое устройство: свой план и идущая тренировка; после первой синхронизации план берётся с сервера.
         let other = FileManager.default.temporaryDirectory.appendingPathComponent("workout-vault-b-\(UUID().uuidString)", isDirectory: true)
