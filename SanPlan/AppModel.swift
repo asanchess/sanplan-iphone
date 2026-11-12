@@ -15,10 +15,13 @@ public final class AppModel: ObservableObject {
     public let vault: VaultKeySession
     /// Encrypted collections of Money and Training (docs/contracts/DOMAINS.md §3); the sections write on top of them.
     public let financeVault = VaultCollection<FinancePayload>(collection: "finance", policy: .newest, idPrefix: "f")
-    public let trainingVault = VaultCollection<WorkoutRecord>(collection: "training", policy: .newest, idPrefix: "t")
+    public let trainingVault = VaultCollection<WorkoutVaultEntry>(collection: "training", policy: .newest, idPrefix: "t")
     /// Day reviews: free text, so both versions survive a conflict and ReviewStore merges them.
     public let reviewsVault = VaultCollection<ReviewDayRecord>(collection: "reviews", policy: .copy, idPrefix: "r")
     public let habitsVault = VaultCollection<HabitPayload>(collection: "habits", policy: .newest, idPrefix: "h")
+    public let goalsVault = VaultCollection<GoalPayload>(collection: "goals", policy: .newest, idPrefix: "g")
+    /// Day and week reviews; shared by «Сегодня» and the spheres screen in Plans.
+    public let reviews = ReviewStore()
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -54,6 +57,24 @@ public final class AppModel: ObservableObject {
             }
         )
         if screenshots { HabitStore.shared.switchOwner(to: .device) }
+        // Goals read the other sections only through their summaries (docs/contracts/DOMAINS.md §2).
+        GoalStore.shared.context = GoalContext(
+            savedAmount: { id in finance.savingsGoals.first(where: { $0.id == id }).map { Int($0.saved) } },
+            trainingCompleted: { from, to in WorkoutStore.shared.periodSummary(from: from, to: to).completed },
+            bestWeight: { exercise in WorkoutStore.shared.bestWeight(exercise: exercise) },
+            habitCompletion: { id, from, to in
+                let habits = HabitStore.shared
+                guard let habit = habits.habits.first(where: { $0.id == id }) else { return nil }
+                return HabitEngine.completion(habit, from: from, to: to, marks: habits.marks[id] ?? [:], context: habits.context)
+            },
+            spending: { from, to in
+                let period = finance.periodSummary(from: from, to: to)
+                guard period.count > 0 else { return nil }
+                let top = period.byCategory.max { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }
+                return (total: Int(period.spent), topCategory: top?.key, topAmount: Int(top?.value ?? 0))
+            }
+        )
+        if screenshots { GoalStore.shared.switchOwner(to: .device) }
         ReviewNotifications.shared.install()
         let inputs = InputDrafts()
         self.inputs = inputs
@@ -82,6 +103,8 @@ public final class AppModel: ObservableObject {
                 self.reviewsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.habitsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 HabitStore.shared.attach(collection: self.habitsVault)
+                self.goalsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                GoalStore.shared.attach(collection: self.goalsVault)
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -121,6 +144,7 @@ public final class AppModel: ObservableObject {
         finance.switchOwner(to: .none)
         workouts.switchOwner(to: .none)
         HabitStore.shared.switchOwner(to: .none)
+        GoalStore.shared.switchOwner(to: .none)
         // The 21:00 review reminder belongs to the account that set it.
         ReviewReminder.cancel()
     }
@@ -140,6 +164,7 @@ public final class AppModel: ObservableObject {
         let next = FinanceStore.Owner.account(email)
         workouts.switchOwner(to: next)
         HabitStore.shared.switchOwner(to: next)
+        GoalStore.shared.switchOwner(to: next)
         guard finance.owner != next else { return }
         if case .account = finance.owner {
             if dictation.isListening(to: .money) { dictation.stop() }
@@ -157,6 +182,8 @@ public final class AppModel: ObservableObject {
         reviewsVault.detach()
         HabitStore.shared.detach()
         habitsVault.detach()
+        GoalStore.shared.detach()
+        goalsVault.detach()
     }
 
     /// Days with a real action in every section (DOMAINS.md §2), for the app streak; habit marks are added by HabitStore.
@@ -192,6 +219,7 @@ public final class AppModel: ObservableObject {
             trainingVault.syncNow()
             reviewsVault.syncNow()
             habitsVault.syncNow()
+            goalsVault.syncNow()
         }
     }
 }

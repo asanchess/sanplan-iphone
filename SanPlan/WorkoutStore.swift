@@ -50,6 +50,7 @@ public final class WorkoutStore: ObservableObject {
     static let undoLimit = 30
     static let migrationFile = "arna_workout_migration_v1.json"
     static let backupFile = "arna_workout_history_v1.premigration.json"
+    static let programBackupFile = "arna_workout_program_v1.premigration.json"
 
     private(set) var location: Location
     private let fileManager = FileManager.default
@@ -60,7 +61,9 @@ public final class WorkoutStore: ObservableObject {
     private var undoStack: [Snapshot] = []
     private var alarmWork: Task<Void, Never>?
     private var restAlarmObservation: AnyCancellable?
-    private(set) var vault: VaultCollection<WorkoutRecord>?
+    private(set) var vault: VaultCollection<WorkoutVaultEntry>?
+    /// Программа сверена с сервером после первой синхронизации; до этого локальные правки программы не выгружаются.
+    private(set) var programReconciled = false
     private var vaultObservation: AnyCancellable?
     private var migrationRunning = false
 
@@ -243,6 +246,7 @@ public final class WorkoutStore: ObservableObject {
         var toSave = training ?? WorkoutProgram.empty()
         toSave.session = activeSession
         write(toSave, to: directory.appendingPathComponent(Self.trainingFile), what: "тренировку")
+        pushProgram()
     }
 
     private func saveHistory() {
@@ -361,7 +365,7 @@ public final class WorkoutStore: ObservableObject {
 
     /// Подключает коллекцию после разблокировки ключа. `account` — почта аккаунта: записи другого аккаунта
     /// в эту папку не попадут. Идущую тренировку и план коллекция не касается.
-    public func attachVault(_ collection: VaultCollection<WorkoutRecord>, account: String, autoMigrate: Bool = true) {
+    public func attachVault(_ collection: VaultCollection<WorkoutVaultEntry>, account: String, autoMigrate: Bool = true) {
         detachVault()
         guard case .account(let folder) = location, folder == FinanceStore.accountFolderName(account) else { return }
         vault = collection
@@ -370,12 +374,14 @@ public final class WorkoutStore: ObservableObject {
             Task { @MainActor in self?.vaultChanged(autoMigrate: autoMigrate) }
         }
         vaultChanged(autoMigrate: autoMigrate)
+        reconcileProgramAfterSync(collection)
     }
 
     /// Выход из аккаунта или смена владельца: коллекция отпускается, локальные файлы остаются.
     public func detachVault() {
         vaultObservation = nil
         vault = nil
+        programReconciled = false
         migrationRunning = false
         vaultStatus = .idle
     }
@@ -391,13 +397,14 @@ public final class WorkoutStore: ObservableObject {
         guard let vault, vault.isAvailable, !isUnavailable else { return }
         mergeVault(vault)
         uploadMissing(vault)
+        if programReconciled { mergeProgram(vault) }
         if autoMigrate, vaultStatus == .idle, !migrationRunning {
             Task { @MainActor in _ = await self.migrateHistory() }
         }
     }
 
-    private func mergeVault(_ vault: VaultCollection<WorkoutRecord>) {
-        let merged = WorkoutVaultMigration.merged(local: history.records, vault: vault.all)
+    private func mergeVault(_ vault: VaultCollection<WorkoutVaultEntry>) {
+        let merged = WorkoutVaultMigration.merged(local: history.records, vault: WorkoutVaultMigration.recordItems(vault.all))
         guard merged != history.records else { return }
         history.records = merged
         // Снимки для «Отменить» старше этого слияния вернули бы удалённое или стёрли чужое.
@@ -412,10 +419,10 @@ public final class WorkoutStore: ObservableObject {
     }
 
     /// Тренировки, которых в коллекции ещё нет (старая история, записанное без связи). Повтор ничего не дублирует.
-    private func uploadMissing(_ vault: VaultCollection<WorkoutRecord>) {
-        let missing = history.records.compactMap { record -> (id: String, data: WorkoutRecord, updatedAt: Int64)? in
+    private func uploadMissing(_ vault: VaultCollection<WorkoutVaultEntry>) {
+        let missing = history.records.compactMap { record -> (id: String, data: WorkoutVaultEntry, updatedAt: Int64)? in
             let id = WorkoutVaultMigration.vaultID(for: record.id)
-            return vault.all[id] == nil ? (id, WorkoutVaultMigration.payload(record), record.endedAt) : nil
+            return vault.all[id] == nil ? (id, .record(WorkoutVaultMigration.payload(record)), record.endedAt) : nil
         }
         if !missing.isEmpty { _ = vault.importMany(missing) }
     }
@@ -426,11 +433,49 @@ public final class WorkoutStore: ObservableObject {
         let before = Dictionary(old.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let kept = Set(new.map(\.id))
         for record in new where before[record.id] != record {
-            vault.put(WorkoutVaultMigration.vaultID(for: record.id), WorkoutVaultMigration.payload(record))
+            vault.put(WorkoutVaultMigration.vaultID(for: record.id), .record(WorkoutVaultMigration.payload(record)))
         }
         for record in old where !kept.contains(record.id) {
             vault.remove(WorkoutVaultMigration.vaultID(for: record.id))
         }
+    }
+
+    // MARK: Программа в коллекции
+
+    /// Первая сверка программы — только после синхронизации, чтобы старый кэш не затёр план с другого устройства.
+    private func reconcileProgramAfterSync(_ collection: VaultCollection<WorkoutVaultEntry>) {
+        Task { @MainActor in
+            let synced = await collection.whenSynced()
+            guard self.vault === collection, synced, !self.isUnavailable else { return }
+            self.mergeProgram(collection)
+            self.programReconciled = true
+            self.pushProgram()
+        }
+    }
+
+    /// Программа из коллекции главнее. Если локальная была другой, её копия остаётся в файле рядом (один раз).
+    /// Идущая тренировка не меняется.
+    private func mergeProgram(_ vault: VaultCollection<WorkoutVaultEntry>) {
+        guard case .program(let remote)? = vault.item(WorkoutVaultMigration.programID)?.data,
+              !WorkoutVaultMigration.same(training, remote) else { return }
+        if !programReconciled, let local = training, !local.days.isEmpty, let directory {
+            let url = directory.appendingPathComponent(Self.programBackupFile)
+            if !fileManager.fileExists(atPath: url.path) { write(local, to: url, what: "копию плана") }
+        }
+        var plan = remote.plan
+        plan.session = activeSession
+        training = plan
+        undoStack = []
+        undoOffer = nil
+        saveTraining()
+    }
+
+    /// Правка программы на этом устройстве уходит в коллекцию записью `t-program`.
+    private func pushProgram() {
+        guard programReconciled, let vault, vault.isAvailable, let plan = training else { return }
+        let payload = WorkoutProgramPayload(plan)
+        if case .program(let current)? = vault.item(WorkoutVaultMigration.programID)?.data, current == payload { return }
+        vault.put(WorkoutVaultMigration.programID, .program(payload))
     }
 
     private var journalURL: URL? { directory?.appendingPathComponent(Self.migrationFile) }
@@ -490,7 +535,7 @@ public final class WorkoutStore: ObservableObject {
             vaultStatus = .failed("История ещё не выгружена: нет связи. Локальные данные не тронуты.")
             return vaultStatus
         }
-        let after = WorkoutVaultMigration.report(vault.items.compactMap(\.data))
+        let after = WorkoutVaultMigration.report(vault.items.compactMap { $0.data?.record })
         journal.before = before
         journal.after = after
         guard before == after else {

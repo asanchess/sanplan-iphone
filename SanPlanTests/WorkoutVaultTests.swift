@@ -40,8 +40,8 @@ final class WorkoutVaultTests: XCTestCase {
         )
     }
 
-    private func collection(folder: String) -> VaultCollection<WorkoutRecord> {
-        let c = VaultCollection<WorkoutRecord>(collection: "training", policy: .newest, idPrefix: "t",
+    private func collection(folder: String) -> VaultCollection<WorkoutVaultEntry> {
+        let c = VaultCollection<WorkoutVaultEntry>(collection: "training", policy: .newest, idPrefix: "t",
                                                baseDirectory: base.appendingPathComponent(folder))
         c.syncDelay = .seconds(3600)
         return c
@@ -52,10 +52,11 @@ final class WorkoutVaultTests: XCTestCase {
         let id = WorkoutVaultMigration.vaultID(for: uuid)
         XCTAssertEqual(id, "t-" + uuid)
         XCTAssertEqual(id, WorkoutVaultMigration.vaultID(for: uuid))
-        XCTAssertTrue(VaultCollection<WorkoutRecord>.isValidID(id))
-        XCTAssertTrue(VaultCollection<WorkoutRecord>.isValidID(WorkoutVaultMigration.vaultID(for: "a")))
-        XCTAssertTrue(VaultCollection<WorkoutRecord>.isValidID(WorkoutVaultMigration.vaultID(for: "тренировка №1")))
-        XCTAssertTrue(VaultCollection<WorkoutRecord>.isValidID(WorkoutVaultMigration.vaultID(for: String(repeating: "x", count: 100))))
+        XCTAssertTrue(VaultCollection<WorkoutVaultEntry>.isValidID(id))
+        XCTAssertTrue(VaultCollection<WorkoutVaultEntry>.isValidID(WorkoutVaultMigration.vaultID(for: "a")))
+        XCTAssertTrue(VaultCollection<WorkoutVaultEntry>.isValidID(WorkoutVaultMigration.vaultID(for: "тренировка №1")))
+        XCTAssertTrue(VaultCollection<WorkoutVaultEntry>.isValidID(WorkoutVaultMigration.vaultID(for: String(repeating: "x", count: 100))))
+        XCTAssertTrue(VaultCollection<WorkoutVaultEntry>.isValidID(WorkoutVaultMigration.programID))
     }
 
     func testReportCountsWorkoutsSetsAndTonnage() {
@@ -131,9 +132,82 @@ final class WorkoutVaultTests: XCTestCase {
         s.attachVault(c, account: email, autoMigrate: false)
         s.saveRecord(record("rec-0003", start: 1_700_000_000_000))
         let vid = WorkoutVaultMigration.vaultID(for: "rec-0003")
-        XCTAssertEqual(c.item(vid)?.data?.id, "rec-0003")
+        XCTAssertEqual(c.item(vid)?.data?.record?.id, "rec-0003")
         s.deleteRecord(id: "rec-0003")
         XCTAssertNil(c.item(vid))
         XCTAssertEqual(c.all[vid]?.deleted, true)
+    }
+    // MARK: - Программа
+
+    private func plan(_ title: String, exercise: String = "Присед") -> WorkoutTrainingPlan {
+        WorkoutTrainingPlan(days: [WorkoutDayPlan(weekday: 2, exercises: [WorkoutExercisePlan(name: exercise, sets: 3, reps: 5, id: "ex-\(exercise)")], title: title)])
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() { try? await Task.sleep(nanoseconds: 10_000_000) }
+    }
+
+    func testEntryKeepsOldRecordFormatAndReadsProgramAndUnknownKinds() throws {
+        let rec = record("rec-0001", start: 1_000)
+        let encoded = try JSONEncoder().encode(WorkoutVaultEntry.record(rec))
+        XCTAssertNil((try JSONSerialization.jsonObject(with: encoded) as? [String: Any])?["kind"])
+        XCTAssertEqual(try JSONDecoder().decode(WorkoutVaultEntry.self, from: encoded).record?.id, "rec-0001")
+        let program = WorkoutVaultEntry.program(WorkoutProgramPayload(plan("Ноги")))
+        let again = try JSONDecoder().decode(WorkoutVaultEntry.self, from: JSONEncoder().encode(program))
+        XCTAssertEqual(again, program)
+        XCTAssertEqual(again.program?.days.first?.title, "Ноги")
+        let unknown = try JSONDecoder().decode(WorkoutVaultEntry.self, from: Data(#"{"kind":"future","x":1}"#.utf8))
+        XCTAssertEqual(unknown, .unknown)
+    }
+
+    func testProgramGoesToTheCollectionWithoutTheRunningSession() async throws {
+        let key = SymmetricKey(size: .bits256)
+        let server = MemoryVaultTransport()
+        let s = store()
+        s.setTrainingPlan(plan("Ноги"))
+        let c = collection(folder: "p1")
+        c.attach(account: email, key: key, transport: server)
+        s.attachVault(c, account: email, autoMigrate: false)
+        await waitUntil { s.programReconciled }
+        XCTAssertTrue(s.programReconciled)
+        XCTAssertEqual(c.item(WorkoutVaultMigration.programID)?.data?.program?.days.first?.title, "Ноги")
+
+        // Правка плана уходит сразу.
+        s.updateProgram(label: nil) { var p = $0; p.days[0].title = "Спина"; return p }
+        XCTAssertEqual(c.item(WorkoutVaultMigration.programID)?.data?.program?.days.first?.title, "Спина")
+        XCTAssertTrue(await c.whenSynced())
+    }
+
+    func testProgramFromTheServerWinsAndLocalOneIsKept() async throws {
+        let key = SymmetricKey(size: .bits256)
+        let server = MemoryVaultTransport()
+        let first = store()
+        first.setTrainingPlan(plan("Ноги"))
+        let a = collection(folder: "pa")
+        a.attach(account: email, key: key, transport: server)
+        first.attachVault(a, account: email, autoMigrate: false)
+        await waitUntil { first.programReconciled }
+        XCTAssertTrue(await a.whenSynced())
+
+        // Другое устройство: свой план и идущая тренировка; после первой синхронизации план берётся с сервера.
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("workout-vault-b-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let second = WorkoutStore(restAlarm: RestAlarmCoordinator(service: FakeRestAlarmService()),
+                                  baseDirectory: other, owner: .account(email), defaults: defaults)
+        let mine = plan("Руки", exercise: "Бицепс")
+        second.setTrainingPlan(mine)
+        second.startWorkout(day: mine.days[0])
+        let running = second.activeSession
+        XCTAssertNotNil(running)
+        let b = collection(folder: "pb")
+        b.attach(account: email, key: key, transport: server)
+        second.attachVault(b, account: email, autoMigrate: false)
+        await waitUntil { second.programReconciled }
+
+        XCTAssertEqual(second.program.days.first?.title, "Ноги")
+        XCTAssertEqual(second.activeSession, running, "идущая тренировка не меняется")
+        let backup = other.appendingPathComponent("ARNA")
+        let found = try FileManager.default.subpathsOfDirectory(atPath: backup.path).contains { $0.hasSuffix(WorkoutStore.programBackupFile) }
+        XCTAssertTrue(found, "локальный план сохранён копией")
     }
 }

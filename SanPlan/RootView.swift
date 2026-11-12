@@ -37,6 +37,7 @@ public struct RootView: View {
     @EnvironmentObject private var authService: AuthService
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .today
+    @State private var goalsRequest = 0
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
@@ -209,7 +210,9 @@ public struct RootView: View {
                     inputs: model.inputs,
                     appStreak: { [model] day in model.appStreak(today: day) },
                     dictation: model.dictation,
-                    reviewRequest: reviewNotifications.dayReviewRequests
+                    onOpenGoals: { selectedTab = .plans; goalsRequest += 1 },
+                    reviewRequest: reviewNotifications.dayReviewRequests,
+                    review: model.reviews
                 )
                 .captureButton(action: openCapture)
             }
@@ -224,7 +227,10 @@ public struct RootView: View {
                     workouts: model.workouts,
                     showSettings: $showSettingsSheet,
                     onOpenWorkout: { selectedTab = .workout },
-                    streakSources: model.streakSources
+                    streakSources: model.streakSources,
+                    savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
+                    weekRatings: model.reviews.file.weeks.values.sorted { $0.weekStart < $1.weekStart },
+                    goalsRequest: goalsRequest
                 )
                 .keyboardDismissBar()
             }

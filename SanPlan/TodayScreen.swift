@@ -16,9 +16,13 @@ public struct TodayScreen: View {
     /// The app-wide streak for a day; nil hides the line.
     var appStreak: ((String) -> StreakState)? = nil
     var dictation: SpeechDictation? = nil
+    /// Opens Plans → «Цели»; nil: just switches to the Plans tab.
+    var onOpenGoals: (() -> Void)? = nil
     /// Grows when the day-review reminder is tapped (ReviewNotifications); opens the day review.
     var reviewRequest: Int = 0
-    @StateObject private var review = ReviewStore()
+    /// Owned by AppModel so Plans (spheres) sees the same week ratings.
+    @ObservedObject var review: ReviewStore
+    @ObservedObject private var goals = GoalStore.shared
     @State private var reviewSheet: ReviewSheet?
     @State private var isShowingAlarms = false
 
@@ -44,6 +48,7 @@ public struct TodayScreen: View {
                                 .foregroundColor(DS.Colors.textSecondary)
                                 .accessibilityLabel(line)
                         }
+                        weekGoalRow
                         reviewCard
                         workoutCard
                         plansCard
@@ -65,7 +70,7 @@ public struct TodayScreen: View {
             case .day:
                 DayReviewSheet(review: review, day: reviewDay, sources: reviewSources, moveOpen: { await moveOpenToTomorrow($0) }, inputs: inputs, dictation: dictation)
             case .week:
-                WeekReviewSheet(review: review, day: reviewDay, sources: reviewSources, spheres: ReviewSphere.defaults)
+                WeekReviewSheet(review: review, day: reviewDay, sources: reviewSources, spheres: goals.spheres.map { ReviewSphere(id: $0.id, title: $0.title) })
             case .history:
                 ReviewHistorySheet(review: review)
             }
@@ -79,6 +84,36 @@ public struct TodayScreen: View {
         // Reviews follow the signed-in account: money switches owner on sign-in and sign-out.
         .onChange(of: finance.state) { _, _ in syncReviewOwner() }
         .onChange(of: reviewsVault?.isAvailable) { _, _ in review.setCollection(reviewsVault) }
+    }
+
+    @ViewBuilder
+    private var weekGoalRow: some View {
+        if let pair = goals.weekGoal(today: reviewDay),
+           let line = WeekGoalLine.make(title: pair.goal.title, progressText: pair.progress.text, fraction: pair.progress.fraction, achieved: pair.progress.achieved) {
+            Button {
+                if let onOpenGoals { onOpenGoals() } else { selectedTab = .plans }
+            } label: {
+                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                    Text("Цель недели").font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                    Text(line.title).font(.headline).foregroundColor(DS.Colors.textPrimary)
+                    if !line.text.isEmpty {
+                        Text(line.text).font(.subheadline).foregroundColor(DS.Colors.textSecondary)
+                    }
+                    if let fraction = line.fraction {
+                        ProgressView(value: fraction).accessibilityHidden(true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(DS.Metrics.spacing12)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .background(DS.Colors.surfaceRaised)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Цель недели: \(line.title). \(line.text)")
+            .accessibilityHint("Открыть цели")
+        }
     }
 
     private var reviewDay: String { PlanDomain.today(timeZone: plans.timeZone) }

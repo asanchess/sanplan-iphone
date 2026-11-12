@@ -8,8 +8,13 @@ public struct PlanScreen: View {
     @ObservedObject public var workouts: WorkoutStore
     @Binding public var showSettings: Bool
     @ObservedObject private var habits = HabitStore.shared
+    @ObservedObject private var goals = GoalStore.shared
+    private let savingsOptions: [GoalSavingsOption]
+    private let weekRatings: [WeekReview]
     private let onOpenWorkout: () -> Void
     private let streakSources: [StreakEngine.ActivitySource]
+    /// Bumped by «Сегодня» to open the goals view.
+    private let goalsRequest: Int
 
     @State private var viewMode: ViewMode = .day
     @State private var isShowingAlarms: Bool = false
@@ -21,6 +26,7 @@ public struct PlanScreen: View {
         case week = "Неделя"
         case upcoming = "Все"
         case habits = "Привычки"
+        case goals = "Цели"
         public var id: String { rawValue }
     }
 
@@ -32,7 +38,10 @@ public struct PlanScreen: View {
         workouts: WorkoutStore,
         showSettings: Binding<Bool>,
         onOpenWorkout: @escaping () -> Void = {},
-        streakSources: [StreakEngine.ActivitySource] = []
+        streakSources: [StreakEngine.ActivitySource] = [],
+        savingsOptions: [GoalSavingsOption] = [],
+        weekRatings: [WeekReview] = [],
+        goalsRequest: Int = 0
     ) {
         self.store = store
         self.recorder = recorder
@@ -42,9 +51,17 @@ public struct PlanScreen: View {
         self._showSettings = showSettings
         self.onOpenWorkout = onOpenWorkout
         self.streakSources = streakSources
+        self.savingsOptions = savingsOptions
+        self.weekRatings = weekRatings
+        self.goalsRequest = goalsRequest
     }
 
     public var body: some View {
+        planBody
+            .onChange(of: goalsRequest) { _, _ in viewMode = .goals }
+    }
+
+    private var planBody: some View {
         ZStack {
             DS.Colors.canvas.ignoresSafeArea()
 
@@ -106,6 +123,9 @@ public struct PlanScreen: View {
                             upcomingList
                         case .habits:
                             HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone), streakSources: streakSources)
+                        case .goals:
+                            GoalsSection(goals: goals, habits: habits, today: PlanDomain.today(timeZone: store.timeZone),
+                                         savings: savingsOptions, weekRatings: weekRatings)
                         }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)

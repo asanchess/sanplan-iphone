@@ -7,6 +7,68 @@ import Foundation
 extension WorkoutRecordSet: @unchecked Sendable {}
 extension WorkoutRecordExercise: @unchecked Sendable {}
 extension WorkoutRecord: @unchecked Sendable {}
+extension WorkoutExercisePlan: @unchecked Sendable {}
+extension WorkoutDayPlan: @unchecked Sendable {}
+extension WorkoutDefaults: @unchecked Sendable {}
+
+/// Недельная программа в коллекции: дни и значения по умолчанию, без идущей тренировки (`session` остаётся на устройстве).
+public struct WorkoutProgramPayload: Codable, Equatable, Sendable {
+    public var kind: String = "program"
+    public var version: Int
+    public var days: [WorkoutDayPlan]
+    public var defaults: WorkoutDefaults?
+
+    public init(_ plan: WorkoutTrainingPlan) {
+        version = plan.version
+        days = plan.days
+        defaults = plan.defaults
+    }
+
+    public var plan: WorkoutTrainingPlan {
+        WorkoutTrainingPlan(version: version, days: days, session: nil, defaults: defaults)
+    }
+}
+
+/// Запись коллекции `training`: тренировка (как раньше, без поля `kind`) или программа (`kind: "program"`).
+/// Незнакомый вид записи читается как `.unknown` и игнорируется, чтобы новая версия не ломала старую.
+public enum WorkoutVaultEntry: Codable, Equatable, Sendable {
+    case record(WorkoutRecord)
+    case program(WorkoutProgramPayload)
+    case unknown
+
+    private enum Key: String, CodingKey { case kind }
+
+    public init(from decoder: Decoder) throws {
+        let kind = try? decoder.container(keyedBy: Key.self).decodeIfPresent(String.self, forKey: .kind)
+        if kind == "program" {
+            self = .program(try WorkoutProgramPayload(from: decoder))
+        } else if kind == nil, let record = try? WorkoutRecord(from: decoder) {
+            self = .record(record)
+        } else {
+            self = .unknown
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .record(let record): try record.encode(to: encoder)
+        case .program(let program): try program.encode(to: encoder)
+        case .unknown:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        }
+    }
+
+    public var record: WorkoutRecord? {
+        if case .record(let record) = self { return record }
+        return nil
+    }
+
+    public var program: WorkoutProgramPayload? {
+        if case .program(let program) = self { return program }
+        return nil
+    }
+}
 
 /// Показатели, которые до и после переноса обязаны совпасть.
 public struct WorkoutMigrationReport: Codable, Equatable {
@@ -53,6 +115,26 @@ public enum WorkoutVaultMigration {
             exercises: exercises,
             tonnageTenths: Int((tonnage * 10).rounded())
         )
+    }
+
+    /// Единственная запись программы на аккаунт.
+    public static let programID = "t-program"
+
+    /// Только записи-тренировки из коллекции, в прежнем виде для слияния и сверки.
+    public static func recordItems(_ all: [String: VaultItem<WorkoutVaultEntry>]) -> [String: VaultItem<WorkoutRecord>] {
+        var result: [String: VaultItem<WorkoutRecord>] = [:]
+        for (id, item) in all where id != programID {
+            if item.deleted { result[id] = VaultItem(id: id, updatedAt: item.updatedAt, deleted: true, data: item.data?.record); continue }
+            guard let record = item.data?.record else { continue }
+            result[id] = VaultItem(id: id, updatedAt: item.updatedAt, data: record)
+        }
+        return result
+    }
+
+    /// Совпадает ли локальная программа с записью коллекции (идущая тренировка не в счёт).
+    public static func same(_ local: WorkoutTrainingPlan?, _ remote: WorkoutProgramPayload) -> Bool {
+        guard let local else { return false }
+        return WorkoutProgramPayload(local) == remote
     }
 
     /// «t-<id>»: детерминированно из локального id, поэтому повторный перенос не создаёт дублей.

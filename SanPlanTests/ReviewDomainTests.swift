@@ -182,6 +182,15 @@ final class ReviewDomainTests: XCTestCase {
         XCTAssertNil(CanSpendLine.make(spend: nil, gap: nil, hasData: true))
     }
 
+    func testWeekGoalLineCarriesProgressAndHidesWithoutTitle() {
+        let line = WeekGoalLine.make(title: " Пробежать 20 км ", progressText: "8 из 20 км", fraction: 0.4)
+        XCTAssertEqual(line, WeekGoalLine(title: "Пробежать 20 км", text: "8 из 20 км", fraction: 0.4, achieved: false))
+        XCTAssertEqual(WeekGoalLine.make(title: "Цель", progressText: "x", fraction: 3)?.fraction, 1)
+        XCTAssertNil(WeekGoalLine.make(title: "Цель", progressText: "Нет данных", fraction: nil)?.fraction)
+        XCTAssertNil(WeekGoalLine.make(title: "  ", progressText: "", fraction: 0.5))
+        XCTAssertNil(WeekGoalLine.make(title: nil, progressText: nil, fraction: nil))
+    }
+
     func testStreakLineStatesDaysAndRestDays() {
         XCTAssertEqual(StreakLine.text(StreakState(days: 5, restDaysLeft: 2)), "Серия: 5 дней · отдыха осталось 2")
         XCTAssertEqual(StreakLine.text(StreakState(days: 1, restDaysLeft: 0)), "Серия: 1 день · дней отдыха не осталось")

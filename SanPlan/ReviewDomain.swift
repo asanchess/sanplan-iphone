@@ -310,20 +310,11 @@ public enum ReviewMood {
     public static func label(_ mood: Int) -> String { labels[mood] ?? "" }
 }
 
-/// A sphere of life to rate once a week. TEMP: the real list belongs to Plans (spheres).
+/// A sphere of life to rate once a week. The list belongs to Plans (GoalStore.spheres); the week review gets it from there.
 public struct ReviewSphere: Codable, Equatable, Identifiable, Hashable {
     public var id: String
     public var title: String
     public init(id: String, title: String) { self.id = id; self.title = title }
-
-    public static let defaults: [ReviewSphere] = [
-        ReviewSphere(id: "health", title: "Здоровье"),
-        ReviewSphere(id: "money", title: "Деньги"),
-        ReviewSphere(id: "work", title: "Дела и работа"),
-        ReviewSphere(id: "people", title: "Близкие"),
-        ReviewSphere(id: "rest", title: "Отдых"),
-        ReviewSphere(id: "growth", title: "Развитие")
-    ]
 }
 
 public struct WeekReview: Codable, Equatable, Identifiable {
@@ -409,6 +400,21 @@ public struct ReviewReminderSettings: Codable, Equatable {
 }
 
 // MARK: - Formatting shared by review and answers
+
+/// «Цель недели» on Today: the title, the progress text and a 0…1 fraction (nil: no data). Hidden without a week goal.
+public struct WeekGoalLine: Equatable {
+    public var title: String
+    public var text: String
+    public var fraction: Double?
+    public var achieved: Bool
+
+    public static func make(title: String?, progressText: String?, fraction: Double?, achieved: Bool = false) -> WeekGoalLine? {
+        let t = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        let f = fraction.flatMap { $0.isFinite ? min(max($0, 0), 1) : nil }
+        return WeekGoalLine(title: t, text: (progressText ?? "").trimmingCharacters(in: .whitespacesAndNewlines), fraction: f, achieved: achieved)
+    }
+}
 
 public enum StreakLine {
     /// «Серия: 5 дней · отдыха осталось 2»; nil, когда показывать нечего.
