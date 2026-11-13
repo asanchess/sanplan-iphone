@@ -5,6 +5,7 @@ public struct SettingsView: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
     @EnvironmentObject private var workouts: WorkoutStore
+    @EnvironmentObject private var onboarding: OnboardingModel
 
     @State private var showSignOutConfirmation: Bool = false
 
