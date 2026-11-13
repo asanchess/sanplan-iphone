@@ -34,11 +34,14 @@ public struct StatusResponse: Decodable, Equatable {
     public let google: GoogleInfo?
     public let authenticated: Bool
     public let account: AccountInfo?
+    /// The server can send a sign-in code by email.
+    public let emailLogin: Bool?
 
-    public init(google: GoogleInfo? = nil, authenticated: Bool, account: AccountInfo? = nil) {
+    public init(google: GoogleInfo? = nil, authenticated: Bool, account: AccountInfo? = nil, emailLogin: Bool? = nil) {
         self.google = google
         self.authenticated = authenticated
         self.account = account
+        self.emailLogin = emailLogin
     }
 }
 

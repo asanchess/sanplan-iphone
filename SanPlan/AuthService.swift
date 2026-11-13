@@ -191,6 +191,42 @@ public final class AuthService: ObservableObject {
         }
     }
 
+    /// Step 1 of the email sign-in: the server mails a 6-digit code. True when it was sent.
+    public func requestEmailCode(_ email: String) async -> Bool {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard address.contains("@") else { return false }
+        isAuthenticating = true
+        errorMessage = nil
+        defer { isAuthenticating = false }
+        struct StartBody: Encodable { let email: String }
+        do {
+            let _: EmptyResponse = try await client.post(path: "/api/auth/email/start", body: StartBody(email: address))
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Step 2: the code from the letter opens a session for that address.
+    public func verifyEmailCode(email: String, code: String) async {
+        let digits = code.filter(\.isNumber)
+        guard digits.count == 6 else { return }
+        isAuthenticating = true
+        errorMessage = nil
+        defer { isAuthenticating = false }
+        struct VerifyBody: Encodable { let email: String; let code: String }
+        do {
+            let _: EmptyResponse = try await client.post(
+                path: "/api/auth/email/verify",
+                body: VerifyBody(email: email.trimmingCharacters(in: .whitespacesAndNewlines), code: digits)
+            )
+            await loadStatus()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     public func signInWithPassword(_ password: String) async {
         guard !password.isEmpty else { return }
         isAuthenticating = true
