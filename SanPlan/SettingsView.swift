@@ -133,6 +133,8 @@ public struct SettingsView: View {
                             }
                         }
 
+                        AccountDataSection { dismiss() }
+
                         // Выход
                         PillButton(
                             "Выйти из аккаунта",
