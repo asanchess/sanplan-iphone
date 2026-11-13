@@ -133,6 +133,8 @@ public struct SettingsView: View {
                             }
                         }
 
+                        OnboardingSettingsRow(model: onboarding, dismiss: { dismiss() })
+
                         AccountDataSection { dismiss() }
 
                         // Выход

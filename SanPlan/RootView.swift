@@ -38,6 +38,7 @@ public struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .today
     @State private var goalsRequest = 0
+    @StateObject private var onboarding = OnboardingModel()
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
@@ -77,11 +78,13 @@ public struct RootView: View {
                     LoginView()
                 case .signedIn:
                     mainTabsView
+                        .onboardingTour(model: onboarding, review: model.reviews, vault: model.vault, openNotes: { selectedTab = .notes })
                 }
             }
         }
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView()
+                .environmentObject(onboarding)
         }
         .alert("Будильник", isPresented: Binding(
             get: { fullAlarmText != nil },
@@ -111,8 +114,10 @@ public struct RootView: View {
                 showCapture = false
                 selectedTab = .today
                 model.clearAccountData()
+                onboarding.accountChanged(nil)
             case .signedIn(let email):
                 model.accountSignedIn(email: email)
+                onboarding.accountChanged(email)
             case .checking:
                 break
             }
