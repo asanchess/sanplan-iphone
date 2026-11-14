@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import SanPlan
 
 /// «Первый запуск»: модель шагов, выбор сфер и флаг «пройден» по аккаунту.
