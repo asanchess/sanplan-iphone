@@ -634,7 +634,7 @@ public final class AlarmCoordinator: ObservableObject {
             schedule: .fixed(alarm.alarmDate),
             attributes: attributes,
             secondaryIntent: ReadFullAlarmIntent(planTitle: alarm.planTitle),
-            sound: .default
+            sound: PlanAlarmSound.alertSound()
         )
         try await service.schedule(id: alarm.id, configuration: configuration)
     }

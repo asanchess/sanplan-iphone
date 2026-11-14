@@ -8,6 +8,7 @@ public struct SettingsView: View {
     @EnvironmentObject private var onboarding: OnboardingModel
 
     @State private var showSignOutConfirmation: Bool = false
+    @ObservedObject private var sounds = AlertSoundSettings.shared
 
     public init() {}
 
@@ -113,6 +114,9 @@ public struct SettingsView: View {
                                         .padding(.top, DS.Metrics.spacing8)
                                     }
                                 }
+                            }
+                            Card {
+                                AlertSoundRow(title: "Звук напоминаний", choice: sounds.plan, onSelect: sounds.setPlan, volume: sounds.planVolume, onVolume: sounds.setPlanVolume)
                             }
                         }
 
