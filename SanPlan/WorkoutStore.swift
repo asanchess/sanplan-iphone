@@ -788,7 +788,7 @@ public final class WorkoutStore: ObservableObject {
 
     /// Resting sets the alarm for the deadline. Alerting keeps it: cancelling there silences a ringing alarm after a couple of seconds
     /// whenever the app is open and moves the session from resting to alerting. Pause, a new set, finishing or no workout cancel it.
-    public static func restAlarmAction(for session: WorkoutSessionState?) -> RestAlarmAction {
+    public nonisolated static func restAlarmAction(for session: WorkoutSessionState?) -> RestAlarmAction {
         guard let session else { return .cancel }
         switch session.phase {
         case .resting:
