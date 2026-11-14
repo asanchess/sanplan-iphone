@@ -778,12 +778,34 @@ public final class WorkoutStore: ObservableObject {
 
     // MARK: - Rest alarm
 
-    private func syncRestAlarm(now: Int64) {
-        var fire: (date: Date, name: String)?
-        if let session = activeSession, session.phase == .resting, let deadline = session.deadline,
-           session.exercises.indices.contains(session.exerciseIndex) {
-            fire = (Date(timeIntervalSince1970: Double(deadline) / 1000.0), session.exercises[session.exerciseIndex].name)
+    /// What the system rest alarm should do for a session.
+    public enum RestAlarmAction: Equatable {
+        case schedule(Date, String)
+        /// The rest has run out and the alarm is ringing: leave it alone until the person stops it or starts the next set.
+        case keep
+        case cancel
+    }
+
+    /// Resting sets the alarm for the deadline. Alerting keeps it: cancelling there silences a ringing alarm after a couple of seconds
+    /// whenever the app is open and moves the session from resting to alerting. Pause, a new set, finishing or no workout cancel it.
+    public static func restAlarmAction(for session: WorkoutSessionState?) -> RestAlarmAction {
+        guard let session else { return .cancel }
+        switch session.phase {
+        case .resting:
+            guard let deadline = session.deadline, session.exercises.indices.contains(session.exerciseIndex) else { return .cancel }
+            return .schedule(Date(timeIntervalSince1970: Double(deadline) / 1000.0), session.exercises[session.exerciseIndex].name)
+        case .alerting:
+            return .keep
+        default:
+            return .cancel
         }
+    }
+
+    private func syncRestAlarm(now: Int64) {
+        let action = Self.restAlarmAction(for: activeSession)
+        if action == .keep { return }
+        var fire: (date: Date, name: String)?
+        if case .schedule(let date, let name) = action { fire = (date, name) }
         // Chained so a quick pause and resume cannot apply out of order and leave the wrong alarm.
         let previous = alarmWork
         let alarm = restAlarm

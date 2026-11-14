@@ -128,6 +128,7 @@ public final class AppModel: ObservableObject {
                 self.settingsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 self.plans.attachDrafts(collection: self.settingsVault, account: account)
                 self.appSettings.setCollection(self.settingsVault)
+                AlertSoundSettings.shared.attach(collection: self.settingsVault)
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -213,6 +214,7 @@ public final class AppModel: ObservableObject {
         goalsVault.detach()
         plans.detachDrafts()
         appSettings.setCollection(nil)
+        AlertSoundSettings.shared.detach()
         settingsVault.detach()
     }
 

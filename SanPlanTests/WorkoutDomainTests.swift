@@ -224,6 +224,27 @@ final class WorkoutDomainTests: XCTestCase {
         XCTAssertGreaterThan(redraws, 0)
     }
 
+    func testRestAlarmIsKeptWhenRestTurnsIntoAlerting() throws {
+        var state = try twoExerciseWorkout(now: 1_000_000)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: nil), .cancel)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: state), .cancel, "подготовка: сигнала нет")
+        state = try WorkoutDomain.workoutCommand(state: state, command: .startRest(), now: 1_010_000)
+        XCTAssertEqual(state.phase, .resting)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: state), .schedule(Date(timeIntervalSince1970: 1_070), "Жим"))
+        // Открытое приложение переводит отдых в «сигнал»: звонящий будильник не отменяется.
+        let alerting = try WorkoutDomain.workoutCommand(state: state, command: .tick(), now: 1_071_000)
+        XCTAssertEqual(alerting.phase, .alerting)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: alerting), .keep)
+        // Отмена: начало следующего подхода, пауза отдыха, завершение.
+        let next = try WorkoutDomain.workoutCommand(state: alerting, command: .acknowledge(), now: 1_072_000)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: next), .cancel)
+        let paused = try WorkoutDomain.workoutCommand(state: state, command: .pause(), now: 1_020_000)
+        XCTAssertEqual(paused.phase, .paused)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: paused), .cancel)
+        let done = try WorkoutDomain.workoutCommand(state: alerting, command: WorkoutCommand(type: "finish"), now: 1_073_000)
+        XCTAssertEqual(WorkoutStore.restAlarmAction(for: done), .cancel)
+    }
+
     func testSetsStepperNeverDropsTheSetInProgress() throws {
         var state = try twoExerciseWorkout(now: 1_000_000)
         state = try WorkoutDomain.workoutCommand(state: state, command: .setSets(4), now: 1_001_000)

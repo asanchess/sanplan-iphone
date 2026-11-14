@@ -42,9 +42,15 @@ public final class LiveRestAlarmService: RestAlarmProtocol, @unchecked Sendable 
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(date),
             attributes: attributes,
-            sound: .default
+            sound: Self.alarmSound()
         )
         try await AlarmManager.shared.schedule(id: Self.sharedRestAlarmId, configuration: configuration)
+    }
+
+    /// Выбранный в настройках звук; если файла нет, остаётся системный тон (он звонит, пока сигнал не остановят).
+    private static func alarmSound() -> AlertSound {
+        guard let name = AlertSoundSettings.restAlarmSoundName() else { return .default }
+        return .named(name)
     }
 
     public func cancel() async throws {

@@ -216,6 +216,7 @@ public struct SettingsView: View {
 /// Starting values for exercises added in the builder. Existing exercises keep their own numbers.
 struct WorkoutDefaultsSection: View {
     @ObservedObject var store: WorkoutStore
+    @ObservedObject private var sounds = AlertSoundSettings.shared
 
     private var defaults: WorkoutDefaults { WorkoutProgram.defaults(of: store.program) }
 
@@ -275,6 +276,9 @@ struct WorkoutDefaultsSection: View {
                             .foregroundColor(DS.Colors.textSecondary)
                     }
                 }
+            }
+            Card {
+                AlertSoundRow(title: "Звук конца отдыха", choice: sounds.rest, onSelect: sounds.setRest, volume: sounds.restVolume, onVolume: sounds.setRestVolume)
             }
             WorkoutHealthRow(store: store, health: WorkoutHealthExport.shared)
         }
