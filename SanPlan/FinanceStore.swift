@@ -37,10 +37,11 @@ public final class FinanceStore: ObservableObject {
     private var storageURL: URL
     private var corruptFolderURL: URL
 
-    public init(fileManager: FileManager = .default, owner: Owner = .device) {
+    /// `baseDirectory` replaces Application Support (tests only).
+    public init(fileManager: FileManager = .default, owner: Owner = .device, baseDirectory: URL? = nil) {
         self.fileManager = fileManager
 
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        let appSupport = baseDirectory ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let arnaDir = appSupport.appendingPathComponent("ARNA", isDirectory: true)
         self.arnaDir = arnaDir
@@ -135,7 +136,7 @@ public final class FinanceStore: ObservableObject {
         if isUnavailable { return }
         let hasLocal = fileManager.fileExists(atPath: storageURL.path) && !isEmpty(state)
         if !hasLocal {
-            if fileManager.fileExists(atPath: storageURL.path) { try? fileManager.removeItem(at: storageURL) }
+            if fileManager.fileExists(atPath: storageURL.path) { keepPreSyncBackup(); try? fileManager.removeItem(at: storageURL) }
             storage = .cloud
             collectionChanged()
             return
@@ -155,10 +156,30 @@ public final class FinanceStore: ObservableObject {
             notice = "Не удалось сверить финансы с облаком. Данные остаются на телефоне, ничего не удалено."
             return
         }
+        // Decision 4 (docs/ONE-APP-PLAN.md): the phone keeps a copy of the file it moved; only then is it removed.
+        guard keepPreSyncBackup() else {
+            storage = .local
+            notice = "Не удалось сохранить резервную копию финансов. Данные остаются на телефоне, ничего не удалено."
+            return
+        }
         try? fileManager.removeItem(at: storageURL)
         storage = .cloud
         notice = nil
         collectionChanged()
+    }
+
+    /// The file as it was before the move, next to it: `finance_state.pre-sync-backup.json`. Never overwritten: a later
+    /// move (after signing out and back in) keeps its own copy with a time stamp in the name.
+    var preSyncBackupURL: URL { storageURL.deletingLastPathComponent().appendingPathComponent("finance_state.pre-sync-backup.json") }
+
+    @discardableResult
+    private func keepPreSyncBackup() -> Bool {
+        var backup = preSyncBackupURL
+        if fileManager.fileExists(atPath: backup.path) {
+            let stamp = Int64(Date().timeIntervalSince1970 * 1000)
+            backup = backup.deletingLastPathComponent().appendingPathComponent("finance_state.pre-sync-backup-\(stamp).json")
+        }
+        do { try fileManager.copyItem(at: storageURL, to: backup); return true } catch { return false }
     }
 
     private func isEmpty(_ s: FinanceState) -> Bool {
