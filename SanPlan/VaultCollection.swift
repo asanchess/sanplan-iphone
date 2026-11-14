@@ -74,6 +74,8 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     /// Highest server `seq` received; live sync asks only for records after it (nil/0: everything).
     public private(set) var syncCursor = 0
     private var waiters: [CheckedContinuation<Bool, Never>] = []
+    /// Callers of `sync()` that arrived while a pass was running; they resume when that pass (re-run for them) ends.
+    private var passWaiters: [CheckedContinuation<Void, Never>] = []
     private let fileManager: FileManager
     private let baseDirectory: URL
     private let now: () -> Int64
@@ -143,6 +145,9 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         let pending = waiters
         waiters = []
         pending.forEach { $0.resume(returning: false) }
+        let passes = passWaiters
+        passWaiters = []
+        passes.forEach { $0.resume() }
     }
 
     // MARK: Editing
@@ -226,11 +231,19 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
 
     public func sync() async {
         guard let key, let transport else { return }
-        if isSyncing { syncAgain = true; return }
+        // A pass is running: ask it to go round once more and wait for it, so pull-to-refresh shows fresh data.
+        if isSyncing { syncAgain = true; await withCheckedContinuation { passWaiters.append($0) }; return }
         let started = generation
         isSyncing = true
         syncState = .syncing
-        defer { if generation == started { isSyncing = false } }
+        defer {
+            if generation == started {
+                isSyncing = false
+                let passes = passWaiters
+                passWaiters = []
+                passes.forEach { $0.resume() }
+            }
+        }
         do {
             repeat {
                 syncAgain = false

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// End-to-end encryption shared by every synced module. The web twin is src/vault-crypto.mjs; both read each
+/// Record encryption shared by every synced module (not end-to-end: the server holds the account key since 13.11). The web twin is src/vault-crypto.mjs; both read each
 /// other's output (native/reference/e2e-fixture.json). Spec: docs/personal-hub/E2E-SYNC.md.
 public enum VaultCrypto {
     public static let recoveryByteCount = 20

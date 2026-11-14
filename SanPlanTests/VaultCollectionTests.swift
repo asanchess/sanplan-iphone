@@ -63,6 +63,21 @@ final class VaultCollectionTests: XCTestCase {
         XCTAssertNil(a.item(id))
     }
 
+    /// A sync() that arrives while a pass runs waits for it (pull-to-refresh), and nothing hangs.
+    func testOverlappingSyncCallsBothSeeTheServer() async throws {
+        let key = SymmetricKey(size: .bits256), server = MemoryVaultTransport()
+        let a = store(folder: "a"), b = store(folder: "b")
+        a.attach(account: "acc1", key: key, transport: server)
+        b.attach(account: "acc1", key: key, transport: server)
+        _ = b.put("lift-0002", Lift(title: "Тяга", weight: 60, reps: 8))
+        await b.sync()
+        async let first: Void = a.sync()
+        await a.sync()
+        XCTAssertEqual(a.item("lift-0002")?.data?.weight, 60)
+        await first
+        XCTAssertEqual(a.syncState, .idle)
+    }
+
     func testNewestEditWinsWithoutDuplicates() async throws {
         let key = SymmetricKey(size: .bits256), server = MemoryVaultTransport()
         let a = store(folder: "a"), b = store(folder: "b")

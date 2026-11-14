@@ -44,7 +44,7 @@ struct AccountDataSection: View {
             SectionHeader("Данные и аккаунт")
             Card {
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                    Text("Файл JSON: планы в открытом виде, остальные разделы — зашифрованными, их откроет только ключ восстановления.")
+                    Text("Файл JSON: планы в открытом виде, остальные разделы — зашифрованными ключом данных вашего аккаунта.")
                         .font(.footnote)
                         .foregroundColor(DS.Colors.textSecondary)
                     if let exportURL {
