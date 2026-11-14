@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import SwiftUI
 import AlarmKit
+import ActivityKit
 
 public protocol RestAlarmProtocol: AnyObject, Sendable {
     var authorizationState: AlarmManager.AuthorizationState { get }
@@ -48,7 +49,7 @@ public final class LiveRestAlarmService: RestAlarmProtocol, @unchecked Sendable 
     }
 
     /// Выбранный в настройках звук; если файла нет, остаётся системный тон (он звонит, пока сигнал не остановят).
-    private static func alarmSound() -> AlertSound {
+    private static func alarmSound() -> AlertConfiguration.AlertSound {
         guard let name = AlertSoundSettings.restAlarmSoundName() else { return .default }
         return .named(name)
     }
