@@ -24,6 +24,10 @@ jobs:
           # An app with no compiled code still "builds"; refuse it.
           size=$(wc -c < build/device/Build/Products/Release-iphoneos/SanPlan.app/SanPlan)
           if [[ "$size" -lt 200000 ]]; then echo "App binary suspiciously small: $size bytes"; exit 1; fi
+          # The alert tones ship flat in the bundle (three tones x four volume steps).
+          ls build/device/Build/Products/Release-iphoneos/SanPlan.app/arna-tone-*.m4a > artifacts/bundled-tones.txt 2>/dev/null || true
+          tones=$(wc -l < artifacts/bundled-tones.txt | tr -d ' ')
+          if [[ "$tones" -ne 12 ]]; then echo "Expected 12 arna-tone-*.m4a in the app bundle, found $tones"; exit 1; fi
           mkdir -p build/package/Payload
           cp -R build/device/Build/Products/Release-iphoneos/SanPlan.app build/package/Payload/
           (cd build/package && zip -qr ../../artifacts/SanPlan-unsigned.ipa Payload)
