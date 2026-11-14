@@ -65,6 +65,10 @@ public final class WorkoutStore: ObservableObject {
     /// Программа сверена с сервером после первой синхронизации; до этого локальные правки программы не выгружаются.
     private(set) var programReconciled = false
     private var programReconcileRunning = false
+    /// Состояние идущей тренировки, которым устройство последний раз обменялось с аккаунтом, и когда (мс).
+    private var activeSynced: WorkoutSessionState?
+    private var activeChangedAt: Int64 = 0
+    private var syncingActive = false
     private var vaultObservation: AnyCancellable?
     private var migrationRunning = false
 
@@ -248,6 +252,7 @@ public final class WorkoutStore: ObservableObject {
         toSave.session = activeSession
         write(toSave, to: directory.appendingPathComponent(Self.trainingFile), what: "тренировку")
         pushProgram()
+        syncActive()
     }
 
     private func saveHistory() {
@@ -384,6 +389,8 @@ public final class WorkoutStore: ObservableObject {
         vault = nil
         programReconciled = false
         programReconcileRunning = false
+        activeSynced = nil
+        activeChangedAt = 0
         migrationRunning = false
         vaultStatus = .idle
     }
@@ -399,7 +406,7 @@ public final class WorkoutStore: ObservableObject {
         guard let vault, vault.isAvailable, !isUnavailable else { return }
         mergeVault(vault)
         uploadMissing(vault)
-        if programReconciled { mergeProgram(vault) }
+        if programReconciled { mergeProgram(vault); syncActive() }
         else if vault.syncState == .idle { reconcileProgramAfterSync(vault) }
         if autoMigrate, vaultStatus == .idle, !migrationRunning {
             Task { @MainActor in _ = await self.migrateHistory() }
@@ -464,6 +471,7 @@ public final class WorkoutStore: ObservableObject {
             self.mergeProgram(collection)
             self.programReconciled = true
             self.pushProgram()
+            self.syncActive()
         }
     }
 
@@ -490,6 +498,52 @@ public final class WorkoutStore: ObservableObject {
         let payload = WorkoutProgramPayload(plan)
         if case .program(let current)? = vault.item(WorkoutVaultMigration.programID)?.data, current == payload { return }
         vault.put(WorkoutVaultMigration.programID, .program(payload))
+    }
+
+    // MARK: Идущая тренировка в коллекции
+
+    /// Одна идущая тренировка на всех устройствах: запись `t-active`. Начатая здесь уходит в аккаунт сразу после каждого действия,
+    /// начатая на другом устройстве приходит сюда; завершение или удаление ставит надгробие, и тренировка исчезает везде.
+    private func syncActive() {
+        guard programReconciled, !syncingActive, let vault, vault.isAvailable, !isUnavailable else { return }
+        syncingActive = true
+        defer { syncingActive = false }
+        let item = vault.all[WorkoutVaultMigration.activeID]
+        let remoteLive = item.map { !$0.deleted && $0.data?.active != nil } ?? false
+        if activeSession == nil, !remoteLive { activeSynced = nil }
+        if let item, !item.deleted, let payload = item.data?.active, payload.session == activeSession, activeSynced != payload.session {
+            activeSynced = payload.session
+        }
+        switch WorkoutActiveSync.decide(remote: item, local: activeSession, lastSynced: activeSynced, changedAt: activeChangedAt) {
+        case .none:
+            break
+        case .push:
+            guard let session = activeSession else { return }
+            vault.put(WorkoutVaultMigration.activeID, .active(WorkoutActivePayload(session: session)))
+            activeSynced = session
+            activeChangedAt = max(Self.nowMs(), session.lastNow)
+        case .apply(let session):
+            let before = snapshot("")
+            activeSynced = session
+            activeChangedAt = item?.updatedAt ?? Self.nowMs()
+            activeSession = session
+            archiveSession(now: Self.nowMs())
+            undoStack = []
+            undoOffer = nil
+            persist(since: before)
+            syncRestAlarm(now: Self.nowMs())
+        case .clearLocal:
+            activeSynced = nil
+            let before = snapshot("")
+            activeSession = nil
+            undoStack = []
+            undoOffer = nil
+            persist(since: before)
+            syncRestAlarm(now: Self.nowMs())
+        case .removeRemote:
+            activeSynced = nil
+            vault.remove(WorkoutVaultMigration.activeID)
+        }
     }
 
     private var journalURL: URL? { directory?.appendingPathComponent(Self.migrationFile) }

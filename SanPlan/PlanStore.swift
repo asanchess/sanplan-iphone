@@ -13,7 +13,7 @@ public final class PlanStore: ObservableObject {
     @Published public var selectedDate: String
     @Published public var timeZone: String = PlanDomain.defaultTimeZone
     @Published public var draftPlans: [PlanItem] = [] {
-        didSet { saveDraftToDisk() }
+        didSet { saveDraftToDisk(); draftSync?.localChanged(draftPlans) }
     }
     @Published public var editingPlanId: String? = nil
     @Published public var isLoading: Bool = false
@@ -37,6 +37,7 @@ public final class PlanStore: ObservableObject {
     /// Bumped on every write to `plans`, so a list fetched before a save cannot overwrite the save.
     private var plansRevision = 0
     private var reloadInFlight = false
+    private var draftSync: PlanDraftSync?
 
     public init(
         client: APIClient,
@@ -465,6 +466,29 @@ public final class PlanStore: ObservableObject {
             return
         }
         errorMessage = err.localizedDescription
+    }
+
+    /// Черновики следуют за аккаунтом через зашифрованную коллекцию `settings` (запись `s-plan-drafts`).
+    public func attachDrafts(collection: VaultCollection<SettingsPayload>, account: String) {
+        detachDrafts()
+        let sync = PlanDraftSync(
+            collection: collection,
+            account: account,
+            getDrafts: { [weak self] in self?.draftPlans ?? [] },
+            setDrafts: { [weak self] next in
+                guard let self else { return }
+                self.draftPlans = next
+                if let id = self.editingPlanId, next.contains(where: { $0.id == id }) { return }
+                self.editingPlanId = next.first?.id
+            }
+        )
+        draftSync = sync
+        Task { await sync.start() }
+    }
+
+    public func detachDrafts() {
+        draftSync?.stop()
+        draftSync = nil
     }
 
     private func saveDraftToDisk() {

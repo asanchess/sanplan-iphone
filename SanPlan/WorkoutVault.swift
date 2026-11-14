@@ -10,6 +10,7 @@ extension WorkoutRecord: @unchecked Sendable {}
 extension WorkoutExercisePlan: @unchecked Sendable {}
 extension WorkoutDayPlan: @unchecked Sendable {}
 extension WorkoutDefaults: @unchecked Sendable {}
+extension WorkoutSessionState: @unchecked Sendable {}
 
 /// Недельная программа в коллекции: дни и значения по умолчанию, без идущей тренировки (`session` остаётся на устройстве).
 public struct WorkoutProgramPayload: Codable, Equatable, Sendable {
@@ -29,11 +30,25 @@ public struct WorkoutProgramPayload: Codable, Equatable, Sendable {
     }
 }
 
-/// Запись коллекции `training`: тренировка (как раньше, без поля `kind`) или программа (`kind: "program"`).
+/// Идущая тренировка в коллекции: одна запись `t-active` на аккаунт, её видят и продолжают все устройства.
+/// Таймеры лежат абсолютными отметками времени (`deadline`, `workStartedAt`), поэтому часы устройств не расходятся.
+public struct WorkoutActivePayload: Codable, Equatable, Sendable {
+    public var kind: String = "active"
+    public var session: WorkoutSessionState
+    public var device: String?
+
+    public init(session: WorkoutSessionState, device: String? = nil) {
+        self.session = session
+        self.device = device
+    }
+}
+
+/// Запись коллекции `training`: тренировка (как раньше, без поля `kind`), программа (`kind: "program"`) или идущая тренировка (`kind: "active"`).
 /// Незнакомый вид записи читается как `.unknown` и игнорируется, чтобы новая версия не ломала старую.
 public enum WorkoutVaultEntry: Codable, Equatable, Sendable {
     case record(WorkoutRecord)
     case program(WorkoutProgramPayload)
+    case active(WorkoutActivePayload)
     case unknown
 
     private enum Key: String, CodingKey { case kind }
@@ -42,6 +57,8 @@ public enum WorkoutVaultEntry: Codable, Equatable, Sendable {
         let kind = try? decoder.container(keyedBy: Key.self).decodeIfPresent(String.self, forKey: .kind)
         if kind == "program" {
             self = .program(try WorkoutProgramPayload(from: decoder))
+        } else if kind == "active", let active = try? WorkoutActivePayload(from: decoder) {
+            self = .active(active)
         } else if kind == nil, let record = try? WorkoutRecord(from: decoder) {
             self = .record(record)
         } else {
@@ -53,6 +70,7 @@ public enum WorkoutVaultEntry: Codable, Equatable, Sendable {
         switch self {
         case .record(let record): try record.encode(to: encoder)
         case .program(let program): try program.encode(to: encoder)
+        case .active(let active): try active.encode(to: encoder)
         case .unknown:
             var container = encoder.singleValueContainer()
             try container.encodeNil()
@@ -66,6 +84,11 @@ public enum WorkoutVaultEntry: Codable, Equatable, Sendable {
 
     public var program: WorkoutProgramPayload? {
         if case .program(let program) = self { return program }
+        return nil
+    }
+
+    public var active: WorkoutActivePayload? {
+        if case .active(let active) = self { return active }
         return nil
     }
 }
@@ -120,10 +143,13 @@ public enum WorkoutVaultMigration {
     /// Единственная запись программы на аккаунт.
     public static let programID = "t-program"
 
+    /// Единственная запись идущей тренировки на аккаунт.
+    public static let activeID = "t-active"
+
     /// Только записи-тренировки из коллекции, в прежнем виде для слияния и сверки.
     public static func recordItems(_ all: [String: VaultItem<WorkoutVaultEntry>]) -> [String: VaultItem<WorkoutRecord>] {
         var result: [String: VaultItem<WorkoutRecord>] = [:]
-        for (id, item) in all where id != programID {
+        for (id, item) in all where id != programID && id != activeID {
             if item.deleted { result[id] = VaultItem(id: id, updatedAt: item.updatedAt, deleted: true, data: item.data?.record); continue }
             guard let record = item.data?.record else { continue }
             result[id] = VaultItem(id: id, updatedAt: item.updatedAt, data: record)
@@ -174,5 +200,51 @@ public enum WorkoutVaultMigration {
             byID[remote.id] = remote
         }
         return WorkoutHistory.sorted(Array(byID.values))
+    }
+}
+
+/// Что делать с идущей тренировкой, когда меняется запись `t-active` или локальное состояние.
+/// Правило одно для всех устройств: побеждает более свежее; завершение или удаление ставит надгробие.
+public enum WorkoutActiveSync {
+    public enum Action: Equatable {
+        case none
+        /// Принять состояние из аккаунта.
+        case apply(WorkoutSessionState)
+        /// Отправить локальное состояние.
+        case push
+        /// Другое устройство закончило или убрало тренировку: убрать её и здесь.
+        case clearLocal
+        /// Здесь тренировку закончили или убрали: убрать запись из аккаунта.
+        case removeRemote
+    }
+
+    /// `lastSynced` — состояние, которым устройство последний раз обменялось с аккаунтом; `changedAt` — когда это было, мс.
+    public static func decide(
+        remote: VaultItem<WorkoutVaultEntry>?,
+        local: WorkoutSessionState?,
+        lastSynced: WorkoutSessionState?,
+        changedAt: Int64
+    ) -> Action {
+        let localFresh = max(changedAt, local?.lastNow ?? 0)
+        if let remote, !remote.deleted, let payload = remote.data?.active {
+            let state = payload.session
+            if local == nil {
+                if lastSynced != nil { return .removeRemote }
+                // Законченную тренировку, которой здесь не было, заново не поднимаем: её итог уже в истории.
+                return state.phase == .complete ? .none : .apply(state)
+            }
+            if state == local { return .none }
+            if state == lastSynced { return pushNeeded(local, lastSynced, remoteLive: true) ? .push : .none }
+            return remote.updatedAt >= localFresh ? .apply(state) : .push
+        }
+        if let remote, remote.deleted, let local, local.phase != .complete, remote.updatedAt > localFresh {
+            return .clearLocal
+        }
+        return pushNeeded(local, lastSynced, remoteLive: false) ? .push : .none
+    }
+
+    private static func pushNeeded(_ local: WorkoutSessionState?, _ lastSynced: WorkoutSessionState?, remoteLive: Bool) -> Bool {
+        guard let local, local != lastSynced else { return false }
+        return local.phase != .complete || remoteLive
     }
 }

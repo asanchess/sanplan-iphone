@@ -8,6 +8,15 @@ public struct VaultRemoteRecord: Codable, Equatable, Sendable {
     public var id: String
     public var revision: Int
     public var c: String
+    /// The server's change counter value for this write (live sync). Nil for rows written before counters existed.
+    public var seq: Int?
+
+    public init(id: String, revision: Int, c: String, seq: Int? = nil) {
+        self.id = id
+        self.revision = revision
+        self.c = c
+        self.seq = seq
+    }
 }
 
 public enum VaultPutResult: Equatable, Sendable {
@@ -16,17 +25,55 @@ public enum VaultPutResult: Equatable, Sendable {
     case conflict(current: VaultRemoteRecord?)
 }
 
-public enum VaultKeyPutResult: Equatable, Sendable {
-    case saved
-    case conflict(envelope: VaultCrypto.Envelope?, revision: Int)
+/// `GET /api/vault/key`: the account's data key, held by the server (docs/ONE-APP-PLAN.md, «Sync contract»).
+public struct VaultAccountKey: Equatable, Sendable {
+    /// 32 bytes; nil while the account only has a recovery-key envelope (`needsAdopt`).
+    public var key: Data?
+    public var needsAdopt: Bool
+    public var envelope: VaultCrypto.Envelope?
+    public var revision: Int
+
+    public init(key: Data?, needsAdopt: Bool = false, envelope: VaultCrypto.Envelope? = nil, revision: Int = 0) {
+        self.key = key
+        self.needsAdopt = needsAdopt
+        self.envelope = envelope
+        self.revision = revision
+    }
+}
+
+public enum VaultAdoptResult: Equatable, Sendable {
+    /// The server now holds this key (the one sent, or the one it already had).
+    case saved(Data)
+    /// The account already has a different key; the payload is the current one.
+    case conflict(Data?)
+}
+
+/// One page of a collection: its records and the collection's counter at the time.
+public struct VaultListing: Equatable, Sendable {
+    public var records: [VaultRemoteRecord]
+    public var stamp: Int?
+
+    public init(records: [VaultRemoteRecord], stamp: Int? = nil) {
+        self.records = records
+        self.stamp = stamp
+    }
 }
 
 /// The server half of docs/personal-hub/E2E-SYNC.md. Tests use an in-memory twin.
 public protocol VaultTransport: Sendable {
-    func fetchKey() async throws -> (envelope: VaultCrypto.Envelope?, revision: Int)
-    func putKey(_ envelope: VaultCrypto.Envelope, revision: Int) async throws -> VaultKeyPutResult
-    func list(_ collection: String) async throws -> [VaultRemoteRecord]
+    func fetchAccountKey() async throws -> VaultAccountKey
+    func adoptKey(_ key: Data) async throws -> VaultAdoptResult
+    /// One counter per namespace (`plans`, `notes`, `finance`, …); a moved counter means something changed.
+    func stamps() async throws -> [String: Int]
+    /// `since` nil: everything. Otherwise only records written after that `seq`.
+    func list(_ collection: String, since: Int?) async throws -> VaultListing
     func put(_ collection: String, record: VaultRemoteRecord) async throws -> VaultPutResult
+}
+
+public extension VaultTransport {
+    func list(_ collection: String) async throws -> [VaultRemoteRecord] {
+        try await list(collection, since: nil).records
+    }
 }
 
 public struct HTTPVaultTransport: VaultTransport {
@@ -34,9 +81,16 @@ public struct HTTPVaultTransport: VaultTransport {
 
     public init(client: APIClient) { self.client = client }
 
-    private struct KeyResponse: Decodable { let envelope: VaultCrypto.Envelope?; let revision: Int }
-    private struct KeyBody: Encodable { let revision: Int; let envelope: VaultCrypto.Envelope }
-    private struct ListResponse: Decodable { let records: [VaultRemoteRecord] }
+    private struct KeyResponse: Decodable {
+        let key: String?
+        let needsAdopt: Bool?
+        let envelope: VaultCrypto.Envelope?
+        let revision: Int?
+    }
+    private struct AdoptBody: Encodable { let key: String }
+    private struct AdoptResponse: Decodable { let key: String? }
+    private struct StampsResponse: Decodable { let stamps: [String: Int] }
+    private struct ListResponse: Decodable { let records: [VaultRemoteRecord]; let stamp: Int? }
     private struct PutResponse: Decodable { let revision: Int }
     private struct ConflictResponse: Decodable { let current: VaultRemoteRecord? }
 
@@ -47,27 +101,40 @@ public struct HTTPVaultTransport: VaultTransport {
         }
     }
 
-    public func fetchKey() async throws -> (envelope: VaultCrypto.Envelope?, revision: Int) {
+    /// A 32-byte key from base64; anything else is treated as no key.
+    static func keyBytes(_ text: String?) -> Data? {
+        guard let text, let data = Data(base64Encoded: text), data.count == 32 else { return nil }
+        return data
+    }
+
+    public func fetchAccountKey() async throws -> VaultAccountKey {
         let (status, data) = try await client.send(method: "GET", path: "/api/vault/key")
         try Self.check(status, data)
         let value = try JSONDecoder().decode(KeyResponse.self, from: data)
-        return (value.envelope, value.revision)
+        return VaultAccountKey(key: Self.keyBytes(value.key), needsAdopt: value.needsAdopt ?? false, envelope: value.envelope, revision: value.revision ?? 0)
     }
 
-    public func putKey(_ envelope: VaultCrypto.Envelope, revision: Int) async throws -> VaultKeyPutResult {
-        let (status, data) = try await client.send(method: "POST", path: "/api/vault/key", body: KeyBody(revision: revision, envelope: envelope))
+    public func adoptKey(_ key: Data) async throws -> VaultAdoptResult {
+        let (status, data) = try await client.send(method: "POST", path: "/api/vault/key/adopt", body: AdoptBody(key: key.base64EncodedString()))
         if status == 409 {
-            let value = try JSONDecoder().decode(KeyResponse.self, from: data)
-            return .conflict(envelope: value.envelope, revision: value.revision)
+            return .conflict(Self.keyBytes((try? JSONDecoder().decode(AdoptResponse.self, from: data))?.key))
         }
         try Self.check(status, data)
-        return .saved
+        return .saved(Self.keyBytes(try JSONDecoder().decode(AdoptResponse.self, from: data).key) ?? key)
     }
 
-    public func list(_ collection: String) async throws -> [VaultRemoteRecord] {
-        let (status, data) = try await client.send(method: "GET", path: "/api/vault/\(collection)")
+    public func stamps() async throws -> [String: Int] {
+        let (status, data) = try await client.send(method: "GET", path: "/api/vault/stamps")
         try Self.check(status, data)
-        return try JSONDecoder().decode(ListResponse.self, from: data).records
+        return try JSONDecoder().decode(StampsResponse.self, from: data).stamps
+    }
+
+    public func list(_ collection: String, since: Int?) async throws -> VaultListing {
+        let query = since.map { ["since": String($0)] }
+        let (status, data) = try await client.send(method: "GET", path: "/api/vault/\(collection)", query: query)
+        try Self.check(status, data)
+        let value = try JSONDecoder().decode(ListResponse.self, from: data)
+        return VaultListing(records: value.records, stamp: value.stamp)
     }
 
     public func put(_ collection: String, record: VaultRemoteRecord) async throws -> VaultPutResult {
@@ -135,31 +202,33 @@ public final class MemoryVaultKeyStorage: VaultKeyStorage {
 
 // MARK: - Key session
 
-/// Whether this device holds the account's data key, and the steps to get it.
+/// Whether this device holds the account's data key. The server holds it per account, so signing in is enough.
+/// The only question ever asked of the person is the one-time transfer of an older recovery key (`needsTransfer`).
 @MainActor
 public final class VaultKeySession: ObservableObject {
     public enum Phase: Equatable {
         /// Signed out, or not checked yet.
         case idle
         case checking
-        /// No key on the server yet: this is the account's first device.
-        case needsSetup
-        /// The server has a key, this device does not: enter the recovery key.
-        case needsRecovery
+        /// The account has data under an older recovery key and this device does not hold the key:
+        /// enter the recovery key once («Перенос данных в аккаунт»).
+        case needsTransfer
         case ready
         case failed(String)
     }
 
     @Published public private(set) var phase: Phase = .idle
-    /// Shown once while setting up, until the person confirms they saved it.
-    @Published public private(set) var pendingRecoveryKey: String?
+    /// Bumped whenever the key in use changes (the first key, or the server's key replacing the cached one).
+    @Published public private(set) var keyVersion = 0
 
     public private(set) var dataKey: SymmetricKey?
     public private(set) var account: String?
-    private var pendingKey: VaultCrypto.NewKey?
+    private var transferEnvelope: VaultCrypto.Envelope?
     private var transport: (any VaultTransport)?
     private let storage: VaultKeyStorage
-    /// Called once the key is available, so stores can load and sync.
+    private var checkTask: Task<Void, Never>?
+    private var generation = 0
+    /// Called once the key is available and again whenever it changes, so stores load and sync under the right key.
     public var onReady: (() -> Void)?
 
     public init(storage: VaultKeyStorage = KeychainVaultKeyStorage()) {
@@ -180,78 +249,100 @@ public final class VaultKeySession: ObservableObject {
 
     /// Signed out: forget the key in memory. It stays in this account's Keychain item for the next sign-in.
     public func reset() {
+        generation += 1
+        checkTask?.cancel()
+        checkTask = nil
         account = nil
         transport = nil
         dataKey = nil
-        pendingKey = nil
-        pendingRecoveryKey = nil
+        transferEnvelope = nil
         phase = .idle
     }
 
-    /// Asks the server whether the account already has a key.
+    /// Asks the server for the account's key. Runs on every start: a cached key keeps the app open offline,
+    /// and a different key from the server replaces it. One check at a time.
     public func check() async {
-        guard let transport, account != nil, phase != .ready else { return }
-        phase = .checking
+        if let running = checkTask { await running.value; return }
+        guard transport != nil, account != nil else { return }
+        let started = generation
+        let task = Task { await self.runCheck(generation: started) }
+        checkTask = task
+        await task.value
+    }
+
+    private func runCheck(generation started: Int) async {
+        defer { if generation == started { checkTask = nil } }
+        guard let transport, let account else { return }
+        if dataKey == nil { phase = .checking }
         do {
-            let (envelope, _) = try await transport.fetchKey()
-            guard phase == .checking else { return }
-            phase = envelope == nil ? .needsSetup : .needsRecovery
+            let info = try await transport.fetchAccountKey()
+            guard generation == started else { return }
+            try await apply(info, transport: transport, account: account, generation: started)
         } catch {
-            phase = .failed((error as? LocalizedError)?.errorDescription ?? "Не удалось связаться с сервером.")
+            // With a cached key the app stays open (offline); without one there is nothing to show but the error.
+            guard generation == started, dataKey == nil else { return }
+            phase = .failed((error as? LocalizedError)?.errorDescription ?? "Не удалось связаться с сервером. Проверьте соединение и повторите.")
         }
     }
 
-    /// Makes a key and shows its recovery key. Nothing is uploaded until the person confirms they saved it.
-    public func beginSetup() {
-        guard phase == .needsSetup else { return }
-        do {
-            let key = try VaultCrypto.createKey()
-            pendingKey = key
-            pendingRecoveryKey = key.recoveryKey
-        } catch {
-            phase = .failed("Не удалось создать ключ.")
+    private func apply(_ info: VaultAccountKey, transport: any VaultTransport, account: String, generation started: Int) async throws {
+        if let raw = info.key {
+            use(SymmetricKey(data: raw), account: account)
+            return
         }
-    }
-
-    /// The person saved the recovery key: store the envelope on the server and the key on the phone.
-    public func confirmSetup() async {
-        guard let transport, let account, let key = pendingKey else { return }
-        do {
-            switch try await transport.putKey(key.envelope, revision: 0) {
-            case .saved:
-                try storage.save(key.dataKey, account: account)
-                pendingKey = nil
-                pendingRecoveryKey = nil
-                dataKey = key.dataKey
-                phase = .ready
-                onReady?()
-            case .conflict:
-                // Another device set up the account first: its key wins, enter that recovery key.
-                pendingKey = nil
-                pendingRecoveryKey = nil
-                phase = .needsRecovery
+        // An account from before the server held keys.
+        if let cached = dataKey {
+            // This device has the key: hand it to the account silently.
+            let result = try await transport.adoptKey(Self.bytes(cached))
+            guard generation == started else { return }
+            switch result {
+            case .saved(let raw): use(SymmetricKey(data: raw), account: account)
+            case .conflict(let raw?): use(SymmetricKey(data: raw), account: account)
+            case .conflict(nil): phase = .failed("Не удалось перенести ключ в аккаунт. Повторите позже.")
             }
-        } catch {
-            phase = .failed((error as? LocalizedError)?.errorDescription ?? "Не удалось сохранить ключ.")
+            return
         }
+        guard let envelope = info.envelope else {
+            phase = .failed("Не удалось получить ключ аккаунта. Повторите позже.")
+            return
+        }
+        transferEnvelope = envelope
+        phase = .needsTransfer
     }
 
-    /// Returns an error text to show next to the field, or nil when the key opened.
-    public func restore(recoveryText: String) async -> String? {
-        guard let transport, let account else { return "Войдите снова." }
-        do {
-            guard let envelope = try await transport.fetchKey().envelope else {
-                phase = .needsSetup
-                return nil
-            }
-            let key = try VaultCrypto.unwrap(envelope, recoveryText: recoveryText)
-            try storage.save(key, account: account)
+    private static func bytes(_ key: SymmetricKey) -> Data { key.withUnsafeBytes { Data($0) } }
+
+    /// Makes `key` the key in use. Stores react through `onReady` only when something changed.
+    private func use(_ key: SymmetricKey, account: String) {
+        let changed = dataKey.map { Self.bytes($0) != Self.bytes(key) } ?? true
+        if changed {
+            try? storage.save(key, account: account)
             dataKey = key
-            phase = .ready
-            onReady?()
+            keyVersion += 1
+        }
+        transferEnvelope = nil
+        let wasReady = phase == .ready
+        phase = .ready
+        if changed || !wasReady { onReady?() }
+    }
+
+    /// The one-time transfer: opens the old recovery key and hands the data key to the account.
+    /// Returns an error text to show next to the field, or nil when the data moved.
+    public func restore(recoveryText: String) async -> String? {
+        guard let transport, let account, let envelope = transferEnvelope else { return "Войдите снова." }
+        let started = generation
+        do {
+            let key = try VaultCrypto.unwrap(envelope, recoveryText: recoveryText)
+            let result = try await transport.adoptKey(Self.bytes(key))
+            guard generation == started else { return nil }
+            switch result {
+            case .saved(let raw): use(SymmetricKey(data: raw), account: account)
+            case .conflict(let raw?): use(SymmetricKey(data: raw), account: account)
+            case .conflict(nil): return "Не удалось перенести данные. Повторите позже."
+            }
             return nil
         } catch {
-            return (error as? LocalizedError)?.errorDescription ?? "Ключ восстановления не подошёл."
+            return (error as? LocalizedError)?.errorDescription ?? "Не удалось перенести данные. Проверьте соединение и повторите."
         }
     }
 

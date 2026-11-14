@@ -252,12 +252,61 @@ public struct ReviewEntry: Codable, Equatable, Identifiable {
     }
 }
 
-/// The payload of a day's record in the encrypted `reviews` collection (id `r-YYYY-MM-DD`).
+/// The payload of a record in the encrypted `reviews` collection: a day (id `r-YYYY-MM-DD`, `kind` nil),
+/// a week review (id `w-YYYY-MM-DD` of its Monday, `kind` "week") or the reminder time (id `s-reminder`, `kind` "reminder").
+/// The web writes the same shapes (src/review-domain.mjs). Day code skips the other kinds because their `day` is empty.
 public struct ReviewDayRecord: Codable, Equatable, Sendable {
     public var day: String
     public var mood: Int?
     public var text: String
+    public var kind: String?
+    public var weekStart: String?
+    public var ratings: [String: Int]?
+    public var enabled: Bool?
+    public var hour: Int?
+    public var minute: Int?
+
     public init(day: String, mood: Int?, text: String) { self.day = day; self.mood = mood; self.text = text }
+
+    public init(week: WeekReview) {
+        day = ""; text = ""
+        kind = "week"; weekStart = week.weekStart; ratings = week.ratings
+    }
+
+    public init(reminder: ReviewReminderSettings) {
+        day = ""; text = ""
+        kind = "reminder"; enabled = reminder.enabled; hour = reminder.hour; minute = reminder.minute
+    }
+
+    private enum CodingKeys: String, CodingKey { case day, mood, text, kind, weekStart, ratings, enabled, hour, minute }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        day = try c.decodeIfPresent(String.self, forKey: .day) ?? ""
+        mood = try c.decodeIfPresent(Int.self, forKey: .mood)
+        text = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        weekStart = try c.decodeIfPresent(String.self, forKey: .weekStart)
+        ratings = try c.decodeIfPresent([String: Int].self, forKey: .ratings)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled)
+        hour = try c.decodeIfPresent(Int.self, forKey: .hour)
+        minute = try c.decodeIfPresent(Int.self, forKey: .minute)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        if kind == nil {
+            try c.encode(day, forKey: .day)
+            try c.encodeIfPresent(mood, forKey: .mood)
+            try c.encode(text, forKey: .text)
+        }
+        try c.encodeIfPresent(kind, forKey: .kind)
+        try c.encodeIfPresent(weekStart, forKey: .weekStart)
+        try c.encodeIfPresent(ratings, forKey: .ratings)
+        try c.encodeIfPresent(enabled, forKey: .enabled)
+        try c.encodeIfPresent(hour, forKey: .hour)
+        try c.encodeIfPresent(minute, forKey: .minute)
+    }
 }
 
 /// One day gathered from the primary record and any copies the `.copy` conflict policy made.
@@ -266,8 +315,56 @@ public struct MergedReviewDay: Equatable {
     public var ids: [String]
 }
 
+/// One week review gathered from the primary record and any copies the `.copy` conflict policy made.
+public struct MergedReviewWeek: Equatable {
+    public var week: WeekReview
+    public var ids: [String]
+}
+
+/// The reminder time gathered the same way.
+public struct MergedReviewReminder: Equatable {
+    public var settings: ReviewReminderSettings
+    public var updatedAt: Int64
+    public var ids: [String]
+}
+
 public enum ReviewVault {
     public static func recordID(for day: String) -> String { "r-\(day)" }
+    public static func weekRecordID(for weekStart: String) -> String { "w-\(weekStart)" }
+    public static let reminderRecordID = "s-reminder"
+
+    /// Week reviews by Monday; of copies of one week the newest wins (a rating set is not text, nothing to join).
+    public static func mergeWeeks(_ items: [VaultItem<ReviewDayRecord>]) -> [String: MergedReviewWeek] {
+        var groups: [String: [VaultItem<ReviewDayRecord>]] = [:]
+        for item in items where !item.deleted {
+            guard let data = item.data, data.kind == "week", let start = data.weekStart, ReviewCalendar.isDay(start),
+                  ReviewCalendar.weekStart(start) == start else { continue }
+            groups[start, default: []].append(item)
+        }
+        var out: [String: MergedReviewWeek] = [:]
+        for (start, list) in groups {
+            let newestFirst = list.sorted { $0.updatedAt != $1.updatedAt ? $0.updatedAt > $1.updatedAt : $0.id < $1.id }
+            for item in newestFirst {
+                let valid = (item.data?.ratings ?? [:]).filter { ReviewLimits.ratingRange.contains($0.value) }
+                guard !valid.isEmpty else { continue }
+                out[start] = MergedReviewWeek(week: WeekReview(weekStart: start, ratings: valid, updatedAt: item.updatedAt), ids: list.map(\.id))
+                break
+            }
+        }
+        return out
+    }
+
+    /// The newest reminder record wins.
+    public static func mergeReminder(_ items: [VaultItem<ReviewDayRecord>]) -> MergedReviewReminder? {
+        let list = items.filter { !$0.deleted && $0.data?.kind == "reminder" }
+        let newestFirst = list.sorted { $0.updatedAt != $1.updatedAt ? $0.updatedAt > $1.updatedAt : $0.id < $1.id }
+        for item in newestFirst {
+            guard let data = item.data, let enabled = data.enabled, let hour = data.hour, let minute = data.minute,
+                  (0...23).contains(hour), (0...59).contains(minute) else { continue }
+            return MergedReviewReminder(settings: ReviewReminderSettings(enabled: enabled, hour: hour, minute: minute), updatedAt: item.updatedAt, ids: list.map(\.id))
+        }
+        return nil
+    }
 
     /// Newest mood wins; the lines of all copies are kept (oldest first, joined once). Mirrors mergeDayRecords in review-domain.mjs.
     public static func merge(_ items: [VaultItem<ReviewDayRecord>]) -> [String: MergedReviewDay] {

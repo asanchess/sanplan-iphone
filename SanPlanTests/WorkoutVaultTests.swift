@@ -212,4 +212,89 @@ final class WorkoutVaultTests: XCTestCase {
         let found = try FileManager.default.subpathsOfDirectory(atPath: backup.path).contains { $0.hasSuffix(WorkoutStore.programBackupFile) }
         XCTAssertTrue(found, "локальный план сохранён копией")
     }
+
+    // MARK: - Идущая тренировка и настройки
+
+    private func session(phase: WorkoutPhase = .working, lastNow: Int64 = 10_000, recordId: String? = "REC-1") -> WorkoutSessionState {
+        WorkoutSessionState(
+            revision: 1, phase: phase,
+            exercises: [SessionExercise(name: "Жим · 8", rests: [90, 90], title: "Жим", reps: 8, weightKg: 60, log: [SetLog(), SetLog()])],
+            lastNow: lastNow, startedAt: 1_000, recordId: recordId
+        )
+    }
+
+    private func remote(_ session: WorkoutSessionState, at: Int64) -> VaultItem<WorkoutVaultEntry> {
+        VaultItem(id: WorkoutVaultMigration.activeID, updatedAt: at, data: .active(WorkoutActivePayload(session: session)))
+    }
+
+    func testActiveAndSettingsRecordsRoundTripAndStayOutOfHistory() throws {
+        let entry = WorkoutVaultEntry.active(WorkoutActivePayload(session: session()))
+        let json = try JSONEncoder().encode(entry)
+        XCTAssertEqual((try JSONSerialization.jsonObject(with: json) as? [String: Any])?["kind"] as? String, "active")
+        XCTAssertEqual(try JSONDecoder().decode(WorkoutVaultEntry.self, from: json), entry)
+        XCTAssertEqual(try JSONDecoder().decode(WorkoutVaultEntry.self, from: json).active?.session.recordId, "REC-1")
+        let items: [String: VaultItem<WorkoutVaultEntry>] = [WorkoutVaultMigration.activeID: remote(session(), at: 5)]
+        XCTAssertTrue(WorkoutVaultMigration.recordItems(items).isEmpty, "идущая тренировка не попадает в историю")
+        let sound = try JSONDecoder().decode(SettingsPayload.self, from: Data(#"{"kind":"training","restSound":false}"#.utf8))
+        XCTAssertEqual(sound, SettingsPayload(restSound: false))
+    }
+
+    func testActiveSyncDecisions() {
+        let local = session(lastNow: 10_000)
+        let newer = session(phase: .resting, lastNow: 20_000)
+        // Своё свежее состояние уходит в аккаунт, пока записи нет.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: nil, local: local, lastSynced: nil, changedAt: 0), .push)
+        // Законченное без живой записи не отправляется.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: nil, local: session(phase: .complete), lastSynced: nil, changedAt: 0), .none)
+        // Чужое более свежее состояние принимается; более старое — нет.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: remote(newer, at: 20_000), local: local, lastSynced: local, changedAt: 10_000), .apply(newer))
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: remote(session(lastNow: 5_000), at: 5_000), local: local, lastSynced: nil, changedAt: 10_000), .push)
+        // Без тренировки здесь: идущая принимается, законченная — нет.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: remote(newer, at: 20_000), local: nil, lastSynced: nil, changedAt: 0), .apply(newer))
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: remote(session(phase: .complete), at: 20_000), local: nil, lastSynced: nil, changedAt: 0), .none)
+        // Убрали здесь — убираем в аккаунте.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: remote(local, at: 10_000), local: nil, lastSynced: local, changedAt: 10_000), .removeRemote)
+        // Надгробие от другого устройства убирает идущую тренировку, но не законченную.
+        let tomb = VaultItem<WorkoutVaultEntry>(id: WorkoutVaultMigration.activeID, updatedAt: 30_000, deleted: true, data: nil)
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: tomb, local: local, lastSynced: local, changedAt: 10_000), .clearLocal)
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: tomb, local: session(phase: .complete), lastSynced: nil, changedAt: 10_000), .none)
+        // Тренировка, начатая после надгробия, им не стирается.
+        XCTAssertEqual(WorkoutActiveSync.decide(remote: tomb, local: session(lastNow: 40_000), lastSynced: nil, changedAt: 0), .push)
+    }
+
+    func testActiveWorkoutMovesToAnotherDeviceAndDiscardEndsItEverywhere() async throws {
+        let key = SymmetricKey(size: .bits256)
+        let server = MemoryVaultTransport()
+        let first = store()
+        let mine = plan("Ноги")
+        first.setTrainingPlan(mine)
+        let a = collection(folder: "ta")
+        a.attach(account: email, key: key, transport: server)
+        first.attachVault(a, account: email, autoMigrate: false)
+        await waitUntil { first.programReconciled }
+        first.startWorkout(day: mine.days[0])
+        let running = try XCTUnwrap(first.activeSession)
+        XCTAssertEqual(a.item(WorkoutVaultMigration.activeID)?.data?.active?.session, running)
+        let syncedA = await a.whenSynced()
+        XCTAssertTrue(syncedA)
+
+        let other = FileManager.default.temporaryDirectory.appendingPathComponent("workout-vault-c-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: other) }
+        let second = WorkoutStore(restAlarm: RestAlarmCoordinator(service: FakeRestAlarmService()),
+                                  baseDirectory: other, owner: .account(email), defaults: defaults)
+        let b = collection(folder: "tb")
+        b.attach(account: email, key: key, transport: server)
+        second.attachVault(b, account: email, autoMigrate: false)
+        await waitUntil { second.activeSession != nil }
+        XCTAssertEqual(second.activeSession?.recordId, running.recordId, "та же тренировка, тот же id записи истории")
+        XCTAssertEqual(second.activeSession?.deadline, running.deadline)
+
+        second.discardWorkout()
+        XCTAssertNil(second.activeSession)
+        let syncedB = await b.whenSynced()
+        XCTAssertTrue(syncedB)
+        await a.sync()
+        await waitUntil { first.activeSession == nil }
+        XCTAssertNil(first.activeSession, "удаление на втором устройстве убрало тренировку и на первом")
+    }
 }

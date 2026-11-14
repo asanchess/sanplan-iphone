@@ -11,29 +11,55 @@ private enum Fixture {
     static let c = "lrDHZmLmJvW3Yi9hk//9yE1kjIJT42fdwXZ6fax/S94Yt0A2kHnVWepruEIXKCdHj0U9/yfWG3RIET76fLYmjo0t22sH6AzPggj+RYzNTtP++4I8AmmwJ35Ruzi/heX69VOU23plFbbi1VnFBODRmZUTCiHKe44AVxuirl3dgra7aHLCdhAz7DmkQdmcuM9hs1gYsguWPzgsPiWgFBd8TES274jN"
 }
 
-/// The server's half in memory, with the same revision rules as cloud/vault.mjs.
+/// The server's half in memory, with the same revision rules as cloud/vault.mjs: a server-held key per account
+/// (`GET /api/vault/key`, adopt), `seq` numbers and one counter per collection (`stamps`, `?since=`).
 final class MemoryVaultTransport: VaultTransport, @unchecked Sendable {
     private let lock = NSLock()
+    /// The account's data key; nil with an `envelope` is an account from before server keys (needsAdopt).
+    var serverKey: Data?
     var envelope: VaultCrypto.Envelope?
     var records: [String: VaultRemoteRecord] = [:]
     var failNext = false
+    var failKeyFetch = false
+    private(set) var keyFetches = 0
+    private(set) var adoptions = 0
+    /// The `since` of every list call, in order.
+    private(set) var listedSince: [Int?] = []
+    private(set) var counters: [String: Int] = [:]
+    private var counter = 0
 
-    func fetchKey() async throws -> (envelope: VaultCrypto.Envelope?, revision: Int) {
-        lock.withLock { (envelope, envelope == nil ? 0 : 1) }
-    }
-
-    func putKey(_ value: VaultCrypto.Envelope, revision: Int) async throws -> VaultKeyPutResult {
-        lock.withLock {
-            if let envelope { return .conflict(envelope: envelope, revision: 1) }
-            envelope = value
-            return .saved
+    func fetchAccountKey() async throws -> VaultAccountKey {
+        try lock.withLock {
+            keyFetches += 1
+            if failKeyFetch { throw APIError.transport("offline") }
+            if serverKey == nil && envelope == nil { serverKey = VaultCrypto.randomBytes(32) }
+            return VaultAccountKey(key: serverKey, needsAdopt: serverKey == nil && envelope != nil, envelope: envelope, revision: envelope == nil ? 0 : 1)
         }
     }
 
-    func list(_ collection: String) async throws -> [VaultRemoteRecord] {
+    func adoptKey(_ key: Data) async throws -> VaultAdoptResult {
+        lock.withLock {
+            adoptions += 1
+            if let serverKey { return serverKey == key ? .saved(key) : .conflict(serverKey) }
+            serverKey = key
+            return .saved(key)
+        }
+    }
+
+    func stamps() async throws -> [String: Int] {
         try lock.withLock {
             if failNext { failNext = false; throw APIError.transport("offline") }
-            return Array(records.values)
+            return counters
+        }
+    }
+
+    func list(_ collection: String, since: Int?) async throws -> VaultListing {
+        try lock.withLock {
+            if failNext { failNext = false; throw APIError.transport("offline") }
+            listedSince.append(since)
+            let all = Array(records.values)
+            let page = since.map { floor in all.filter { ($0.seq ?? 0) > floor } } ?? all
+            return VaultListing(records: page, stamp: counters[collection] ?? 0)
         }
     }
 
@@ -42,8 +68,18 @@ final class MemoryVaultTransport: VaultTransport, @unchecked Sendable {
             if failNext { failNext = false; throw APIError.transport("offline") }
             let current = records[record.id]
             guard (current?.revision ?? 0) == record.revision else { return .conflict(current: current) }
-            records[record.id] = VaultRemoteRecord(id: record.id, revision: record.revision + 1, c: record.c)
+            counter += 1
+            counters[collection] = counter
+            records[record.id] = VaultRemoteRecord(id: record.id, revision: record.revision + 1, c: record.c, seq: counter)
             return .saved(revision: record.revision + 1)
+        }
+    }
+
+    /// A write that moved the counter but never produced a record (it lost its conflict on the server).
+    func bumpCounterWithoutRecord(_ collection: String) {
+        lock.withLock {
+            counter += 1
+            counters[collection] = counter
         }
     }
 }
@@ -90,51 +126,134 @@ final class VaultCryptoTests: XCTestCase {
 
 @MainActor
 final class VaultKeySessionTests: XCTestCase {
-    func testFirstDeviceSetsUpSecondDeviceRestores() async {
-        let server = MemoryVaultTransport()
-        let first = VaultKeySession(storage: MemoryVaultKeyStorage())
-        first.attach(account: "a@example.com", transport: server)
-        await first.check()
-        XCTAssertEqual(first.phase, .needsSetup)
-        first.beginSetup()
-        let recovery = first.pendingRecoveryKey
-        XCTAssertNotNil(recovery)
-        XCTAssertNil(server.envelope, "Nothing is uploaded before the person confirms the key is saved")
-        await first.confirmSetup()
-        XCTAssertEqual(first.phase, .ready)
-        XCTAssertNil(first.pendingRecoveryKey)
+    private func raw(_ key: SymmetricKey?) -> Data? { key?.withUnsafeBytes { Data($0) } }
 
-        let second = VaultKeySession(storage: MemoryVaultKeyStorage())
-        second.attach(account: "a@example.com", transport: server)
-        await second.check()
-        XCTAssertEqual(second.phase, .needsRecovery)
-        let wrong = await second.restore(recoveryText: "0000-0000-0000-0000-0000-0000-0000-0000")
-        XCTAssertEqual(wrong, "Ключ восстановления не подошёл.")
-        let ok = await second.restore(recoveryText: recovery!)
-        XCTAssertNil(ok)
-        XCTAssertEqual(second.phase, .ready)
-        XCTAssertEqual(second.dataKey?.withUnsafeBytes { Data($0) }, first.dataKey?.withUnsafeBytes { Data($0) })
+    /// A new account gets its key from the server on the first call: no screen, nothing to save.
+    func testNewAccountGetsTheServerKeyWithoutAskingAnything() async {
+        let server = MemoryVaultTransport(), storage = MemoryVaultKeyStorage()
+        let session = VaultKeySession(storage: storage)
+        var ready = 0
+        session.onReady = { ready += 1 }
+        session.attach(account: "a@example.com", transport: server)
+        XCTAssertEqual(session.phase, .idle)
+        await session.check()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(raw(session.dataKey), server.serverKey)
+        XCTAssertEqual(raw(storage.load(account: "a@example.com")), server.serverKey, "The key is cached in the Keychain for offline starts")
+        XCTAssertEqual(ready, 1)
+        XCTAssertEqual(session.keyVersion, 1)
     }
 
-    func testSetupRaceFallsBackToRecovery() async {
+    func testSecondDeviceOpensBySigningIn() async {
         let server = MemoryVaultTransport()
-        let a = VaultKeySession(storage: MemoryVaultKeyStorage()), b = VaultKeySession(storage: MemoryVaultKeyStorage())
-        a.attach(account: "a@example.com", transport: server)
-        b.attach(account: "a@example.com", transport: server)
-        await a.check(); await b.check()
-        a.beginSetup(); b.beginSetup()
-        await a.confirmSetup()
-        await b.confirmSetup()
-        XCTAssertEqual(a.phase, .ready)
-        XCTAssertEqual(b.phase, .needsRecovery)
-        XCTAssertNil(b.dataKey)
+        let first = VaultKeySession(storage: MemoryVaultKeyStorage()), second = VaultKeySession(storage: MemoryVaultKeyStorage())
+        first.attach(account: "a@example.com", transport: server)
+        second.attach(account: "a@example.com", transport: server)
+        await first.check()
+        await second.check()
+        XCTAssertEqual(second.phase, .ready)
+        XCTAssertEqual(raw(second.dataKey), raw(first.dataKey))
+    }
+
+    func testCachedKeyKeepsTheAppOpenOffline() async {
+        let server = MemoryVaultTransport(), storage = MemoryVaultKeyStorage()
+        let cached = SymmetricKey(size: .bits256)
+        try? storage.save(cached, account: "a@example.com")
+        server.failKeyFetch = true
+        let session = VaultKeySession(storage: storage)
+        session.attach(account: "a@example.com", transport: server)
+        XCTAssertEqual(session.phase, .ready, "A cached key opens at once, before the server answers")
+        await session.check()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(raw(session.dataKey), raw(cached))
+    }
+
+    func testNoKeyAndNoServerIsAnErrorNotAScreen() async {
+        let server = MemoryVaultTransport()
+        server.failKeyFetch = true
+        let session = VaultKeySession(storage: MemoryVaultKeyStorage())
+        session.attach(account: "a@example.com", transport: server)
+        await session.check()
+        guard case .failed(let message) = session.phase else { return XCTFail("Expected failed, got \(session.phase)") }
+        XCTAssertFalse(message.isEmpty)
+        XCTAssertNil(session.dataKey)
+    }
+
+    /// The server's key wins: the cached one is replaced, stores are told, the Keychain follows.
+    func testServerKeyReplacesADifferentCachedKey() async {
+        let server = MemoryVaultTransport(), storage = MemoryVaultKeyStorage()
+        server.serverKey = VaultCrypto.randomBytes(32)
+        try? storage.save(SymmetricKey(size: .bits256), account: "a@example.com")
+        let session = VaultKeySession(storage: storage)
+        var ready = 0
+        session.onReady = { ready += 1 }
+        session.attach(account: "a@example.com", transport: server)
+        XCTAssertEqual(ready, 1)
+        let before = session.keyVersion
+        await session.check()
+        XCTAssertEqual(raw(session.dataKey), server.serverKey)
+        XCTAssertEqual(raw(storage.load(account: "a@example.com")), server.serverKey)
+        XCTAssertEqual(session.keyVersion, before + 1)
+        XCTAssertEqual(ready, 2, "Stores reopen under the new key")
+        await session.check()
+        XCTAssertEqual(ready, 2, "The same key again changes nothing")
+    }
+
+    /// An account from before server keys, on a device that still has the key: handed over silently.
+    func testOlderAccountWithACachedKeyAdoptsSilently() async throws {
+        let server = MemoryVaultTransport(), storage = MemoryVaultKeyStorage()
+        let made = try VaultCrypto.createKey()
+        server.envelope = made.envelope
+        try storage.save(made.dataKey, account: "a@example.com")
+        let session = VaultKeySession(storage: storage)
+        session.attach(account: "a@example.com", transport: server)
+        await session.check()
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(server.serverKey, raw(made.dataKey))
+        XCTAssertEqual(server.adoptions, 1)
+    }
+
+    /// A device without the key asks once for the recovery key; afterwards every device opens by signing in.
+    func testOlderAccountWithoutAKeyAsksForTheRecoveryKeyOnce() async throws {
+        let server = MemoryVaultTransport()
+        let made = try VaultCrypto.createKey()
+        server.envelope = made.envelope
+        let session = VaultKeySession(storage: MemoryVaultKeyStorage())
+        session.attach(account: "a@example.com", transport: server)
+        await session.check()
+        XCTAssertEqual(session.phase, .needsTransfer)
+        XCTAssertNil(session.dataKey)
+        let wrong = await session.restore(recoveryText: "0000-0000-0000-0000-0000-0000-0000-0000")
+        XCTAssertEqual(wrong, "Ключ восстановления не подошёл.")
+        XCTAssertEqual(server.adoptions, 0, "A wrong key never reaches the server")
+        let ok = await session.restore(recoveryText: made.recoveryKey)
+        XCTAssertNil(ok)
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(raw(session.dataKey), raw(made.dataKey))
+        XCTAssertEqual(server.serverKey, raw(made.dataKey))
+
+        let other = VaultKeySession(storage: MemoryVaultKeyStorage())
+        other.attach(account: "a@example.com", transport: server)
+        await other.check()
+        XCTAssertEqual(other.phase, .ready, "The next device needs no recovery key")
+    }
+
+    func testTwoChecksAtOnceAskTheServerOnce() async {
+        let server = MemoryVaultTransport()
+        let session = VaultKeySession(storage: MemoryVaultKeyStorage())
+        session.attach(account: "a@example.com", transport: server)
+        async let a: Void = session.check()
+        async let b: Void = session.check()
+        _ = await (a, b)
+        XCTAssertEqual(server.keyFetches, 1)
+        XCTAssertEqual(session.phase, .ready)
     }
 
     func testKeyStaysPerAccountOnThePhone() async {
         let storage = MemoryVaultKeyStorage(), server = MemoryVaultTransport()
         let session = VaultKeySession(storage: storage)
         session.attach(account: "a@example.com", transport: server)
-        await session.check(); session.beginSetup(); await session.confirmSetup()
+        await session.check()
         session.reset()
         session.attach(account: "b@example.com", transport: MemoryVaultTransport())
         XCTAssertNotEqual(session.phase, .ready)

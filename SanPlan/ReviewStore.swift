@@ -1,10 +1,12 @@
 import Foundation
 import Combine
 
-/// Итоги дня и недели. Дни — в зашифрованной коллекции `reviews` (id «r-ГГГГ-ММ-ДД», политика `.copy`: строка итога
-/// не должна теряться при правке одного вечера на двух устройствах; копии сводятся в основную запись), пока
-/// хранилище закрыто — в файле на аккаунт (имя — хэш почты, как у денег); открывшись, коллекция забирает локальные дни.
-/// Итоги недели и время напоминания остаются в файле на устройстве.
+/// Итоги дня и недели и время напоминания. Всё — в зашифрованной коллекции `reviews` (политика `.copy`: строка итога
+/// не должна теряться при правке одного вечера на двух устройствах; копии сводятся в основную запись):
+/// день — `r-ГГГГ-ММ-ДД`, неделя — `w-<понедельник>`, время напоминания — `s-reminder`. Пока хранилище закрыто —
+/// в файле на аккаунт (имя — хэш почты, как у денег); открывшись, коллекция забирает локальные данные, а перед этим
+/// файл копируется в `*.pre-sync-backup.json` (решение 4 в docs/ONE-APP-PLAN.md). Файл хранит и последнее известное
+/// время напоминания, чтобы уведомление не сбивалось, пока ключ ещё не открыт.
 @MainActor
 public final class ReviewStore: ObservableObject {
     struct FileState: Codable, Equatable {
@@ -25,6 +27,10 @@ public final class ReviewStore: ObservableObject {
     private var vault: VaultCollection<ReviewDayRecord>?
     private var vaultSub: AnyCancellable?
     private var settling = false
+    /// The reminder last handed to `onReminderChanged` (or set here), to notice a change that came from another device.
+    private var lastReminder: ReviewReminderSettings?
+    /// Another device changed the reminder time: the local notification has to follow.
+    public var onReminderChanged: ((ReviewReminderSettings) -> Void)?
 
     public init(directory: URL? = nil, fileManager: FileManager = .default, now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) {
         self.fileManager = fileManager
@@ -43,6 +49,7 @@ public final class ReviewStore: ObservableObject {
         owner = next
         errorMessage = nil
         file = FileState()
+        lastReminder = nil
         switch next {
         case .none: url = nil
         case .device: url = directory.appendingPathComponent("device.json")
@@ -73,6 +80,16 @@ public final class ReviewStore: ObservableObject {
         return ReviewVault.merge(vault.items)
     }
 
+    private func remoteWeeks() -> [String: MergedReviewWeek] {
+        guard let vault, vault.isAvailable else { return [:] }
+        return ReviewVault.mergeWeeks(vault.items)
+    }
+
+    private func remoteReminder() -> MergedReviewReminder? {
+        guard let vault, vault.isAvailable else { return nil }
+        return ReviewVault.mergeReminder(vault.items)
+    }
+
     /// Local file < collection (when newer).
     private func dayMap() -> [String: ReviewEntry] {
         var map = file.days
@@ -80,17 +97,46 @@ public final class ReviewStore: ObservableObject {
         return map
     }
 
-    /// Local days go into the collection once (idempotent by id); copies made by conflicts are merged into the primary record.
+    private func weekMap() -> [String: WeekReview] {
+        var map = file.weeks
+        for (start, merged) in remoteWeeks() where map[start] == nil || merged.week.updatedAt >= map[start]!.updatedAt { map[start] = merged.week }
+        return map
+    }
+
+    /// Before the first move of local data into the account: a copy of the file, kept beside it, never overwritten.
+    private func backupLocalOnce() {
+        guard let url, fileManager.fileExists(atPath: url.path) else { return }
+        let backup = url.deletingPathExtension().appendingPathExtension("pre-sync-backup.json")
+        guard !fileManager.fileExists(atPath: backup.path) else { return }
+        try? fileManager.copyItem(at: url, to: backup)
+    }
+
+    /// Local data goes into the collection once (idempotent by id); copies made by conflicts are merged into the primary record.
     private func settle() {
         guard !settling, let vault, vault.isAvailable, url != nil else { return }
         settling = true
         defer { settling = false }
+        let remoteWeekNow = remoteWeeks()
+        let remoteReminderNow = remoteReminder()
+        let moveReminder = remoteReminderNow == nil && file.reminder != .standard
+        if !file.days.isEmpty || !file.weeks.isEmpty || moveReminder { backupLocalOnce() }
+        var next = file
         if !file.days.isEmpty {
             _ = vault.importMany(file.days.values.map { (id: ReviewVault.recordID(for: $0.day), data: ReviewDayRecord(day: $0.day, mood: $0.mood, text: $0.text), updatedAt: $0.updatedAt) })
-            var next = file
             next.days = [:]
-            _ = commit(next)
         }
+        if !file.weeks.isEmpty {
+            for (start, week) in file.weeks where remoteWeekNow[start].map({ $0.week.updatedAt < week.updatedAt }) ?? true {
+                vault.put(ReviewVault.weekRecordID(for: start), ReviewDayRecord(week: week), updatedAt: week.updatedAt)
+            }
+            next.weeks = [:]
+        }
+        if moveReminder {
+            vault.put(ReviewVault.reminderRecordID, ReviewDayRecord(reminder: file.reminder))
+        } else if let remote = remoteReminderNow, remote.settings != file.reminder {
+            next.reminder = remote.settings
+        }
+        if next != file { _ = commit(next) }
         for (day, merged) in remoteDays() {
             let primary = ReviewVault.recordID(for: day)
             let record = ReviewDayRecord(day: day, mood: merged.entry.mood, text: merged.entry.text)
@@ -98,14 +144,40 @@ public final class ReviewStore: ObservableObject {
             vault.put(primary, record)
             for id in merged.ids where id != primary { vault.remove(id) }
         }
+        for (start, merged) in remoteWeeks() {
+            let primary = ReviewVault.weekRecordID(for: start)
+            let record = ReviewDayRecord(week: merged.week)
+            if merged.ids == [primary], vault.item(primary)?.data == record { continue }
+            vault.put(primary, record, updatedAt: merged.week.updatedAt)
+            for id in merged.ids where id != primary { vault.remove(id) }
+        }
+        if let merged = remoteReminder() {
+            let primary = ReviewVault.reminderRecordID
+            let record = ReviewDayRecord(reminder: merged.settings)
+            if !(merged.ids == [primary] && vault.item(primary)?.data == record) {
+                vault.put(primary, record, updatedAt: merged.updatedAt)
+                for id in merged.ids where id != primary { vault.remove(id) }
+            }
+        }
+        noticeReminderChange()
+    }
+
+    private func noticeReminderChange() {
+        let effective = reminder
+        defer { lastReminder = effective }
+        guard owner != .none, let last = lastReminder, last != effective else { return }
+        onReminderChanged?(effective)
     }
 
     // MARK: Reading (DOMAINS.md §2: ReviewStore.day(_:))
 
     public func day(_ day: String) -> ReviewEntry? { dayMap()[day] }
-    public func week(containing day: String) -> WeekReview? { file.weeks[ReviewCalendar.weekStart(day)] }
-    public func previousWeek(before day: String) -> WeekReview? { file.weeks[ReviewCalendar.addDays(ReviewCalendar.weekStart(day), -7)] }
-    public var reminder: ReviewReminderSettings { file.reminder }
+    public func week(containing day: String) -> WeekReview? { weekMap()[ReviewCalendar.weekStart(day)] }
+    public func previousWeek(before day: String) -> WeekReview? { weekMap()[ReviewCalendar.addDays(ReviewCalendar.weekStart(day), -7)] }
+    /// Every saved week review, oldest first (the spheres screen in Plans).
+    public var weeks: [WeekReview] { weekMap().values.sorted { $0.weekStart < $1.weekStart } }
+    /// The account's reminder time; the file's copy of it while the collection is closed.
+    public var reminder: ReviewReminderSettings { remoteReminder()?.settings ?? file.reminder }
     public var reviewedDays: [String] { dayMap().keys.sorted() }
 
     /// Days with a saved review, for the streak.
@@ -148,6 +220,15 @@ public final class ReviewStore: ObservableObject {
     @discardableResult
     public func saveWeek(containing day: String, ratings: [String: Int]) -> Bool {
         guard url != nil, let week = WeekReview.make(containing: day, ratings: ratings, now: now()) else { return false }
+        if let vault, vault.isAvailable {
+            guard vault.put(ReviewVault.weekRecordID(for: week.weekStart), ReviewDayRecord(week: week), updatedAt: week.updatedAt) != nil else { return false }
+            if file.weeks[week.weekStart] != nil {
+                var cleaned = file
+                cleaned.weeks[week.weekStart] = nil
+                _ = commit(cleaned)
+            }
+            return true
+        }
         var next = file
         next.weeks[week.weekStart] = week
         return commit(next)
@@ -156,6 +237,10 @@ public final class ReviewStore: ObservableObject {
     @discardableResult
     public func setReminder(_ settings: ReviewReminderSettings) -> Bool {
         guard url != nil else { return false }
+        lastReminder = settings
+        if let vault, vault.isAvailable {
+            guard vault.put(ReviewVault.reminderRecordID, ReviewDayRecord(reminder: settings)) != nil else { return false }
+        }
         var next = file
         next.reminder = settings
         return commit(next)

@@ -130,9 +130,9 @@ public final class APIClient: @unchecked Sendable {
     }
 
     /// For endpoints whose error bodies carry data (a 409 with the current version). 401 still throws.
-    public func send(method: String, path: String, body: (any Encodable)? = nil) async throws -> (status: Int, data: Data) {
+    public func send(method: String, path: String, query: [String: String]? = nil, body: (any Encodable)? = nil) async throws -> (status: Int, data: Data) {
         let bodyData = try body.map { try JSONEncoder().encode($0) }
-        let request = try buildRequest(path: path, query: nil, method: method, bodyData: bodyData)
+        let request = try buildRequest(path: path, query: query, method: method, bodyData: bodyData)
         let data: Data
         let response: URLResponse
         do {

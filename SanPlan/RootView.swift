@@ -78,7 +78,7 @@ public struct RootView: View {
                     LoginView()
                 case .signedIn:
                     mainTabsView
-                        .onboardingTour(model: onboarding, review: model.reviews, vault: model.vault, openNotes: { selectedTab = .notes })
+                        .onboardingTour(model: onboarding, review: model.reviews)
                 }
             }
         }
@@ -117,13 +117,20 @@ public struct RootView: View {
                 onboarding.accountChanged(nil)
             case .signedIn(let email):
                 model.accountSignedIn(email: email)
+                onboarding.attach(settings: model.appSettings)
                 onboarding.accountChanged(email)
             case .checking:
                 break
             }
         }
+        .onAppear { onboarding.attach(settings: model.appSettings) }
+        // The account's settings arrive after the first sync: the tour is decided then.
+        .onReceive(model.appSettings.objectWillChange.receive(on: DispatchQueue.main)) { _ in
+            onboarding.settingsChanged()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !isScreenshotSignedInMode { model.becameActive() }
+            if phase == .background { model.becameInactive() }
         }
     }
 
@@ -234,7 +241,7 @@ public struct RootView: View {
                     onOpenWorkout: { selectedTab = .workout },
                     streakSources: model.streakSources,
                     savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
-                    weekRatings: model.reviews.file.weeks.values.sorted { $0.weekStart < $1.weekStart },
+                    weekRatings: model.reviews.weeks,
                     goalsRequest: goalsRequest
                 )
                 .keyboardDismissBar()

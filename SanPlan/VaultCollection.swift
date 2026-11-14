@@ -60,6 +60,8 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     @Published public private(set) var all: [String: VaultItem<Payload>] = [:]
     @Published public private(set) var syncState: SyncState = .idle
     @Published public private(set) var unreadableCount = 0
+    /// True after the first complete sync with the server since `attach`.
+    @Published public private(set) var hasSynced = false
 
     private var cache: [String: CacheEntry] = [:]
     private var key: SymmetricKey?
@@ -69,6 +71,8 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     private var isSyncing = false
     private var syncAgain = false
     private var generation = 0
+    /// Highest server `seq` received; live sync asks only for records after it (nil/0: everything).
+    public private(set) var syncCursor = 0
     private var waiters: [CheckedContinuation<Bool, Never>] = []
     private let fileManager: FileManager
     private let baseDirectory: URL
@@ -131,6 +135,8 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         cache = [:]
         all = [:]
         unreadableCount = 0
+        syncCursor = 0
+        hasSynced = false
         syncState = .idle
         isSyncing = false
         syncAgain = false
@@ -205,6 +211,9 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
 
     public func syncNow() { scheduleSync(after: .zero) }
 
+    /// The counter stayed ahead of every record we received (a write that lost its conflict): stop waiting for it.
+    public func advanceCursor(to stamp: Int) { syncCursor = max(syncCursor, stamp) }
+
     private func scheduleSync(after delay: Duration) {
         guard transport != nil else { return }
         syncTask?.cancel()
@@ -230,6 +239,7 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
             } while syncAgain && generation == started
             guard generation == started else { return }
             syncState = .idle
+            hasSynced = true
             if pendingCount == 0 {
                 let done = waiters
                 waiters = []
@@ -298,16 +308,21 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     }
 
     private func pull(key: SymmetricKey, transport: any VaultTransport, generation started: Int) async throws {
-        let remote = try await transport.list(collection)
+        let full = syncCursor <= 0
+        let listing = try await transport.list(collection, since: full ? nil : syncCursor)
         guard generation == started else { return }
         var unreadable = 0
-        for record in remote {
+        var highest = syncCursor
+        for record in listing.records {
+            if let seq = record.seq { highest = max(highest, seq) }
             if let local = cache[record.id], local.dirty || local.revision >= record.revision { continue }
             guard let item = try? open(id: record.id, c: record.c, key: key) else { unreadable += 1; continue }
             cache[record.id] = CacheEntry(revision: record.revision, c: record.c, dirty: false)
             all[record.id] = item
         }
-        unreadableCount = unreadable
+        syncCursor = highest
+        // A partial answer says nothing about records already counted as unreadable.
+        if full { unreadableCount = unreadable } else { unreadableCount += unreadable }
         saveCache()
     }
 
@@ -329,11 +344,13 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         guard let fileURL, let key else { return }
         guard let data = try? Data(contentsOf: fileURL),
               let stored = try? JSONDecoder().decode([String: CacheEntry].self, from: data) else { return }
-        cache = stored
         var items: [String: VaultItem<Payload>] = [:]
+        var kept = stored
         for (id, entry) in stored {
-            if let item = try? open(id: id, c: entry.c, key: key) { items[id] = item }
+            if let item = try? open(id: id, c: entry.c, key: key) { items[id] = item } else { kept[id] = nil }
         }
+        // Entries sealed under another key (the server's key replaced the cached one) are dropped; the next sync fetches them again.
+        cache = kept
         all = items
     }
 

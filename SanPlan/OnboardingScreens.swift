@@ -1,20 +1,19 @@
 import SwiftUI
 
-// «Первый запуск»: четыре коротких шага. Любой шаг можно пропустить; пройденный тур помнится по аккаунту.
-// Ключ восстановления — существующий поток «Заметок» (VaultGateView), время итогов — ReviewStore/ReviewReminder,
-// сферы — GoalStore. Зеркало onboarding.mjs / OnboardingPanel.jsx.
+// «Первый запуск»: три коротких шага. Любой шаг можно пропустить; пройденный тур помнится по аккаунту
+// (флаг — запись `s-app-settings` коллекции `settings`, на каждом устройстве аккаунта один и тот же).
+// Время итогов — ReviewStore/ReviewReminder, сферы — GoalStore. Шага про ключ нет: ключ хранит сервер. Зеркало onboarding.mjs / OnboardingPanel.jsx.
 
 // MARK: - Domain
 
 public enum OnboardingStep: Int, CaseIterable, Equatable {
-    case tabs, reminder, spheres, key
+    case tabs, reminder, spheres
 
     public var title: String {
         switch self {
         case .tabs: return "Что где"
         case .reminder: return "Итоги дня"
         case .spheres: return "Сферы жизни"
-        case .key: return "Ключ восстановления"
         }
     }
 }
@@ -64,37 +63,6 @@ public enum OnboardingTabs {
     ]
 }
 
-/// Что показать на шаге ключа по состоянию существующей сессии ключа.
-public enum OnboardingKeyState: Equatable {
-    case ready, create, enter, pending
-
-    public static func make(_ phase: VaultKeySession.Phase) -> OnboardingKeyState {
-        switch phase {
-        case .ready: return .ready
-        case .needsSetup: return .create
-        case .needsRecovery: return .enter
-        default: return .pending
-        }
-    }
-
-    public var text: String {
-        switch self {
-        case .ready: return "Ключ настроен на этом устройстве."
-        case .create: return "Создайте ключ: он понадобится для входа на другом устройстве."
-        case .enter: return "Данные аккаунта уже зашифрованы. Введите ключ восстановления, чтобы открыть их здесь."
-        case .pending: return "Состояние ключа проверяется. Вернуться к шагу можно из настроек."
-        }
-    }
-
-    public var actionTitle: String? {
-        switch self {
-        case .create: return "Создать ключ"
-        case .enter: return "Ввести ключ"
-        default: return nil
-        }
-    }
-}
-
 /// Выбор 2–3 сфер для «Целей».
 public enum OnboardingSpheres {
     public static let minCount = 2
@@ -128,33 +96,58 @@ public final class OnboardingModel: ObservableObject {
     private let defaults: UserDefaults
     private(set) var email: String?
     static let keyPrefix = "arna.onboarding.v1."
+    /// The account-wide flag (`s-app-settings` in the `settings` collection). Nil in tests that only use the device flag.
+    private weak var settings: AppSettingsStore?
+    /// This sign-in's tour was already shown or skipped; a later settings update must not bring it back.
+    private var handled = false
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
+    public func attach(settings: AppSettingsStore) { self.settings = settings }
+
     private func key(_ email: String) -> String { Self.keyPrefix + FinanceStore.accountFolderName(email) }
 
+    /// Пройден на этом устройстве или на любом другом устройстве аккаунта.
     public func isDone(for email: String?) -> Bool {
         guard let email else { return false }
-        return defaults.bool(forKey: key(email))
+        return defaults.bool(forKey: key(email)) || settings?.onboardingDone == true
     }
 
     public func shouldShow(for email: String?) -> Bool { email != nil && !isDone(for: email) }
 
     /// Вход в аккаунт: тур показывается, только если этот аккаунт его не проходил. Выход закрывает тур.
+    /// Пока настройки аккаунта не пришли с сервера, тур не решается: на втором устройстве он не должен мигнуть.
     public func accountChanged(_ next: String?) {
         email = next
-        isPresented = shouldShow(for: next)
+        handled = false
+        isPresented = false
+        settingsChanged()
+    }
+
+    /// Настройки аккаунта пришли или изменились: решаем, показывать ли тур, и переносим старый флаг устройства в аккаунт.
+    public func settingsChanged() {
+        guard let email else { return }
+        if let settings {
+            guard settings.isLoaded else { return }
+            if defaults.bool(forKey: key(email)), !settings.onboardingDone { settings.setOnboardingDone(true) }
+        }
+        guard !handled else { return }
+        handled = true
+        isPresented = shouldShow(for: email)
     }
 
     public func complete() {
+        handled = true
         if let email { defaults.set(true, forKey: key(email)) }
+        settings?.setOnboardingDone(true)
         isPresented = false
     }
 
-    /// «Показать вводный тур» в настройках.
+    /// «Показать вводный тур» в настройках. Флаг аккаунта не сбрасывается: другие устройства тур не увидят.
     public func requestTour() {
         guard let email else { return }
         defaults.removeObject(forKey: key(email))
+        handled = true
         isPresented = true
     }
 }
@@ -164,10 +157,7 @@ public final class OnboardingModel: ObservableObject {
 struct OnboardingScreen: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var review: ReviewStore
-    @ObservedObject var vault: VaultKeySession
     @ObservedObject var goals: GoalStore
-    /// Вкладка «Заметки» с существующим потоком ключа.
-    let onOpenNotes: () -> Void
 
     @State private var tour = OnboardingTour()
     @State private var picked: [String] = []
@@ -200,9 +190,6 @@ struct OnboardingScreen: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .onAppear { reminder = review.reminder }
-        .task(id: tour.step) {
-            if tour.step == .key, vault.phase == .idle { await vault.check() }
-        }
     }
 
     @ViewBuilder
@@ -257,20 +244,6 @@ struct OnboardingScreen: View {
                 }
                 Text(OnboardingSpheres.hint(picked)).font(.footnote).foregroundColor(DS.Colors.textSecondary)
             }
-        case .key:
-            let state = OnboardingKeyState.make(vault.phase)
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                Text(state.text)
-                if let title = state.actionTitle {
-                    PillButton(title, style: .primary) {
-                        model.complete()
-                        onOpenNotes()
-                    }
-                }
-                Text("Ключ создаётся и вводится в «Заметках». Без него данные не открыть на новом устройстве.")
-                    .font(.footnote)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
         }
     }
 
@@ -280,14 +253,9 @@ struct OnboardingScreen: View {
             if tour.index > 0 {
                 PillButton("Назад", style: .secondary) { tour.apply(.back) }
             }
-            if step == .key {
-                let hasAction = OnboardingKeyState.make(vault.phase).actionTitle != nil
-                PillButton(hasAction ? "Позже" : "Готово", style: hasAction ? .secondary : .primary) { advance(.skip) }
-            } else {
-                PillButton("Пропустить", style: .secondary) { advance(.skip) }
-                PillButton("Далее", style: .primary) { advance(.next) }
-                    .disabled(step == .spheres && !picked.isEmpty && !OnboardingSpheres.isReady(picked))
-            }
+            PillButton("Пропустить", style: .secondary) { advance(.skip) }
+            PillButton(step == .spheres ? "Готово" : "Далее", style: .primary) { advance(.next) }
+                .disabled(step == .spheres && !picked.isEmpty && !OnboardingSpheres.isReady(picked))
         }
     }
 
@@ -322,26 +290,24 @@ struct OnboardingScreen: View {
 // MARK: - Hooks
 
 /// Хук для RootView: показывает тур листом, пока аккаунт его не прошёл.
-///   .onboardingTour(model: model.onboarding-или-@StateObject, review: model.reviews, vault: model.vault, goals: GoalStore.shared, openNotes: { selectedTab = .notes })
+///   .onboardingTour(model: model.onboarding-или-@StateObject, review: model.reviews, goals: GoalStore.shared)
 /// и в `onChange(of: authService.phase)`: signedIn(email) → onboarding.accountChanged(email); signedOut → accountChanged(nil).
 struct OnboardingHost: ViewModifier {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var review: ReviewStore
-    @ObservedObject var vault: VaultKeySession
     @ObservedObject var goals: GoalStore
-    let openNotes: () -> Void
 
     func body(content: Content) -> some View {
         // Closing the sheet any other way (swipe down) counts as skipping the tour.
         content.sheet(isPresented: $model.isPresented, onDismiss: { model.complete() }) {
-            OnboardingScreen(model: model, review: review, vault: vault, goals: goals, onOpenNotes: openNotes)
+            OnboardingScreen(model: model, review: review, goals: goals)
         }
     }
 }
 
 extension View {
-    func onboardingTour(model: OnboardingModel, review: ReviewStore, vault: VaultKeySession, goals: GoalStore = .shared, openNotes: @escaping () -> Void) -> some View {
-        modifier(OnboardingHost(model: model, review: review, vault: vault, goals: goals, openNotes: openNotes))
+    func onboardingTour(model: OnboardingModel, review: ReviewStore, goals: GoalStore = .shared) -> some View {
+        modifier(OnboardingHost(model: model, review: review, goals: goals))
     }
 }
 

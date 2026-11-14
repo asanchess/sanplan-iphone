@@ -57,13 +57,13 @@ final class OnboardingTests: XCTestCase {
         tour.apply(.back)
         XCTAssertEqual(tour.step, .reminder)
         tour.apply(.skip)
+        XCTAssertEqual(tour.step, .spheres)
         tour.apply(.skip)
-        XCTAssertEqual(tour.step, .key)
-        tour.apply(.skip)
-        XCTAssertTrue(tour.finished)
+        XCTAssertTrue(tour.finished, "три шага: вкладки, напоминание, сферы")
         XCTAssertNil(tour.step)
         XCTAssertEqual(tour.results[.tabs], .done)
-        XCTAssertEqual(tour.results[.key], .skipped)
+        XCTAssertEqual(tour.results[.spheres], .skipped)
+        XCTAssertEqual(OnboardingStep.allCases.count, 3)
 
         var quick = OnboardingTour()
         quick.apply(.finish)
@@ -81,13 +81,72 @@ final class OnboardingTests: XCTestCase {
         }
     }
 
-    func testKeyStepFollowsTheExistingKeySession() {
-        XCTAssertEqual(OnboardingKeyState.make(.ready), .ready)
-        XCTAssertEqual(OnboardingKeyState.make(.needsSetup), .create)
-        XCTAssertEqual(OnboardingKeyState.make(.needsRecovery), .enter)
-        XCTAssertEqual(OnboardingKeyState.make(.checking), .pending)
-        XCTAssertNil(OnboardingKeyState.ready.actionTitle)
-        XCTAssertEqual(OnboardingKeyState.create.actionTitle, "Создать ключ")
+    private func settingsStore(_ server: MemoryVaultTransport, key: SymmetricKey, folder: String) -> (AppSettingsStore, VaultCollection<AppSettingsRecord>) {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-settings-\(UUID().uuidString)").appendingPathComponent(folder)
+        let c = VaultCollection<AppSettingsRecord>(collection: "settings", policy: .newest, idPrefix: "s", baseDirectory: base)
+        c.syncDelay = .seconds(3600)
+        c.attach(account: "acc1", key: key, transport: server)
+        let store = AppSettingsStore()
+        store.setCollection(c)
+        return (store, c)
+    }
+
+    /// Флаг «тур пройден» общий для аккаунта: второе устройство тур не показывает и не мигает им, пока настройки не пришли.
+    func testTourWaitsForTheAccountSettingsAndHonoursAnotherDevice() async {
+        let server = MemoryVaultTransport(), key = SymmetricKey(size: .bits256)
+        let (s1, c1) = settingsStore(server, key: key, folder: "one")
+        let m1 = model()
+        m1.attach(settings: s1)
+        m1.accountChanged("a@example.com")
+        XCTAssertFalse(m1.isPresented, "настройки аккаунта ещё не пришли")
+        await c1.sync()
+        m1.settingsChanged()
+        XCTAssertTrue(m1.isPresented, "новый аккаунт видит тур")
+        m1.complete()
+        XCTAssertTrue(s1.onboardingDone)
+        await c1.sync()
+        XCTAssertNotNil(server.records[AppSettingsStore.recordID], "флаг ушёл в запись s-app-settings")
+
+        let (s2, c2) = settingsStore(server, key: key, folder: "two")
+        let m2 = model()
+        m2.attach(settings: s2)
+        m2.accountChanged("a@example.com")
+        XCTAssertFalse(m2.isPresented)
+        await c2.sync()
+        m2.settingsChanged()
+        XCTAssertFalse(m2.isPresented, "на другом устройстве тур уже пройден")
+        XCTAssertTrue(m2.isDone(for: "a@example.com"))
+    }
+
+    func testTheDeviceFlagMovesIntoTheAccountOnce() async {
+        let server = MemoryVaultTransport(), key = SymmetricKey(size: .bits256)
+        let defaults = UserDefaults(suiteName: "onboarding-move-\(UUID().uuidString)")!
+        let old = OnboardingModel(defaults: defaults)
+        old.accountChanged("a@example.com")
+        old.complete()
+
+        let (settings, collection) = settingsStore(server, key: key, folder: "move")
+        let m = OnboardingModel(defaults: defaults)
+        m.attach(settings: settings)
+        m.accountChanged("a@example.com")
+        await collection.sync()
+        m.settingsChanged()
+        XCTAssertFalse(m.isPresented)
+        XCTAssertTrue(settings.onboardingDone, "флаг устройства перенесён в аккаунт")
+    }
+
+    func testRequestTourDoesNotResetTheAccountFlag() async {
+        let server = MemoryVaultTransport(), key = SymmetricKey(size: .bits256)
+        let (settings, collection) = settingsStore(server, key: key, folder: "again")
+        let m = model()
+        m.attach(settings: settings)
+        m.accountChanged("a@example.com")
+        await collection.sync()
+        m.settingsChanged()
+        m.complete()
+        m.requestTour()
+        XCTAssertTrue(m.isPresented)
+        XCTAssertTrue(settings.onboardingDone, "другие устройства тур снова не увидят")
     }
 
     func testTwoToThreeSpheresAreChosen() {

@@ -79,4 +79,99 @@ final class ReviewVaultTests: XCTestCase {
         XCTAssertEqual(vault.items.count, 1)
         XCTAssertEqual(vault.item("r-2026-11-12")?.data, ReviewDayRecord(day: day, mood: 3, text: "Первое · Со второго устройства"))
     }
+
+    // MARK: Week reviews and the reminder time live in the collection too
+
+    private let monday = "2026-11-09"
+
+    func testWeekAndReminderRecordIDsAreValidAndDoNotLookLikeDays() {
+        XCTAssertEqual(ReviewVault.weekRecordID(for: monday), "w-2026-11-09")
+        XCTAssertTrue(VaultCollection<ReviewDayRecord>.isValidID(ReviewVault.weekRecordID(for: monday)))
+        XCTAssertTrue(VaultCollection<ReviewDayRecord>.isValidID(ReviewVault.reminderRecordID))
+        let items = [
+            VaultItem(id: "w-2026-11-09", updatedAt: 1, data: ReviewDayRecord(week: WeekReview(weekStart: monday, ratings: ["health": 7], updatedAt: 1))),
+            VaultItem(id: ReviewVault.reminderRecordID, updatedAt: 1, data: ReviewDayRecord(reminder: ReviewReminderSettings(enabled: true, hour: 22, minute: 30)))
+        ]
+        XCTAssertTrue(ReviewVault.merge(items).isEmpty, "Day code skips records of other kinds")
+    }
+
+    /// The same JSON the web writes (src/review-domain.mjs): `{kind, weekStart, ratings}` and `{kind, enabled, hour, minute}`.
+    func testRecordsRoundTripAsTheWebShapes() throws {
+        let week = ReviewDayRecord(week: WeekReview(weekStart: monday, ratings: ["health": 7, "money": 5], updatedAt: 9))
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(week), encoding: .utf8))
+        XCTAssertTrue(json.contains("\"kind\":\"week\""))
+        XCTAssertFalse(json.contains("\"day\""), "A week record carries no day")
+        XCTAssertEqual(try JSONDecoder().decode(ReviewDayRecord.self, from: Data(json.utf8)), week)
+
+        let webReminder = Data(#"{"kind":"reminder","enabled":false,"hour":8,"minute":5}"#.utf8)
+        let reminder = try JSONDecoder().decode(ReviewDayRecord.self, from: webReminder)
+        XCTAssertEqual(reminder, ReviewDayRecord(reminder: ReviewReminderSettings(enabled: false, hour: 8, minute: 5)))
+
+        let day = try JSONDecoder().decode(ReviewDayRecord.self, from: Data(#"{"day":"2026-11-12","mood":4,"text":"Ок"}"#.utf8))
+        XCTAssertEqual(day, ReviewDayRecord(day: "2026-11-12", mood: 4, text: "Ок"))
+        let dayJSON = try XCTUnwrap(String(data: JSONEncoder().encode(day), encoding: .utf8))
+        XCTAssertFalse(dayJSON.contains("kind"), "Day records keep their old shape")
+    }
+
+    func testSavedWeekAndReminderLandInTheCollection() {
+        let vault = collection()
+        let s = store(vault)
+        XCTAssertTrue(s.saveWeek(containing: "2026-11-12", ratings: ["health": 7]))
+        XCTAssertEqual(vault.item("w-2026-11-09")?.data?.ratings, ["health": 7])
+        XCTAssertEqual(s.week(containing: "2026-11-12")?.ratings, ["health": 7])
+        XCTAssertEqual(s.weeks.map(\.weekStart), [monday])
+        let custom = ReviewReminderSettings(enabled: true, hour: 22, minute: 30)
+        XCTAssertTrue(s.setReminder(custom))
+        XCTAssertEqual(s.reminder, custom)
+        XCTAssertEqual(vault.item(ReviewVault.reminderRecordID)?.data, ReviewDayRecord(reminder: custom))
+    }
+
+    func testLocalWeeksAndReminderMoveIntoTheCollectionAfterABackup() throws {
+        let s = store(nil)
+        XCTAssertTrue(s.saveWeek(containing: "2026-11-12", ratings: ["health": 6]))
+        let custom = ReviewReminderSettings(enabled: true, hour: 20, minute: 15)
+        XCTAssertTrue(s.setReminder(custom))
+        let vault = collection()
+        s.setCollection(vault)
+        XCTAssertEqual(vault.item("w-2026-11-09")?.data?.ratings, ["health": 6])
+        XCTAssertEqual(vault.item(ReviewVault.reminderRecordID)?.data, ReviewDayRecord(reminder: custom))
+        XCTAssertEqual(s.reminder, custom)
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.appendingPathComponent("files").path)
+        XCTAssertTrue(files.contains { $0.hasSuffix("pre-sync-backup.json") }, "Backup of the local file is taken before moving data")
+        s.setCollection(vault)
+        XCTAssertEqual(vault.items.filter { $0.data?.kind == "week" }.count, 1, "Moving again changes nothing")
+    }
+
+    func testANewerWeekFromAnotherDeviceWinsOverALocalOne() {
+        clock = 5_000
+        let s = store(nil)
+        XCTAssertTrue(s.saveWeek(containing: "2026-11-12", ratings: ["health": 3]))
+        let vault = collection()
+        vault.put("w-2026-11-09", ReviewDayRecord(week: WeekReview(weekStart: monday, ratings: ["health": 9], updatedAt: 9_000)), updatedAt: 9_000)
+        s.setCollection(vault)
+        XCTAssertEqual(s.week(containing: monday)?.ratings, ["health": 9])
+        XCTAssertEqual(vault.item("w-2026-11-09")?.data?.ratings, ["health": 9])
+    }
+
+    func testReminderCopiesFromConflictsCollapseToTheNewest() {
+        let vault = collection()
+        let s = store(vault)
+        vault.put(ReviewVault.reminderRecordID, ReviewDayRecord(reminder: ReviewReminderSettings(enabled: true, hour: 21, minute: 0)), updatedAt: 100)
+        vault.put("rcopy0000000000002", ReviewDayRecord(reminder: ReviewReminderSettings(enabled: true, hour: 7, minute: 45)), updatedAt: 300)
+        s.setCollection(vault)
+        XCTAssertEqual(s.reminder.timeText, "07:45")
+        XCTAssertEqual(vault.items.filter { $0.data?.kind == "reminder" }.count, 1)
+        XCTAssertEqual(vault.item(ReviewVault.reminderRecordID)?.data, ReviewDayRecord(reminder: ReviewReminderSettings(enabled: true, hour: 7, minute: 45)))
+    }
+
+    func testAReminderChangedElsewhereIsReported() {
+        let vault = collection()
+        let s = store(vault)
+        var seen: [ReviewReminderSettings] = []
+        s.onReminderChanged = { seen.append($0) }
+        s.setCollection(vault)
+        vault.put(ReviewVault.reminderRecordID, ReviewDayRecord(reminder: ReviewReminderSettings(enabled: true, hour: 6, minute: 30)), updatedAt: 500)
+        s.setCollection(vault)
+        XCTAssertEqual(seen.map(\.timeText), ["06:30"])
+    }
 }

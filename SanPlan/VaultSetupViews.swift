@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Shown in place of encrypted sections until this device holds the account's data key.
+/// Shown in place of encrypted sections until this device holds the account's data key. The server holds the key,
+/// so signing in is enough; the only thing ever asked is the one-time transfer of an older recovery key.
 struct VaultGateView: View {
     @ObservedObject var vault: VaultKeySession
     @Binding var showSettings: Bool
@@ -9,8 +10,6 @@ struct VaultGateView: View {
     @State private var recoveryText = ""
     @State private var recoveryError: String?
     @State private var isWorking = false
-    @State private var savedConfirmed = false
-    @State private var copied = false
 
     var body: some View {
         ZStack {
@@ -37,74 +36,21 @@ struct VaultGateView: View {
         case .idle, .checking, .ready:
             HStack(spacing: DS.Metrics.spacing12) {
                 ProgressView().tint(DS.Colors.accent)
-                Text("Проверяем ключ шифрования…").foregroundColor(DS.Colors.textSecondary)
+                Text("Открываем данные аккаунта…").foregroundColor(DS.Colors.textSecondary)
             }
             .padding(.top, DS.Metrics.spacing24)
-        case .needsSetup:
-            if let key = vault.pendingRecoveryKey {
-                showKey(key)
-            } else {
-                setupIntro
-            }
-        case .needsRecovery:
-            recovery
+        case .needsTransfer:
+            transfer
         case .failed(let message):
             ErrorBanner(message: message)
             PillButton("Повторить", style: .secondary) { Task { await vault.check() } }
         }
     }
 
-    private var setupIntro: some View {
+    private var transfer: some View {
         Card {
-            SectionHeader("Шифрование заметок")
-            Text("Заметки шифруются на этом телефоне. Сервер хранит только зашифрованный текст и не может его прочитать.")
-                .foregroundColor(DS.Colors.textPrimary)
-            Text("Для входа на другом устройстве понадобится ключ восстановления. Он появится на следующем шаге.")
-                .font(.subheadline)
-                .foregroundColor(DS.Colors.textSecondary)
-            PillButton("Создать ключ", icon: "key") { vault.beginSetup() }
-        }
-    }
-
-    private func showKey(_ key: String) -> some View {
-        Card {
-            SectionHeader("Ключ восстановления")
-            Text("Сохраните его в менеджере паролей или запишите. Без ключа заметки не открыть на новом устройстве — даже нам.")
-                .font(.subheadline)
-                .foregroundColor(DS.Colors.textSecondary)
-            Text(key.replacingOccurrences(of: "-", with: " "))
-                .font(.system(.title3, design: .monospaced).weight(.medium))
-                .foregroundColor(DS.Colors.textPrimary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(DS.Metrics.spacing16)
-                .background(DS.Colors.surfaceRaised)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .accessibilityLabel("Ключ восстановления: \(key.map { String($0) }.joined(separator: " "))")
-            PillButton(copied ? "Скопировано" : "Скопировать", icon: copied ? "checkmark" : "doc.on.doc", style: .secondary) {
-                // Local only and short-lived, so the key does not travel to other devices or stay on the clipboard.
-                UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: key]], options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)])
-                copied = true
-            }
-            Toggle(isOn: $savedConfirmed) {
-                Text("Я сохранил ключ").foregroundColor(DS.Colors.textPrimary)
-            }
-            .tint(DS.Colors.accent)
-            .frame(minHeight: DS.Metrics.minHitTarget)
-            PillButton("Готово", isLoading: isWorking, isEnabled: savedConfirmed) {
-                isWorking = true
-                Task {
-                    await vault.confirmSetup()
-                    isWorking = false
-                }
-            }
-        }
-    }
-
-    private var recovery: some View {
-        Card {
-            SectionHeader("Введите ключ восстановления")
-            Text("Заметки этого аккаунта зашифрованы. Ключ показывался при первой настройке на другом устройстве: 32 знака, буквы и цифры.")
+            SectionHeader("Перенос данных в аккаунт")
+            Text("Данные этого аккаунта были зашифрованы ключом восстановления. Введите его один раз — дальше они открываются входом через Google на любом устройстве.")
                 .font(.subheadline)
                 .foregroundColor(DS.Colors.textSecondary)
             TextField("XXXX XXXX XXXX XXXX XXXX XXXX XXXX XXXX", text: $recoveryText, axis: .vertical)
@@ -122,7 +68,7 @@ struct VaultGateView: View {
             if let recoveryError {
                 Text(recoveryError).font(.footnote).foregroundColor(DS.Colors.destructive)
             }
-            PillButton("Открыть заметки", isLoading: isWorking, isEnabled: !recoveryText.trimmingCharacters(in: .whitespaces).isEmpty) {
+            PillButton("Перенести данные", isLoading: isWorking, isEnabled: !recoveryText.trimmingCharacters(in: .whitespaces).isEmpty) {
                 isWorking = true
                 Task {
                     recoveryError = await vault.restore(recoveryText: recoveryText)
@@ -178,7 +124,7 @@ struct CaptureSheet: View {
                         Text(error).font(.footnote).foregroundColor(DS.Colors.destructive)
                     }
                     if !notes.isAvailable {
-                        Text("Заметки откроются после настройки шифрования во вкладке «Заметки». Запись можно сделать планом или тратой.")
+                        Text("Заметки откроются после входа в аккаунт. Запись можно сделать планом или тратой.")
                             .font(.footnote)
                             .foregroundColor(DS.Colors.textSecondary)
                     }

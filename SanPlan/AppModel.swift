@@ -20,8 +20,13 @@ public final class AppModel: ObservableObject {
     public let reviewsVault = VaultCollection<ReviewDayRecord>(collection: "reviews", policy: .copy, idPrefix: "r")
     public let habitsVault = VaultCollection<HabitPayload>(collection: "habits", policy: .newest, idPrefix: "h")
     public let goalsVault = VaultCollection<GoalPayload>(collection: "goals", policy: .newest, idPrefix: "g")
+    /// Settings shared by every device of the account: plan drafts, rest sound, the first-run tour flag (SettingsPayload.swift).
+    public let settingsVault = VaultCollection<SettingsPayload>(collection: "settings", policy: .newest, idPrefix: "s")
+    public let appSettings = AppSettingsStore()
     /// Day and week reviews; shared by «Сегодня» and the spheres screen in Plans.
     public let reviews = ReviewStore()
+    /// Polls the server's change counters while the app is in front, so another device's edits arrive within seconds.
+    public let liveSync: VaultLiveSync
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -92,6 +97,21 @@ public final class AppModel: ObservableObject {
         }
         let notes = self.notes
         notes.onUnauthorized = { auth.signedOutLocally() }
+        let client = auth.client
+        let live = VaultLiveSync(
+            stamps: { try await HTTPVaultTransport(client: client).stamps() },
+            canPoll: { [weak vault] in
+                guard let vault, case .signedIn = auth.phase else { return false }
+                return vault.phase == .ready
+            },
+            onPlansMoved: { [plans = self.plans] in Task { await plans.reload() } }
+        )
+        self.liveSync = live
+        for target in [notes, self.financeVault, self.trainingVault, self.reviewsVault, self.habitsVault, self.goalsVault, self.settingsVault] as [any VaultSyncable] {
+            live.register(target)
+        }
+        // The reminder time was changed on another device: the local notification follows it.
+        self.reviews.onReminderChanged = { settings in Task { await ReviewReminder.apply(settings) } }
         vault.onReady = { [weak vault] in
             guard let vault, let account = vault.account, let key = vault.dataKey else { return }
             notes.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
@@ -105,6 +125,9 @@ public final class AppModel: ObservableObject {
                 HabitStore.shared.attach(collection: self.habitsVault)
                 self.goalsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
                 GoalStore.shared.attach(collection: self.goalsVault)
+                self.settingsVault.attach(account: account, key: key, transport: HTTPVaultTransport(client: auth.client))
+                self.plans.attachDrafts(collection: self.settingsVault, account: account)
+                self.appSettings.setCollection(self.settingsVault)
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -140,6 +163,7 @@ public final class AppModel: ObservableObject {
         notes.detach()
         detachCollections()
         vault.reset()
+        liveSync.reset()
         plans.resetForSignOut()
         finance.switchOwner(to: .none)
         workouts.switchOwner(to: .none)
@@ -160,7 +184,10 @@ public final class AppModel: ObservableObject {
             notes.detach()
             detachCollections()
             vault.attach(account: email, transport: HTTPVaultTransport(client: auth.client))
+            // The server's key wins over the cached one: ask on every start.
+            Task { await vault.check() }
         }
+        liveSync.start()
         let next = FinanceStore.Owner.account(email)
         workouts.switchOwner(to: next)
         HabitStore.shared.switchOwner(to: next)
@@ -184,6 +211,9 @@ public final class AppModel: ObservableObject {
         habitsVault.detach()
         GoalStore.shared.detach()
         goalsVault.detach()
+        plans.detachDrafts()
+        appSettings.setCollection(nil)
+        settingsVault.detach()
     }
 
     /// Days with a real action in every section (DOMAINS.md §2), for the app streak; habit marks are added by HabitStore.
@@ -207,12 +237,19 @@ public final class AppModel: ObservableObject {
         await alarms.reconcileWithSystem()
     }
 
+    /// The app left the foreground: no polling until it is back.
+    public func becameInactive() {
+        liveSync.stop()
+    }
+
     public func becameActive() {
         finance.reloadIfUnavailable()
         workouts.reloadIfUnavailable()
         workouts.reconcileClock()
         if case .signedIn = auth.phase {
             Task { await plans.reload() }
+            Task { await vault.check() }
+            liveSync.start()
             notes.syncNow()
             // Another device may have changed money, workouts, reviews or habits while ARNA was in the background.
             financeVault.syncNow()
@@ -220,6 +257,7 @@ public final class AppModel: ObservableObject {
             reviewsVault.syncNow()
             habitsVault.syncNow()
             goalsVault.syncNow()
+            settingsVault.syncNow()
         }
     }
 }

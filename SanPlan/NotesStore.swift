@@ -37,6 +37,8 @@ public final class NotesStore: ObservableObject {
     private var syncAgain = false
     /// Bumped on every account change, so a sync started for one account never writes into another.
     private var generation = 0
+    /// Highest server `seq` received; live sync asks only for records after it (0: everything).
+    public private(set) var syncCursor = 0
     private let fileManager: FileManager
     private let baseDirectory: URL
     private let now: () -> Int64
@@ -90,6 +92,7 @@ public final class NotesStore: ObservableObject {
         all = [:]
         recentlyDeleted = nil
         unreadableCount = 0
+        syncCursor = 0
         syncState = .idle
         isSyncing = false
         syncAgain = false
@@ -159,6 +162,9 @@ public final class NotesStore: ObservableObject {
     // MARK: Sync
 
     public func syncNow() { scheduleSync(after: .zero) }
+
+    /// The counter stayed ahead of every record we received (a write that lost its conflict): stop waiting for it.
+    public func advanceCursor(to stamp: Int) { syncCursor = max(syncCursor, stamp) }
 
     private func scheduleSync(after delay: Duration) {
         guard transport != nil else { return }
@@ -237,17 +243,21 @@ public final class NotesStore: ObservableObject {
     }
 
     private func pull(key: SymmetricKey, transport: any VaultTransport, generation started: Int) async throws {
-        let remote = try await transport.list(Self.collection)
+        let full = syncCursor <= 0
+        let listing = try await transport.list(Self.collection, since: full ? nil : syncCursor)
         guard generation == started else { return }
         var unreadable = 0
-        for record in remote {
+        var highest = syncCursor
+        for record in listing.records {
+            if let seq = record.seq { highest = max(highest, seq) }
             let local = cache[record.id]
             if let local, local.dirty || local.revision >= record.revision { continue }
             guard let note = try? open(record, key: key) else { unreadable += 1; continue }
             cache[record.id] = CacheEntry(revision: record.revision, c: record.c, dirty: false)
             all[record.id] = note
         }
-        unreadableCount = unreadable
+        syncCursor = highest
+        if full { unreadableCount = unreadable } else { unreadableCount += unreadable }
         saveCache()
     }
 
@@ -272,11 +282,13 @@ public final class NotesStore: ObservableObject {
         guard let fileURL, let key else { return }
         guard let data = try? Data(contentsOf: fileURL),
               let stored = try? JSONDecoder().decode([String: CacheEntry].self, from: data) else { return }
-        cache = stored
         var notes: [String: Note] = [:]
+        var kept = stored
         for (id, entry) in stored {
-            if let note = try? open(id: id, c: entry.c, key: key) { notes[id] = note }
+            if let note = try? open(id: id, c: entry.c, key: key) { notes[id] = note } else { kept[id] = nil }
         }
+        // Entries sealed under another key are dropped; the next sync fetches them again.
+        cache = kept
         all = notes
     }
 
