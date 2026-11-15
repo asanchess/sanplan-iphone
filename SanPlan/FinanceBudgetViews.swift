@@ -443,7 +443,8 @@ struct FinanceOverviewTab: View {
     @ViewBuilder
     private var setAsideCard: some View {
         let offers = FinanceBudgeting.setAsideOffers(store.state, today: today)
-        if !offers.isEmpty {
+        let freeOffer = FinanceBudgeting.freeBalanceOffer(store.state, today: today)
+        if !offers.isEmpty || freeOffer != nil {
             let goal = FinanceEnvelopes.savingsGoal(store.state)
             Card {
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
@@ -456,6 +457,9 @@ struct FinanceOverviewTab: View {
                     }
                     ForEach(offers.prefix(3)) { offer in
                         SetAsideOfferRow(offer: offer, goal: goal, apply: apply)
+                    }
+                    if let freeOffer {
+                        FreeOfferRow(offer: freeOffer, goal: goal, apply: apply)
                     }
                 }
             }
@@ -508,6 +512,44 @@ struct HintRow: View {
                 .foregroundColor(DS.Colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+}
+
+/// «Свободно» — деньги на счетах, которых не ждут ни накопления, ни платежи плана этого месяца. Предлагается не больше трети.
+struct FreeOfferRow: View {
+    let offer: FreeBalanceOffer
+    let goal: FinanceRecord?
+    let apply: FinanceApply
+
+    var body: some View {
+        let amount = offer.suggestedMinor
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            Text("Свободно (FinanceText.money(offer.freeMinor)) после накоплений и платежей плана")
+                .font(.subheadline)
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(2)
+            if let goal, FinanceEnvelopes.room(goal) < amount {
+                Text("Цель «(goal.title)» вырастет до (FinanceText.money((goal.savedMinor ?? 0) + amount)).")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            HStack(spacing: DS.Metrics.spacing12) {
+                if let goal {
+                    PillButton("Отложить (FinanceText.money(amount))", style: .primary) {
+                        apply("Отложено (FinanceText.money(amount)) в «(goal.title)».") {
+                            let saved = try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, raiseTarget: true)
+                            return try FinanceBudgeting.answerFreeOffer(saved, month: offer.month)
+                        }
+                    }
+                }
+                PillButton("Не сейчас", style: .secondary) {
+                    apply(nil) { try FinanceBudgeting.answerFreeOffer($0, month: offer.month) }
+                }
+            }
+        }
+        .padding(12)
+        .background(DS.Colors.surfaceRaised)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
     }
 }
 

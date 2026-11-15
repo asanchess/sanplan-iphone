@@ -26,6 +26,8 @@ public struct FinanceBudget: Codable, Equatable {
     /// Payments marked paid without an operation: «obligationId|yyyy-MM» for a monthly one,
     /// «obligationId|yyyy-MM-dd» for one weekly charge.
     public var manualPaid: [String]?
+    /// Months in which the offer to set aside from the free balance was answered, accepted or not.
+    public var freeOfferMonths: [String]?
 
     public init(
         limits: [String: Int64]? = nil,
@@ -36,7 +38,8 @@ public struct FinanceBudget: Codable, Equatable {
         dismissedMatches: [String]? = nil,
         handledIncomes: [String]? = nil,
         reviewedMonths: [String]? = nil,
-        manualPaid: [String]? = nil
+        manualPaid: [String]? = nil,
+        freeOfferMonths: [String]? = nil
     ) {
         self.limits = limits
         self.savePercent = savePercent
@@ -47,6 +50,7 @@ public struct FinanceBudget: Codable, Equatable {
         self.handledIncomes = handledIncomes
         self.reviewedMonths = reviewedMonths
         self.manualPaid = manualPaid
+        self.freeOfferMonths = freeOfferMonths
     }
 
     static let maxLimits = 64
@@ -88,6 +92,7 @@ public struct FinanceBudget: Codable, Equatable {
         }
         out.handledIncomes = answers(b.handledIncomes) { ids.contains($0) }
         out.reviewedMonths = answers(b.reviewedMonths) { isValidMonthString($0) }
+        out.freeOfferMonths = answers(b.freeOfferMonths) { isValidMonthString($0) }
         out.manualPaid = answers(b.manualPaid) { mark in
             let parts = mark.split(separator: "|").map(String.init)
             return parts.count == 2 && obligations.contains(parts[0]) && (isValidMonthString(parts[1]) || isValidDateString(parts[1]))
@@ -164,6 +169,13 @@ public struct PaymentMatch: Equatable, Identifiable {
     public let recordTitle: String
     public let amountMinor: Int64
     public let date: String
+}
+
+/// An offer to set aside part of what is free: on the accounts, not in envelopes, not owed to the plan this month.
+public struct FreeBalanceOffer: Equatable {
+    public let freeMinor: Int64
+    public let suggestedMinor: Int64
+    public let month: String
 }
 
 public struct SetAsideOffer: Equatable, Identifiable {
@@ -523,6 +535,34 @@ public enum FinanceBudgeting {
                 guard suggested > 0 else { return nil }
                 return SetAsideOffer(incomeId: r.id, incomeTitle: r.merchant ?? r.title, incomeMinor: amount, suggestedMinor: suggested, date: r.date ?? today)
             }
+    }
+
+    /// The free balance must be at least this much before anything is offered.
+    public static let freeOfferThresholdMinor: Int64 = 10_000 * oneTenge
+
+    /// A third of what is free, rounded down to 1 000 ₸; nothing below the threshold or when the third is under 1 000 ₸.
+    public static func freeOfferAmount(freeMinor: Int64) -> Int64 {
+        guard freeMinor >= freeOfferThresholdMinor else { return 0 }
+        let step = 1000 * oneTenge
+        let amount = freeMinor / 3 / step * step
+        return amount >= step ? amount : 0
+    }
+
+    /// Free = on the accounts − envelopes − payments of the plan not yet paid this month (the limits are not taken out).
+    /// Offered once a month; nil without a known balance, below the threshold or after an answer.
+    public static func freeBalanceOffer(_ state: FinanceState, today: String) -> FreeBalanceOffer? {
+        let month = String(today.prefix(7))
+        guard !(state.budget?.freeOfferMonths ?? []).contains(month),
+              let summary = try? financeSummary(state, today: today),
+              let balance = summary.balanceMinor else { return nil }
+        let free = balance - summary.reservedGoalMinor - summary.obligationsMinor
+        let amount = freeOfferAmount(freeMinor: free)
+        return amount > 0 ? FreeBalanceOffer(freeMinor: free, suggestedMinor: amount, month: month) : nil
+    }
+
+    /// Remembers that this month's free-balance offer was answered.
+    public static func answerFreeOffer(_ state: FinanceState, month: String) throws -> FinanceState {
+        try updateBudget(state) { $0.freeOfferMonths = ($0.freeOfferMonths ?? []) + [month] }
     }
 
     /// Moves money into an envelope. Nothing moves in the bank; the amount only stops being «Чистыми».

@@ -150,4 +150,42 @@ final class FinanceSwipeTests: XCTestCase {
         XCTAssertEqual(MoneyFormat.legendShare(amountMinor: 1_250_00, totalMinor: 5_000_00), "25% · 1 250 ₸")
         XCTAssertEqual(MoneyFormat.legendShare(amountMinor: 100, totalMinor: 0), "0% · 1 ₸")
     }
+
+    // Предложение отложить со свободного (зеркало freeBalanceOffer в src/finance-summary.mjs).
+    func testFreeOfferAmountThresholdAndRounding() {
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: 9_999_00), 0)
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: 10_000_00 - 1), 0)
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: 10_000_00), 3_000_00)
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: 17_999_00), 5_000_00)
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: 30_000_00), 10_000_00)
+        XCTAssertEqual(FinanceBudgeting.freeOfferAmount(freeMinor: -5_000_00), 0)
+    }
+
+    func testFreeOfferSubtractsPlanAndEnvelopes() throws {
+        let rent = FinanceRecord(id: "rent", kind: "obligation", title: "Аренда", amountMinor: 40_000_00, date: "2026-09-01", frequency: "monthly")
+        let bal = FinanceRecord(id: "b", kind: "balance", title: "Остаток", amountMinor: 60_000_00, date: "2026-11-01")
+        let offer = try XCTUnwrap(FinanceBudgeting.freeBalanceOffer(state([bal, rent]), today: "2026-11-10"))
+        XCTAssertEqual(offer.freeMinor, 20_000_00)
+        XCTAssertEqual(offer.suggestedMinor, 6_000_00)
+        let goal = FinanceRecord(id: "g", kind: "goal", title: "Цель", amountMinor: 100_000_00, savedMinor: 45_000_00)
+        XCTAssertEqual(FinanceBudgeting.freeBalanceOffer(state([bal, goal]), today: "2026-11-10")?.suggestedMinor, 5_000_00)
+        XCTAssertNil(FinanceBudgeting.freeBalanceOffer(state([FinanceRecord(id: "b", kind: "balance", title: "Остаток", amountMinor: 30_000_00, date: "2026-11-01"), rent]), today: "2026-11-10"))
+        XCTAssertNil(FinanceBudgeting.freeBalanceOffer(state([]), today: "2026-11-10"))
+    }
+
+    func testFreeOfferWeeklyPaymentsAndMonthEnd() throws {
+        let bal = FinanceRecord(id: "b", kind: "balance", title: "Остаток", amountMinor: 60_000_00, date: "2026-11-01")
+        let gym = FinanceRecord(id: "gym", kind: "obligation", title: "Зал", amountMinor: 1_000_00, date: "2026-11-02", frequency: "weekly")
+        XCTAssertEqual(FinanceBudgeting.freeBalanceOffer(state([bal, gym]), today: "2026-11-10")?.freeMinor, 57_000_00)
+        XCTAssertEqual(FinanceBudgeting.freeBalanceOffer(state([bal, gym]), today: "2026-11-30")?.freeMinor, 59_000_00)
+    }
+
+    func testFreeOfferAnsweredOncePerMonth() throws {
+        let bal = FinanceRecord(id: "b", kind: "balance", title: "Остаток", amountMinor: 60_000_00, date: "2026-11-01")
+        let s = state([bal])
+        XCTAssertNotNil(FinanceBudgeting.freeBalanceOffer(s, today: "2026-11-10"))
+        let answered = try FinanceBudgeting.answerFreeOffer(s, month: "2026-11")
+        XCTAssertNil(FinanceBudgeting.freeBalanceOffer(answered, today: "2026-11-20"))
+        XCTAssertNotNil(FinanceBudgeting.freeBalanceOffer(answered, today: "2026-12-01"))
+    }
 }
