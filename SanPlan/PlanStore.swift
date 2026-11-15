@@ -106,6 +106,23 @@ public final class PlanStore: ObservableObject {
         }
     }
 
+    /// Opens a saved plan for editing: a draft with the same id, which «Сохранить планы» writes over the saved one.
+    public func beginEdit(_ item: PlanItem) {
+        if !draftPlans.contains(where: { $0.id == item.id }) {
+            draftPlans.insert(PlanDomain.withDefaultReminders(item), at: 0)
+        }
+        editingPlanId = item.id
+    }
+
+    /// Done tasks and past events, newest first.
+    public var completedAgenda: [AgendaItem] {
+        PlanDomain.getCompletedItems(
+            plans: plans,
+            nowEpochMs: Int64(Date().timeIntervalSince1970 * 1000),
+            timeZone: timeZone
+        )
+    }
+
     public func removeDraft(id: String) {
         draftPlans.removeAll(where: { $0.id == id })
         conflictedDraftIds.remove(id)
@@ -444,6 +461,8 @@ public final class PlanStore: ObservableObject {
                 conflictedDraftIds.remove(draft.id)
                 continue
             }
+            // A draft copied from a saved plan (it carries savedAt) is an edit of that plan: keep its id so saving replaces it.
+            if draft.savedAt != nil { next.append(draft); continue }
             var renamed = draft
             renamed.id = UUID().uuidString
             if editingPlanId == draft.id { editingPlanId = renamed.id }

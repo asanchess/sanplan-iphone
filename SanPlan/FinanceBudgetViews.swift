@@ -524,19 +524,19 @@ struct FreeOfferRow: View {
     var body: some View {
         let amount = offer.suggestedMinor
         VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-            Text("Свободно (FinanceText.money(offer.freeMinor)) после накоплений и платежей плана")
+            Text("Свободно \(FinanceText.money(offer.freeMinor)) после накоплений и платежей плана")
                 .font(.subheadline)
                 .foregroundColor(DS.Colors.textPrimary)
                 .lineLimit(2)
             if let goal, FinanceEnvelopes.room(goal) < amount {
-                Text("Цель «(goal.title)» вырастет до (FinanceText.money((goal.savedMinor ?? 0) + amount)).")
+                Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + amount)).")
                     .font(.caption)
                     .foregroundColor(DS.Colors.textSecondary)
             }
             HStack(spacing: DS.Metrics.spacing12) {
                 if let goal {
-                    PillButton("Отложить (FinanceText.money(amount))", style: .primary) {
-                        apply("Отложено (FinanceText.money(amount)) в «(goal.title)».") {
+                    PillButton("Отложить \(FinanceText.money(amount))", style: .primary) {
+                        apply("Отложено \(FinanceText.money(amount)) в «\(goal.title)».") {
                             let saved = try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, raiseTarget: true)
                             return try FinanceBudgeting.answerFreeOffer(saved, month: offer.month)
                         }
