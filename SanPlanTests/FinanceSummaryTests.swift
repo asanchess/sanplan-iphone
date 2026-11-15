@@ -144,4 +144,10 @@ final class FinanceSwipeTests: XCTestCase {
     func testRecategorizeUnknownRecordThrows() {
         XCTAssertThrowsError(try StatementImport.recategorize("zzz", to: "Кафе", in: FinanceState(records: [])))
     }
+
+    func testLegendShareShowsPercentAndAmount() {
+        XCTAssertEqual(MoneyFormat.legendShare(amountMinor: 48_000_00, totalMinor: 240_000_00), "20% · 48 000 ₸")
+        XCTAssertEqual(MoneyFormat.legendShare(amountMinor: 1_250_00, totalMinor: 5_000_00), "25% · 1 250 ₸")
+        XCTAssertEqual(MoneyFormat.legendShare(amountMinor: 100, totalMinor: 0), "0% · 1 ₸")
+    }
 }

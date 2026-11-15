@@ -175,6 +175,19 @@ final class ReviewDomainTests: XCTestCase {
         XCTAssertEqual(ReviewFormat.plural(21, "трата", "траты", "трат"), "21 трата")
     }
 
+    /// Regression (phone check 14.11): the line printed the source text «(ReviewFormat.tenge(amount * 100))» instead of the sum.
+    func testCanSpendLineTitleShowsTheSumInTengeNotCode() {
+        let title = CanSpendLine.title(amount: 5000)
+        XCTAssertTrue(title.hasPrefix("Можно потратить сегодня: "))
+        XCTAssertTrue(title.hasSuffix(" ₸"))
+        XCTAssertFalse(title.contains("ReviewFormat"))
+        XCTAssertFalse(title.contains("("))
+        let digits = title.filter(\.isNumber)
+        XCTAssertEqual(digits, "5000")
+        XCTAssertEqual(CanSpendLine.title(amount: 0).filter(\.isNumber), "0")
+        XCTAssertEqual(CanSpendLine.title(amount: 1_250_000).filter(\.isNumber), "1250000")
+    }
+
     func testCanSpendLinePicksAmountGapOrNothing() {
         XCTAssertEqual(CanSpendLine.make(spend: CanSpendToday(amount: 5000, basis: "b"), gap: nil, hasData: true), .amount(5000, basis: "b"))
         XCTAssertEqual(CanSpendLine.make(spend: nil, gap: "Задайте лимиты", hasData: true), .gap("Задайте лимиты"))

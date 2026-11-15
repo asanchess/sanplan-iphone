@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Home: one card each for money, plans and workout, each with a direct way in.
+/// Home. Blocks in order: day review · plans · habits · goals · pinned notes · money · workout.
+/// Each block is 1–2 lines and opens its section; habits, goals, notes and workout are hidden while empty (`TodaySummary`).
 public struct TodayScreen: View {
     @ObservedObject var plans: PlanStore
     @ObservedObject var finance: FinanceStore
@@ -18,11 +19,14 @@ public struct TodayScreen: View {
     var dictation: SpeechDictation? = nil
     /// Opens Plans → «Цели»; nil: just switches to the Plans tab.
     var onOpenGoals: (() -> Void)? = nil
+    /// Opens Plans → «Привычки»; nil: just switches to the Plans tab.
+    var onOpenHabits: (() -> Void)? = nil
     /// Grows when the day-review reminder is tapped (ReviewNotifications); opens the day review.
     var reviewRequest: Int = 0
     /// Owned by AppModel so Plans (spheres) sees the same week ratings.
     @ObservedObject var review: ReviewStore
     @ObservedObject private var goals = GoalStore.shared
+    @ObservedObject private var habitStore = HabitStore.shared
     @State private var reviewSheet: ReviewSheet?
     @State private var isShowingAlarms = false
 
@@ -48,11 +52,13 @@ public struct TodayScreen: View {
                                 .foregroundColor(DS.Colors.textSecondary)
                                 .accessibilityLabel(line)
                         }
-                        weekGoalRow
                         reviewCard
-                        workoutCard
                         plansCard
+                        habitsCard
+                        goalsCard
+                        pinnedNotesCard
                         moneyCard
+                        workoutCard
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.vertical, DS.Metrics.spacing16)
@@ -86,34 +92,120 @@ public struct TodayScreen: View {
         .onChange(of: reviewsVault?.isAvailable) { _, _ in review.setCollection(reviewsVault) }
     }
 
+    /// Habits due today; the check button goes through `HabitStore.tap`, the same path as Plans → «Привычки».
     @ViewBuilder
-    private var weekGoalRow: some View {
-        if let pair = goals.weekGoal(today: reviewDay),
-           let line = WeekGoalLine.make(title: pair.goal.title, progressText: pair.progress.text, fraction: pair.progress.fraction, achieved: pair.progress.achieved) {
-            Button {
-                if let onOpenGoals { onOpenGoals() } else { selectedTab = .plans }
-            } label: {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                    Text("Цель недели").font(.footnote).foregroundColor(DS.Colors.textSecondary)
-                    Text(line.title).font(.headline).foregroundColor(DS.Colors.textPrimary)
-                    if !line.text.isEmpty {
-                        Text(line.text).font(.subheadline).foregroundColor(DS.Colors.textSecondary)
-                    }
-                    if let fraction = line.fraction {
-                        ProgressView(value: fraction).accessibilityHidden(true)
+    private var habitsCard: some View {
+        if let block = HabitsSummary.make(habits: habitStore.habits, marks: habitStore.marks, day: reviewDay, context: habitStore.context) {
+            Card {
+                SectionHeader("Привычки")
+                ForEach(block.rows) { row in
+                    HStack(spacing: DS.Metrics.spacing12) {
+                        Button {
+                            if let habit = habitStore.habits.first(where: { $0.id == row.id }) { habitStore.tap(habit, on: reviewDay) }
+                        } label: {
+                            Image(systemName: row.done ? "checkmark.circle.fill" : "circle")
+                                .font(.title2)
+                                .foregroundColor(row.done ? DS.Colors.accent : DS.Colors.textSecondary)
+                                .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(row.auto)
+                        .accessibilityLabel(row.title)
+                        .accessibilityValue(row.done ? "выполнено" : "не выполнено")
+                        .accessibilityHint(row.auto ? "Отмечается автоматически" : "Отметить")
+                        Button { openHabits() } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.title)
+                                    .font(.body)
+                                    .foregroundColor(row.done ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                                    .strikethrough(row.done)
+                                let caption = [row.detail, row.auto ? "авто" : ""].filter { !$0.isEmpty }.joined(separator: " · ")
+                                if !caption.isEmpty {
+                                    Text(caption).font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: DS.Metrics.minHitTarget)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Открыть привычки")
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(DS.Metrics.spacing12)
-                .frame(minHeight: DS.Metrics.minHitTarget)
-                .background(DS.Colors.surfaceRaised)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                let more = TodaySummary.moreText(block.more)
+                PillButton(more.isEmpty ? "\(block.done) из \(block.total)" : "\(block.done) из \(block.total) · \(more)", style: .secondary) { openHabits() }
             }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Цель недели: \(line.title). \(line.text)")
-            .accessibilityHint("Открыть цели")
         }
+    }
+
+    /// Two or three active goals; the week goal comes first (it replaces the old stand-alone «Цель недели» row).
+    @ViewBuilder
+    private var goalsCard: some View {
+        let weekId = goals.weekGoal(today: reviewDay)?.goal.id
+        if let block = GoalsSummary.make(goals: goals.goals, weekGoalId: weekId, progressOf: { goals.progress(for: $0, today: reviewDay) }) {
+            Card {
+                SectionHeader("Цели")
+                ForEach(block.rows) { row in
+                    Button { openGoals() } label: {
+                        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                            Text(row.isWeek ? "Цель недели · \(row.title)" : row.title)
+                                .font(.body)
+                                .foregroundColor(DS.Colors.textPrimary)
+                            if !row.text.isEmpty {
+                                Text(row.text).font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                            }
+                            if let fraction = row.fraction {
+                                ProgressView(value: fraction).accessibilityHidden(true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(row.isWeek ? "Цель недели: " : "")\(row.title). \(row.text)")
+                    .accessibilityHint("Открыть цели")
+                }
+                if block.more > 0 {
+                    Text(TodaySummary.moreText(block.more)).font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                }
+            }
+        }
+    }
+
+    /// Pinned notes are the favourites: no separate star. Tapping leads to the notes tab.
+    @ViewBuilder
+    private var pinnedNotesCard: some View {
+        if let block = PinnedNotesSummary.make(notes: notes?.notes ?? []) {
+            Card {
+                SectionHeader("Закреплённые заметки")
+                ForEach(block.rows) { row in
+                    Button { selectedTab = .notes } label: {
+                        Text(row.title)
+                            .font(.body)
+                            .foregroundColor(DS.Colors.textPrimary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: DS.Metrics.minHitTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Открыть заметки")
+                }
+                if block.more > 0 {
+                    Text(TodaySummary.moreText(block.more)).font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func openGoals() {
+        if let onOpenGoals { onOpenGoals() } else { selectedTab = .plans }
+    }
+
+    private func openHabits() {
+        if let onOpenHabits { onOpenHabits() } else { selectedTab = .plans }
     }
 
     private var reviewDay: String { PlanDomain.today(timeZone: plans.timeZone) }
@@ -191,7 +283,7 @@ public struct TodayScreen: View {
             switch CanSpendLine.make(spend: finance.canSpendToday(on: reviewDay), gap: finance.canSpendGap(on: reviewDay), hasData: !finance.state.records.isEmpty) {
             case .amount(let amount, let basis):
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Можно потратить сегодня: (ReviewFormat.tenge(amount * 100))")
+                    Text(CanSpendLine.title(amount: amount))
                         .font(.subheadline.weight(.medium))
                         .foregroundColor(DS.Colors.textPrimary)
                     Text(basis)
@@ -213,19 +305,36 @@ public struct TodayScreen: View {
         }
     }
 
+    /// The running session, else today's day of the program, else the nearest next one; hidden with no program and no session.
+    @ViewBuilder
     private var workoutCard: some View {
-        Card {
-            SectionHeader("Тренировка")
-            if let session = workouts.activeSession, session.phase != .complete {
-                Text(session.exercises[session.exerciseIndex].name)
-                    .font(.body)
-                    .foregroundColor(DS.Colors.textPrimary)
-                PillButton("Вернуться к тренировке", icon: "play.fill") { selectedTab = .workout }
-            } else {
-                Text(workouts.training?.days.isEmpty == false ? "Программа готова." : "Программа не задана.")
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-                PillButton(workouts.training?.days.isEmpty == false ? "Начать тренировку" : "Задать программу", style: .secondary) { selectedTab = .workout }
+        let session = workouts.activeSession.flatMap { $0.phase != .complete ? $0 : nil }
+        let name = session.map { $0.exercises.indices.contains($0.exerciseIndex) ? $0.exercises[$0.exerciseIndex].name : "" } ?? ""
+        let weekday = WorkoutProgram.weekday(of: Date(), timeZone: TimeZone(identifier: plans.timeZone) ?? .current)
+        if let line = WorkoutSummary.make(active: session != nil, currentName: name, days: workouts.training?.days ?? [], weekday: weekday) {
+            Card {
+                SectionHeader("Тренировка")
+                Button { selectedTab = .workout } label: {
+                    HStack {
+                        Text(line.title).font(.body).foregroundColor(DS.Colors.textPrimary)
+                        Spacer()
+                        Text(line.when).font(.footnote).foregroundColor(DS.Colors.textSecondary)
+                    }
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(line.title), \(line.when)")
+                .accessibilityHint("Открыть тренировку")
+                switch line.kind {
+                case .active:
+                    PillButton("Вернуться к тренировке", icon: "play.fill") { selectedTab = .workout }
+                case .today:
+                    PillButton("Начать тренировку", style: .secondary) { selectedTab = .workout }
+                case .next:
+                    EmptyView()
+                }
             }
         }
     }

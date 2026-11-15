@@ -371,13 +371,14 @@ public final class AlarmCoordinator: ObservableObject {
             }
         }
 
-        // 4. Обновление изменившихся будильников (переименование)
+        // 4. Обновление изменившихся будильников (переименование, смена звука)
+        let soundChanged = PlanAlarmSound.changed(store: userDefaults)
         for uuidString in existingUUIDs {
             if deleteAllRequested { break }
             guard let alarm = desiredMap[UUID(uuidString: uuidString)!],
                   let existing = currentRecords[uuidString] else { continue }
 
-            if existing.title != alarm.planTitle || existing.eventDate == nil || existing.timeZone != alarm.timeZone {
+            if existing.title != alarm.planTitle || existing.eventDate == nil || existing.timeZone != alarm.timeZone || soundChanged {
                 guard let alarmUUID = UUID(uuidString: uuidString) else { continue }
                 do {
                     try await service.cancel(id: alarmUUID)
@@ -426,6 +427,7 @@ public final class AlarmCoordinator: ObservableObject {
             }
         }
 
+        if currentErrors.isEmpty { PlanAlarmSound.markApplied(store: userDefaults) }
         saveRegistry(registry)
         updatePublishedState(from: registry)
         lastSyncDate = Date()
@@ -471,7 +473,7 @@ public final class AlarmCoordinator: ObservableObject {
         let configuration = AlarmManager.AlarmConfiguration<SanPlanAlarmMetadata>.alarm(
             schedule: .fixed(fireDate),
             attributes: attributes,
-            sound: .default
+            sound: PlanAlarmSound.alertSound()
         )
 
         do {

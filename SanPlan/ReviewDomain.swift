@@ -395,6 +395,9 @@ public enum CanSpendLine: Equatable {
     case amount(Int64, basis: String)
     case gap(String)
 
+    /// The line on «Сегодня»: `amount` is whole tenge (as in `CanSpendToday.amount`), shown like the web: «Можно потратить сегодня: 5 000 ₸».
+    public static func title(amount: Int64) -> String { "Можно потратить сегодня: \(ReviewFormat.tenge(amount * 100))" }
+
     public static func make(spend: CanSpendToday?, gap: String?, hasData: Bool) -> CanSpendLine? {
         if let spend { return .amount(spend.amount, basis: spend.basis) }
         if hasData, let gap { return .gap(gap) }

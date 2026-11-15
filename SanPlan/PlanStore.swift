@@ -17,6 +17,8 @@ public final class PlanStore: ObservableObject {
     }
     @Published public var editingPlanId: String? = nil
     @Published public var isLoading: Bool = false
+    /// True once the account's saved plans have been read at least once; before that an empty list means «unknown», not «none».
+    public private(set) var hasLoadedPlans = false
     @Published public var isParsing: Bool = false
     @Published public var errorMessage: String? = nil
     @Published public var pendingTaskIds: Set<String> = []
@@ -126,6 +128,7 @@ public final class PlanStore: ObservableObject {
         remoteEvents = []
         upcomingEvents = []
         loadedRange = nil
+        hasLoadedPlans = false
         errorMessage = nil
         pendingTaskIds = []
         googlePendingId = nil
@@ -150,6 +153,7 @@ public final class PlanStore: ObservableObject {
         do {
             let loaded = try await PlanAPI.getPlans(client: client)
             guard started == generation else { return }
+            hasLoadedPlans = true
             // A save or alarm change that landed meanwhile already holds the newer list.
             if revisionAtStart == plansRevision {
                 plans = loaded

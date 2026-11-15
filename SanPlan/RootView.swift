@@ -38,6 +38,7 @@ public struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .today
     @State private var goalsRequest = 0
+    @State private var habitsRequest = 0
     @StateObject private var onboarding = OnboardingModel()
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
@@ -223,6 +224,7 @@ public struct RootView: View {
                     appStreak: { [model] day in model.appStreak(today: day) },
                     dictation: model.dictation,
                     onOpenGoals: { selectedTab = .plans; goalsRequest += 1 },
+                    onOpenHabits: { selectedTab = .plans; habitsRequest += 1 },
                     reviewRequest: reviewNotifications.dayReviewRequests,
                     review: model.reviews
                 )
@@ -242,7 +244,8 @@ public struct RootView: View {
                     streakSources: model.streakSources,
                     savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
                     weekRatings: model.reviews.weeks,
-                    goalsRequest: goalsRequest
+                    goalsRequest: goalsRequest,
+                    habitsRequest: habitsRequest
                 )
                 .keyboardDismissBar()
             }

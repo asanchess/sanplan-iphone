@@ -15,8 +15,11 @@ public struct PlanScreen: View {
     private let streakSources: [StreakEngine.ActivitySource]
     /// Bumped by «Сегодня» to open the goals view.
     private let goalsRequest: Int
+    /// Bumped by «Сегодня» to open the habits view.
+    private let habitsRequest: Int
 
     @State private var viewMode: ViewMode = .day
+    @State private var section: PlansSection = PlansSection.stored()
     @State private var isShowingAlarms: Bool = false
     @State private var isConfirmingDraftReset: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -25,8 +28,6 @@ public struct PlanScreen: View {
         case day = "Сегодня"
         case week = "Неделя"
         case upcoming = "Все"
-        case habits = "Привычки"
-        case goals = "Цели"
         public var id: String { rawValue }
     }
 
@@ -41,7 +42,8 @@ public struct PlanScreen: View {
         streakSources: [StreakEngine.ActivitySource] = [],
         savingsOptions: [GoalSavingsOption] = [],
         weekRatings: [WeekReview] = [],
-        goalsRequest: Int = 0
+        goalsRequest: Int = 0,
+        habitsRequest: Int = 0
     ) {
         self.store = store
         self.recorder = recorder
@@ -54,11 +56,14 @@ public struct PlanScreen: View {
         self.savingsOptions = savingsOptions
         self.weekRatings = weekRatings
         self.goalsRequest = goalsRequest
+        self.habitsRequest = habitsRequest
     }
 
     public var body: some View {
         planBody
-            .onChange(of: goalsRequest) { _, _ in viewMode = .goals }
+            .onChange(of: goalsRequest) { _, _ in section = .goals }
+            .onChange(of: habitsRequest) { _, _ in section = .habits }
+            .onChange(of: section) { _, next in next.store() }
     }
 
     private var planBody: some View {
@@ -94,6 +99,11 @@ public struct PlanScreen: View {
 
                 ScrollView {
                     VStack(spacing: DS.Metrics.spacing16) {
+                        Picker("Раздел", selection: $section) {
+                            ForEach(PlansSection.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+
                         if recorder.isRecordingOrPaused {
                             recorderSection
                         }
@@ -106,21 +116,24 @@ public struct PlanScreen: View {
                             draftsSection
                         }
 
-                        Picker("Вид", selection: $viewMode) {
-                            ForEach(ViewMode.allCases) { mode in
-                                Text(mode.rawValue).tag(mode)
+                        switch section {
+                        case .plans:
+                            Picker("Вид", selection: $viewMode) {
+                                ForEach(ViewMode.allCases) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
                             }
-                        }
-                        .pickerStyle(.segmented)
+                            .pickerStyle(.segmented)
 
-                        switch viewMode {
-                        case .day:
-                            weekStrip
-                            agendaDayList
-                        case .week:
-                            weekView
-                        case .upcoming:
-                            upcomingList
+                            switch viewMode {
+                            case .day:
+                                weekStrip
+                                agendaDayList
+                            case .week:
+                                weekView
+                            case .upcoming:
+                                upcomingList
+                            }
                         case .habits:
                             HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone), streakSources: streakSources)
                         case .goals:

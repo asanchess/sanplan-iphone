@@ -20,6 +20,12 @@ enum MoneyFormat {
         return (formatter.string(from: value) ?? "\(minor / 100)") + " ₸"
     }
 
+    /// Строка легенды расходов: «20% · 48 000 ₸» (веб: legendShareText).
+    static func legendShare(amountMinor: Int64, totalMinor: Int64) -> String {
+        let percent = totalMinor > 0 ? Int((Double(amountMinor) / Double(totalMinor) * 100).rounded()) : 0
+        return "\(percent)% · \(kzt(amountMinor))"
+    }
+
     static func date(_ ymd: String?) -> String {
         guard let ymd, ymd.count == 10 else { return ymd ?? "" }
         let parts = ymd.split(separator: "-")
@@ -441,7 +447,7 @@ struct MoneyChartsSection: View {
             Circle().fill(color(for: slice)).frame(width: 8, height: 8)
             Text(slice.name).font(.caption).lineLimit(1)
             Spacer(minLength: 4)
-            Text(percent(slice.amountMinor)).font(.caption.monospacedDigit())
+            Text(MoneyFormat.legendShare(amountMinor: slice.amountMinor, totalMinor: insights.expenseMinor)).font(.caption.monospacedDigit()).lineLimit(1).fixedSize()
         }
         .foregroundColor(DS.Colors.textPrimary)
         .frame(minHeight: onCategory == nil ? nil : 32)
@@ -476,10 +482,5 @@ struct MoneyChartsSection: View {
     private func color(for slice: FinanceInsights.Slice) -> Color {
         let index = insights.categories.firstIndex(of: slice) ?? 0
         return palette[index % palette.count]
-    }
-
-    private func percent(_ minor: Int64) -> String {
-        guard insights.expenseMinor > 0 else { return "" }
-        return "\(Int((Double(minor) / Double(insights.expenseMinor) * 100).rounded())) %"
     }
 }

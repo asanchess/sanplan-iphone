@@ -27,6 +27,7 @@ public final class AppModel: ObservableObject {
     public let reviews = ReviewStore()
     /// Polls the server's change counters while the app is in front, so another device's edits arrive within seconds.
     public let liveSync: VaultLiveSync
+    private var planSoundWatcher: PlanSoundWatcher?
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -133,6 +134,9 @@ public final class AppModel: ObservableObject {
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
         }
+        let planStore = self.plans
+        let resync = PlanAlarmResync(alarms: alarms, plansLoaded: { planStore.hasLoadedPlans }, plans: { planStore.plans.map { $0.toNativePlan() } })
+        planSoundWatcher = PlanSoundWatcher { Task { await resync.soundChanged() } }
         #if DEBUG
         if screenshots { seedScreenshotNotes() }
         #endif
