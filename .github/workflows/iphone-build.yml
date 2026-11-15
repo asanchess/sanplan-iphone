@@ -30,6 +30,12 @@ jobs:
           if [[ "$tones" -ne 12 ]]; then echo "Expected 12 arna-tone-*.m4a in the app bundle, found $tones"; exit 1; fi
           mkdir -p build/package/Payload
           cp -R build/device/Build/Products/Release-iphoneos/SanPlan.app build/package/Payload/
+          # Unsigned builds carry no entitlements, so a sideloader re-signs without HealthKit. Seal the app ad hoc
+          # with its entitlements (extensions first) so the sideloader sees and requests them.
+          for ext in build/package/Payload/SanPlan.app/PlugIns/*.appex; do [[ -d "$ext" ]] && codesign --force --sign - "$ext"; done
+          codesign --force --sign - --entitlements SanPlanSupport/SanPlan.entitlements build/package/Payload/SanPlan.app
+          codesign -d --entitlements - --xml build/package/Payload/SanPlan.app > artifacts/app-entitlements.plist 2>/dev/null || codesign -d --entitlements :- build/package/Payload/SanPlan.app > artifacts/app-entitlements.plist
+          grep -q "com.apple.developer.healthkit" artifacts/app-entitlements.plist || { echo "HealthKit entitlement missing from the packaged app"; exit 1; }
           (cd build/package && zip -qr ../../artifacts/SanPlan-unsigned.ipa Payload)
           shasum -a 256 artifacts/SanPlan-unsigned.ipa > artifacts/SHA256.txt
           xcrun simctl list devices available --json > artifacts/devices.json
