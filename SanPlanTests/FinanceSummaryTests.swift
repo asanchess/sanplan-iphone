@@ -1,6 +1,11 @@
 import XCTest
 @testable import SanPlan
 
+/// Shared by both test classes in this file.
+private func state(_ records: [FinanceRecord], limits: [String: Int64]? = nil) -> FinanceState {
+    FinanceState(records: records, budget: limits.map { FinanceBudget(limits: $0.mapValues { $0 * 100 }) })
+}
+
 final class FinanceSummaryTests: XCTestCase {
 
     // Выдуманные данные, суммы в тенге.
@@ -8,9 +13,6 @@ final class FinanceSummaryTests: XCTestCase {
         FinanceRecord(id: id, kind: kind, title: id, amountMinor: tenge * 100, date: date, category: category)
     }
 
-    private func state(_ records: [FinanceRecord], limits: [String: Int64]? = nil) -> FinanceState {
-        FinanceState(records: records, budget: limits.map { FinanceBudget(limits: $0.mapValues { $0 * 100 }) })
-    }
 
     // MARK: Day, period, activity, goals
 
