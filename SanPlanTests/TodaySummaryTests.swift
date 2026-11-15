@@ -19,7 +19,7 @@ final class TodaySummaryTests: XCTestCase {
             habit("a"), habit("b"), habit("c", schedule: .onWeekdays([3])),
             habit("d", archived: true), habit("e", createdDay: "2026-12-01")
         ]
-        let block = try XCTUnwrap(HabitsSummary.make(habits: habits, marks: ["a": [day: 1]], day: day, context: .empty))
+        let block = try XCTUnwrap(TodayHabitsSummary.make(habits: habits, marks: ["a": [day: 1]], day: day, context: .empty))
         XCTAssertEqual(block.rows.map(\.id), ["b", "a"])
         XCTAssertEqual([block.done, block.total, block.more], [1, 2, 0])
         XCTAssertTrue(block.rows[1].done)
@@ -31,7 +31,7 @@ final class TodaySummaryTests: XCTestCase {
             habit("t", rule: HabitRule(kind: .training))
         ]
         let context = HabitContext(trainingDay: { _ in HabitTrainingDay(completed: true) })
-        let rows = try XCTUnwrap(HabitsSummary.make(habits: habits, marks: ["w": [day: 3]], day: day, context: context)).rows
+        let rows = try XCTUnwrap(TodayHabitsSummary.make(habits: habits, marks: ["w": [day: 3]], day: day, context: context)).rows
         let w = try XCTUnwrap(rows.first { $0.id == "w" })
         let t = try XCTUnwrap(rows.first { $0.id == "t" })
         XCTAssertEqual(w.detail, "3 из 8 стак.")
@@ -42,17 +42,17 @@ final class TodaySummaryTests: XCTestCase {
 
     func testHabitsLimitFourAndNilWhenNothingDue() throws {
         let many = ["a", "b", "c", "d", "e", "f"].map { habit($0) }
-        let block = try XCTUnwrap(HabitsSummary.make(habits: many, marks: [:], day: day, context: .empty))
+        let block = try XCTUnwrap(TodayHabitsSummary.make(habits: many, marks: [:], day: day, context: .empty))
         XCTAssertEqual(block.rows.count, TodaySummary.habitsLimit)
         XCTAssertEqual(block.more, 2)
         XCTAssertEqual(TodaySummary.moreText(block.more), "ещё 2")
         XCTAssertEqual(TodaySummary.moreText(0), "")
-        XCTAssertNil(HabitsSummary.make(habits: [habit("x", schedule: .onWeekdays([3]))], marks: [:], day: day, context: .empty))
-        XCTAssertNil(HabitsSummary.make(habits: [], marks: [:], day: day, context: .empty))
+        XCTAssertNil(TodayHabitsSummary.make(habits: [habit("x", schedule: .onWeekdays([3]))], marks: [:], day: day, context: .empty))
+        XCTAssertNil(TodayHabitsSummary.make(habits: [], marks: [:], day: day, context: .empty))
     }
 
     func testTimesPerWeekHabitIsDueUntilTheNormIsMet() throws {
-        let block = try XCTUnwrap(HabitsSummary.make(habits: [habit("w", schedule: .timesPerWeek(1))], marks: [:], day: day, context: .empty))
+        let block = try XCTUnwrap(TodayHabitsSummary.make(habits: [habit("w", schedule: .timesPerWeek(1))], marks: [:], day: day, context: .empty))
         XCTAssertEqual(block.rows.count, 1)
     }
 
@@ -106,17 +106,17 @@ final class TodaySummaryTests: XCTestCase {
 
     func testWorkoutActiveThenTodayThenNextOverTheWeek() {
         let days = [WorkoutDayPlan(weekday: 3, exercises: [], title: "Ноги"), WorkoutDayPlan(weekday: 6, exercises: [])]
-        XCTAssertEqual(WorkoutSummary.make(active: true, currentName: "Присед", days: days, weekday: 1),
+        XCTAssertEqual(TodayWorkoutSummary.make(active: true, currentName: "Присед", days: days, weekday: 1),
                        WorkoutSummaryLine(kind: .active, title: "Присед", when: "Идёт сейчас"))
-        XCTAssertEqual(WorkoutSummary.make(active: false, currentName: "", days: days, weekday: 3),
+        XCTAssertEqual(TodayWorkoutSummary.make(active: false, currentName: "", days: days, weekday: 3),
                        WorkoutSummaryLine(kind: .today, title: "Ноги", when: "Сегодня"))
-        XCTAssertEqual(WorkoutSummary.make(active: false, currentName: "", days: days, weekday: 2),
+        XCTAssertEqual(TodayWorkoutSummary.make(active: false, currentName: "", days: days, weekday: 2),
                        WorkoutSummaryLine(kind: .next, title: "Ноги", when: "Завтра"))
-        XCTAssertEqual(WorkoutSummary.make(active: false, currentName: "", days: days, weekday: 4),
+        XCTAssertEqual(TodayWorkoutSummary.make(active: false, currentName: "", days: days, weekday: 4),
                        WorkoutSummaryLine(kind: .next, title: "Тренировка", when: "Сб"))
-        XCTAssertEqual(WorkoutSummary.make(active: false, currentName: "", days: days, weekday: 7),
+        XCTAssertEqual(TodayWorkoutSummary.make(active: false, currentName: "", days: days, weekday: 7),
                        WorkoutSummaryLine(kind: .next, title: "Ноги", when: "Ср"))
-        XCTAssertNil(WorkoutSummary.make(active: false, currentName: "", days: [], weekday: 1))
+        XCTAssertNil(TodayWorkoutSummary.make(active: false, currentName: "", days: [], weekday: 1))
     }
 }
 
@@ -129,10 +129,10 @@ final class TodaySummaryTapTests: XCTestCase {
         let day = "2026-11-16"
         let h = Habit(id: "hw", title: "Вода", createdDay: "2026-11-01")
         store.add(h)
-        XCTAssertFalse(try XCTUnwrap(HabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
+        XCTAssertFalse(try XCTUnwrap(TodayHabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
         XCTAssertEqual(store.tap(h, on: day), 1)
-        XCTAssertTrue(try XCTUnwrap(HabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
+        XCTAssertTrue(try XCTUnwrap(TodayHabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
         XCTAssertEqual(store.tap(h, on: day), 0)
-        XCTAssertFalse(try XCTUnwrap(HabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
+        XCTAssertFalse(try XCTUnwrap(TodayHabitsSummary.make(habits: store.habits, marks: store.marks, day: day, context: .empty)).rows[0].done)
     }
 }

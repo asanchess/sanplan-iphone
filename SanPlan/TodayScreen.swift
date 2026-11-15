@@ -95,7 +95,7 @@ public struct TodayScreen: View {
     /// Habits due today; the check button goes through `HabitStore.tap`, the same path as Plans → «Привычки».
     @ViewBuilder
     private var habitsCard: some View {
-        if let block = HabitsSummary.make(habits: habitStore.habits, marks: habitStore.marks, day: reviewDay, context: habitStore.context) {
+        if let block = TodayHabitsSummary.make(habits: habitStore.habits, marks: habitStore.marks, day: reviewDay, context: habitStore.context) {
             Card {
                 SectionHeader("Привычки")
                 ForEach(block.rows) { row in
@@ -311,7 +311,7 @@ public struct TodayScreen: View {
         let session = workouts.activeSession.flatMap { $0.phase != .complete ? $0 : nil }
         let name = session.map { $0.exercises.indices.contains($0.exerciseIndex) ? $0.exercises[$0.exerciseIndex].name : "" } ?? ""
         let weekday = WorkoutProgram.weekday(of: Date(), timeZone: TimeZone(identifier: plans.timeZone) ?? .current)
-        if let line = WorkoutSummary.make(active: session != nil, currentName: name, days: workouts.training?.days ?? [], weekday: weekday) {
+        if let line = TodayWorkoutSummary.make(active: session != nil, currentName: name, days: workouts.training?.days ?? [], weekday: weekday) {
             Card {
                 SectionHeader("Тренировка")
                 Button { selectedTab = .workout } label: {

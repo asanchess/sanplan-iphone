@@ -33,7 +33,7 @@ public struct HabitsSummaryBlock: Equatable {
     public var total: Int
 }
 
-public enum HabitsSummary {
+public enum TodayHabitsSummary {
     /// Привычки на сегодня: те, что нужно отметить в этот день. Невыполненные первыми, порядок внутри групп прежний.
     public static func make(
         habits: [Habit], marks: [String: [String: Int]], day: String, context: HabitContext,
@@ -133,7 +133,7 @@ public struct WorkoutSummaryLine: Equatable {
     public var when: String
 }
 
-public enum WorkoutSummary {
+public enum TodayWorkoutSummary {
     private static let weekdayShort = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
     /// Идущая тренировка, иначе сегодняшний день программы, иначе ближайший следующий (по кругу недели).
