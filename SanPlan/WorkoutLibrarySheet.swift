@@ -21,7 +21,7 @@ struct ExerciseLibrarySheet: View {
                     .padding(Ink.Metrics.page)
 
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !typed.isEmpty && !ExerciseLibrary.allExercises.contains(where: { $0.caseInsensitiveCompare(typed) == .orderedSame }) {
                             Button {

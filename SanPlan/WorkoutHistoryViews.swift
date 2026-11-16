@@ -176,8 +176,7 @@ struct WorkoutHistoryView: View {
     }
 
     private func statTiles(_ current: PeriodSummary, previous: PeriodSummary, against: String) -> some View {
-        let columns = [GridItem(.flexible(), spacing: Ink.Metrics.gutter), GridItem(.flexible(), spacing: Ink.Metrics.gutter)]
-        return LazyVGrid(columns: columns, spacing: Ink.Metrics.gutter) {
+        return InkFlowGrid(minimum: 140, spacing: Ink.Metrics.gutter) {
             WorkoutStatTile(
                 title: "Тренировки",
                 value: "\(current.workouts)",

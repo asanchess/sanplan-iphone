@@ -42,7 +42,7 @@ struct ExerciseSetsCard: View {
                             .foregroundColor(Ink.Colors.muted)
                     }
                 }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: Ink.Metrics.gutter)], spacing: Ink.Metrics.gutter) {
+                InkFlowGrid(minimum: 88, spacing: Ink.Metrics.gutter) {
                     ForEach(exercise.rests.indices, id: \.self) { set in
                         setCell(set, isCurrent: isCurrent && set == session.setIndex)
                     }
@@ -297,5 +297,52 @@ struct ExerciseTargetSheet: View {
         store.editSession(nil) {
             try WorkoutSessionEdit.updateExercise($0, index: index, reps: reps, weightKg: weight, restSeconds: rest, weightStepKg: step)
         }
+    }
+}
+
+/// Сетка колонок одинаковой ширины, как `LazyVGrid(.adaptive)`, но без ленивости: все ячейки существуют сразу,
+/// поэтому экранный диктор и UI-тесты видят подходы и «+ Подход» и за краем экрана.
+struct InkFlowGrid: Layout {
+    var minimum: CGFloat
+    var spacing: CGFloat
+
+    private func columns(for width: CGFloat) -> Int {
+        guard width.isFinite, width > 0 else { return 1 }
+        return max(1, Int(((width + spacing) / (minimum + spacing)).rounded(.down)))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? minimum
+        let rows = layoutRows(width: width, subviews: subviews)
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let count = columns(for: bounds.width)
+        let cell = (bounds.width - spacing * CGFloat(count - 1)) / CGFloat(count)
+        var y = bounds.minY
+        for row in layoutRows(width: bounds.width, subviews: subviews) {
+            for (offset, index) in row.indices.enumerated() {
+                let x = bounds.minX + CGFloat(offset) * (cell + spacing)
+                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: cell, height: row.height))
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private func layoutRows(width: CGFloat, subviews: Subviews) -> [(indices: [Int], height: CGFloat)] {
+        let count = columns(for: width)
+        let cell = (width - spacing * CGFloat(count - 1)) / CGFloat(count)
+        var rows: [(indices: [Int], height: CGFloat)] = []
+        var start = 0
+        while start < subviews.count {
+            let end = min(start + count, subviews.count)
+            let indices = Array(start..<end)
+            let height = indices.map { subviews[$0].sizeThatFits(ProposedViewSize(width: cell, height: nil)).height }.max() ?? 0
+            rows.append((indices, height))
+            start = end
+        }
+        return rows
     }
 }
