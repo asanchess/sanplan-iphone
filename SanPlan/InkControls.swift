@@ -49,6 +49,8 @@ struct InkSegmented<Value: Hashable>: View {
                 }
             }
         }
+        // Разделители гибкие по высоте: без этого сегменты тянулись на всё свободное место экрана.
+        .fixedSize(horizontal: false, vertical: true)
         .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: Ink.Metrics.frameLine))
         .accessibilityElement(children: .contain)
     }
@@ -108,7 +110,7 @@ struct InkStepper: View {
             Rectangle().fill(Ink.Colors.fg).frame(width: Ink.Metrics.cellLine)
             stepCell("plus", label: "Больше: \(title)", enabled: canIncrease, action: onIncrease)
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: true, vertical: true)
         .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: Ink.Metrics.cellLine))
     }
 
