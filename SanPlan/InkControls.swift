@@ -166,6 +166,7 @@ struct InkSetCell: View {
     let onEdit: () -> Void
     let onToggle: () -> Void
     let toggleLabel: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -209,7 +210,7 @@ struct InkSetCell: View {
                 style: StrokeStyle(lineWidth: Ink.Metrics.cellLine, dash: state == .skipped ? [6, 4] : [])
             )
         )
-        .animation(.easeOut(duration: 0.18), value: state)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: state)
     }
 
     private var textColor: Color {

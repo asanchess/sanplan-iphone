@@ -79,6 +79,7 @@ struct InkDayPanel: View {
                     .inkPoster(20, relativeTo: .headline)
                     .foregroundColor(Ink.Colors.fg)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel(isToday ? "\(title), сегодня" : title)
                     .accessibilityAddTraits(.isHeader)
                 Text("\(day.exercises.count) упр.")
                     .inkText(.subheadline, weight: .medium, numeric: true)

@@ -149,6 +149,8 @@ struct WorkoutSummaryView: View {
                 .offset(x: -12, y: -26)
             }
         }
+        // Запас сверху (после overlay, чтобы надпись ехала вместе с кадром): «ФУХ!» поднята на 26 pt и наклонена.
+        .padding(.top, allDone ? 24 : 0)
     }
 }
 
@@ -186,14 +188,15 @@ struct WorkoutStatTile: View {
 /// «Отменить» for the last change, at the bottom of the workout section for five seconds.
 struct WorkoutUndoToast: View {
     @ObservedObject var store: WorkoutStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
             if let offer = store.undoOffer {
                 InkToast(label: offer.label) { store.undoLast() }
                     .padding(.horizontal, Ink.Metrics.page)
-                    .padding(.bottom, Ink.Metrics.gutter)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.vertical, Ink.Metrics.gutter)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .task(id: offer.id) {
                         try? await Task.sleep(for: .seconds(5))
                         store.dismissUndo(offer.id)
@@ -202,6 +205,6 @@ struct WorkoutUndoToast: View {
                     .accessibilityAddTraits(.isStaticText)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: store.undoOffer)
+        .animation(.easeOut(duration: reduceMotion ? 0.12 : 0.2), value: store.undoOffer)
     }
 }

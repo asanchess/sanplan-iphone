@@ -26,6 +26,7 @@ struct ActiveWorkoutView: View {
     @State private var replacingExercise: WorkoutIndexRef?
     @State private var isAddingExercise = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var current: SessionExercise { session.exercises[session.exerciseIndex] }
 
@@ -47,8 +48,8 @@ struct ActiveWorkoutView: View {
                     CurrentSetCard(store: store, session: session)
                 }
                 // Место под «ДЗЫНЬ!» над кадром таймера, пока отдых окончен.
-                .padding(.top, session.phase == .alerting ? 28 : 0)
-                .animation(.easeInOut(duration: 0.25), value: session.phase == .alerting)
+                .padding(.top, session.phase == .alerting ? 48 : 0)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: session.phase == .alerting)
 
                 // На крупных размерах текста кнопки идут в прокрутке, иначе закреплены внизу (DESIGN-INK 11.5).
                 if typeSize.isAccessibilitySize {
@@ -150,6 +151,7 @@ struct WorkoutTimerCard: View {
     @ObservedObject var store: WorkoutStore
     let session: WorkoutSessionState
     @State private var sfxCount = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
@@ -201,7 +203,7 @@ struct WorkoutTimerCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .animation(.easeInOut(duration: 0.25), value: phase)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: phase)
             }
             .overlay(alignment: .bottomLeading) {
                 if phase == .resting { InkMascotSlot(pose: .rest, size: 64) }

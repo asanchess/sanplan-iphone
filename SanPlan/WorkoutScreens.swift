@@ -53,11 +53,11 @@ public struct WorkoutScreen: View {
                     case .plan:
                         planContent
                     }
+
+                    // Тост занимает место под панелью кнопок, а не лежит поверх неё: главная кнопка остаётся доступной.
+                    WorkoutUndoToast(store: store)
                 }
                 .frame(maxWidth: Ink.Metrics.maxWidth)
-
-                WorkoutUndoToast(store: store)
-                    .frame(maxWidth: Ink.Metrics.maxWidth)
             }
             .frame(maxWidth: .infinity)
             .toolbar(.hidden, for: .navigationBar)
