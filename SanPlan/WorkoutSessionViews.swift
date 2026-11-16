@@ -69,20 +69,26 @@ struct ActiveWorkoutView: View {
                 InkButton(title: "Добавить упражнение", icon: "plus", kind: .secondary) {
                     isAddingExercise = true
                 }
-                finishControl.frame(maxWidth: .infinity)
+                if typeSize.isAccessibilitySize {
+                    finishControl.frame(maxWidth: .infinity)
+                }
             }
             .padding(.horizontal, Ink.Metrics.page)
             .padding(.top, Ink.Metrics.gutter)
             .padding(.bottom, 24)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Закреплённая панель: кнопки фазы. Прокрутка кончается над ней, так что «Завершить досрочно» в конце списка достижима.
+            // Закреплённая панель: кнопки фазы. «Завершить досрочно» лежит в ней же: под панель в прокрутке она не попадает.
             if !typeSize.isAccessibilitySize {
-                WorkoutActionButtons(store: store, session: session)
-                    .padding(.horizontal, Ink.Metrics.page)
-                    .padding(.vertical, Ink.Metrics.gutter)
-                    .background(Ink.Colors.bg)
-                    .overlay(alignment: .top) { InkRule() }
+                VStack(spacing: 0) {
+                    WorkoutActionButtons(store: store, session: session)
+                    // Вместе с кнопками фазы: всегда на виду и не уходит под панель при прокрутке.
+                    finishControl
+                }
+                .padding(.horizontal, Ink.Metrics.page)
+                .padding(.vertical, Ink.Metrics.gutter)
+                .background(Ink.Colors.bg)
+                .overlay(alignment: .top) { InkRule() }
             }
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
