@@ -30,6 +30,9 @@ struct ActiveWorkoutView: View {
     private var current: SessionExercise { session.exercises[session.exerciseIndex] }
 
     var body: some View {
+        // Панель — соседний вид под прокруткой, а не safeAreaInset: рамка ScrollView кончается над панелью,
+        // поэтому UI-тесты и диктор докручивают конец списка выше неё (с inset рамка уходила под панель).
+        VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: Ink.Metrics.stack) {
                 if let warning = store.restAlarm.warningMessage {
@@ -69,27 +72,19 @@ struct ActiveWorkoutView: View {
                 InkButton(title: "Добавить упражнение", icon: "plus", kind: .secondary) {
                     isAddingExercise = true
                 }
-                if typeSize.isAccessibilitySize {
-                    finishControl.frame(maxWidth: .infinity)
-                }
+                finishControl.frame(maxWidth: .infinity)
             }
             .padding(.horizontal, Ink.Metrics.page)
             .padding(.top, Ink.Metrics.gutter)
             .padding(.bottom, 24)
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Закреплённая панель: кнопки фазы. «Завершить досрочно» лежит в ней же: под панель в прокрутке она не попадает.
-            if !typeSize.isAccessibilitySize {
-                VStack(spacing: 0) {
-                    WorkoutActionButtons(store: store, session: session)
-                    // Вместе с кнопками фазы: всегда на виду и не уходит под панель при прокрутке.
-                    finishControl
-                }
+        if !typeSize.isAccessibilitySize {
+            WorkoutActionButtons(store: store, session: session)
                 .padding(.horizontal, Ink.Metrics.page)
                 .padding(.vertical, Ink.Metrics.gutter)
                 .background(Ink.Colors.bg)
                 .overlay(alignment: .top) { InkRule() }
-            }
+        }
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
             WorkoutHaptics.feedback(from: old, to: new)
