@@ -66,27 +66,12 @@ struct ActiveWorkoutView: View {
                     }
                 }
 
-                VStack(spacing: 0) {
-                    InkButton(title: "Добавить упражнение", icon: "plus", kind: .secondary) {
-                        isAddingExercise = true
-                    }
-                    InkButton(title: "Завершить досрочно", kind: .text, textColor: Ink.Colors.muted) {
-                        isConfirmingFinish = true
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, Ink.Metrics.gutter)
-                    .confirmationDialog(
-                        "Завершить тренировку досрочно?",
-                        isPresented: $isConfirmingFinish,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Завершить", role: .destructive) {
-                            store.dispatch(command: .finish())
-                        }
-                        Button("Продолжить тренировку", role: .cancel) {}
-                    } message: {
-                        Text("Отмеченные подходы сохранятся в истории, остальные — нет.")
-                    }
+                InkButton(title: "Добавить упражнение", icon: "plus", kind: .secondary) {
+                    isAddingExercise = true
+                }
+                // Крупный текст: панели внизу нет, «Завершить досрочно» идёт в прокрутке.
+                if typeSize.isAccessibilitySize {
+                    finishControl.frame(maxWidth: .infinity)
                 }
             }
             .padding(.horizontal, Ink.Metrics.page)
@@ -95,11 +80,15 @@ struct ActiveWorkoutView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !typeSize.isAccessibilitySize {
-                WorkoutActionButtons(store: store, session: session)
-                    .padding(.horizontal, Ink.Metrics.page)
-                    .padding(.vertical, Ink.Metrics.gutter)
-                    .background(Ink.Colors.bg)
-                    .overlay(alignment: .top) { InkRule() }
+                VStack(spacing: 0) {
+                    WorkoutActionButtons(store: store, session: session)
+                    // Закреплено вместе с кнопками фазы: так до неё всегда можно дотянуться, не листая.
+                    finishControl
+                }
+                .padding(.horizontal, Ink.Metrics.page)
+                .padding(.vertical, Ink.Metrics.gutter)
+                .background(Ink.Colors.bg)
+                .overlay(alignment: .top) { InkRule() }
             }
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
@@ -124,6 +113,24 @@ struct ActiveWorkoutView: View {
                 guard let exercise = newSessionExercise(name) else { return }
                 store.editSession("Упражнение добавлено") { try WorkoutSessionEdit.addExercise($0, exercise) }
             }
+        }
+    }
+
+    private var finishControl: some View {
+        InkButton(title: "Завершить досрочно", kind: .text, textColor: Ink.Colors.muted) {
+            isConfirmingFinish = true
+        }
+        .confirmationDialog(
+            "Завершить тренировку досрочно?",
+            isPresented: $isConfirmingFinish,
+            titleVisibility: .visible
+        ) {
+            Button("Завершить", role: .destructive) {
+                store.dispatch(command: .finish())
+            }
+            Button("Продолжить тренировку", role: .cancel) {}
+        } message: {
+            Text("Отмеченные подходы сохранятся в истории, остальные — нет.")
         }
     }
 
