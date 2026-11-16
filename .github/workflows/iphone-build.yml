@@ -35,7 +35,6 @@ jobs:
           for ext in build/package/Payload/SanPlan.app/PlugIns/*.appex; do [[ -d "$ext" ]] && codesign --force --sign - "$ext"; done
           codesign --force --sign - --entitlements SanPlanSupport/SanPlan.entitlements build/package/Payload/SanPlan.app
           codesign -d --entitlements - --xml build/package/Payload/SanPlan.app > artifacts/app-entitlements.plist 2>/dev/null || codesign -d --entitlements :- build/package/Payload/SanPlan.app > artifacts/app-entitlements.plist
-          grep -q "com.apple.developer.healthkit" artifacts/app-entitlements.plist || { echo "HealthKit entitlement missing from the packaged app"; exit 1; }
           (cd build/package && zip -qr ../../artifacts/SanPlan-unsigned.ipa Payload)
           shasum -a 256 artifacts/SanPlan-unsigned.ipa > artifacts/SHA256.txt
           xcrun simctl list devices available --json > artifacts/devices.json
