@@ -97,6 +97,8 @@ public struct FinanceScreen: View {
 
                     if !store.state.records.isEmpty {
                         VStack(spacing: DS.Metrics.spacing12) {
+                            CleanHeader(snapshot: snapshot) { showBreakdown = true }
+                            CanSpendTodayCard(result: store.canSpendToday(on: todayString))
                             Picker("Раздел", selection: $tab) {
                                 ForEach(FinanceTab.allCases) { Text($0.title).tag($0) }
                             }
@@ -108,13 +110,6 @@ public struct FinanceScreen: View {
 
                     ScrollView {
                         VStack(spacing: DS.Metrics.spacing24) {
-                            // Сводка прокручивается вместе с разделом и не закрывает его содержимое.
-                            if !store.state.records.isEmpty {
-                                VStack(spacing: DS.Metrics.spacing12) {
-                                    CleanHeader(snapshot: snapshot) { showBreakdown = true }
-                                    CanSpendTodayCard(result: store.canSpendToday(on: todayString))
-                                }
-                            }
                             messages
 
                             if showComposer || !drafts.isEmpty {

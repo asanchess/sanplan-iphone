@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The weekly program builder: weekday chips on top, the chosen day's exercises as cards with steppers.
+/// The weekly program builder: weekday squares on top, the chosen day's exercises as panels with steppers.
+/// Оформление — «Тушь» (DESIGN-INK 11.4); данные и действия те же, что были.
 struct WorkoutBuilderView: View {
     @ObservedObject var store: WorkoutStore
     /// Shown as «Готово» once the program has at least one training day.
@@ -26,41 +27,51 @@ struct WorkoutBuilderView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+            VStack(alignment: .leading, spacing: Ink.Metrics.stack) {
                 if let error = store.errorMessage {
-                    ErrorBanner(message: error) { store.errorMessage = nil }
+                    InkBanner(message: error) { store.errorMessage = nil }
                 }
 
                 dayChips
 
                 if let day {
-                    dayTitleField(day)
-                    ForEach(day.exercises, id: \.id) { exercise in
-                        if let id = exercise.id {
-                            exerciseCard(exercise, id: id, isFirst: exercise.id == day.exercises.first?.id, isLast: exercise.id == day.exercises.last?.id)
+                    VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+                        dayTitleField(day)
+                        ForEach(day.exercises, id: \.id) { exercise in
+                            if let id = exercise.id {
+                                exerciseCard(exercise, id: id, isFirst: exercise.id == day.exercises.first?.id, isLast: exercise.id == day.exercises.last?.id)
+                            }
                         }
                     }
                 } else {
-                    Card {
-                        Text("\(Self.fullNames[weekday - 1]) — день отдыха")
-                            .font(.headline)
-                            .foregroundColor(DS.Colors.textPrimary)
-                        Text("Добавьте упражнение, и день станет тренировочным.")
-                            .font(.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
+                    InkPanel {
+                        HStack(alignment: .center, spacing: Ink.Metrics.framePadding) {
+                            InkMascotSlot(pose: .shrug, size: 72)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(Self.fullNames[weekday - 1]) — день отдыха")
+                                    .inkText(.headline, weight: .bold)
+                                    .foregroundColor(Ink.Colors.fg)
+                                Text("Добавьте упражнение, и день станет тренировочным.")
+                                    .inkText(.body)
+                                    .foregroundColor(Ink.Colors.muted)
+                            }
+                        }
                     }
                 }
 
-                PillButton("Добавить упражнение", icon: "plus", style: day == nil ? .primary : .secondary) {
-                    showLibrary = true
-                }
-
-                if let onDone, !store.program.days.isEmpty {
-                    PillButton("Готово", icon: "checkmark") { onDone() }
+                // Одна главная кнопка: «Добавить», пока день пуст, и «Готово», когда в дне есть упражнения.
+                VStack(spacing: Ink.Metrics.gutter) {
+                    InkButton(title: "Добавить упражнение", icon: "plus", kind: day == nil ? .primary : .secondary) {
+                        showLibrary = true
+                    }
+                    if let onDone, !store.program.days.isEmpty {
+                        InkButton(title: "Готово", icon: "checkmark", kind: day == nil ? .secondary : .primary) { onDone() }
+                    }
                 }
             }
-            .padding(.horizontal, DS.Metrics.screenGutter)
-            .padding(.vertical, DS.Metrics.spacing16)
+            .padding(.horizontal, Ink.Metrics.page)
+            .padding(.vertical, Ink.Metrics.stack)
+            .padding(.bottom, 96)
         }
         .sensoryFeedback(.selection, trigger: weekday)
         .onAppear { titleDraft = day?.title ?? "" }
@@ -85,45 +96,43 @@ struct WorkoutBuilderView: View {
 
     // MARK: - Parts
 
+    /// Семь квадратов 44×44: день тренировки — заливка `fg`, отдых — без заливки, выбранный — заливка акцентом.
     private var dayChips: some View {
-        HStack(spacing: DS.Metrics.spacing4) {
+        HStack(spacing: Ink.Metrics.gutter / 2) {
             ForEach(1...7, id: \.self) { value in
                 let isSelected = value == weekday
                 let isTraining = WorkoutProgram.day(store.program, weekday: value) != nil
                 Button {
                     weekday = value
                 } label: {
-                    VStack(spacing: 3) {
-                        Text(Self.shortNames[value - 1])
-                            .font(.subheadline.weight(.semibold))
-                        Circle()
-                            .fill(isSelected ? DS.Colors.onAccent : DS.Colors.accent)
-                            .frame(width: 5, height: 5)
-                            .opacity(isTraining ? 1 : 0)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                    .foregroundColor(isSelected ? DS.Colors.onAccent : DS.Colors.textPrimary)
-                    .background(
-                        RoundedRectangle(cornerRadius: DS.Metrics.innerRadius)
-                            .fill(isSelected ? DS.Colors.accent : DS.Colors.surface)
-                    )
+                    Text(Self.shortNames[value - 1])
+                        .inkText(.subheadline, weight: .bold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .foregroundColor(isSelected ? Ink.Colors.onAccent : (isTraining ? Ink.Colors.bg : Ink.Colors.fg))
+                        .frame(width: Ink.Metrics.minHit, height: Ink.Metrics.minHit)
+                        .background(isSelected ? Ink.Colors.accent : (isTraining ? Ink.Colors.fg : Ink.Colors.bg))
+                        .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: Ink.Metrics.cellLine))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(Self.fullNames[value - 1])\(isTraining ? ", тренировка" : ", отдых")")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func dayTitleField(_ day: WorkoutDayPlan) -> some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-            Text(Self.fullNames[day.weekday - 1])
-                .font(.caption.weight(.semibold))
-                .foregroundColor(DS.Colors.textSecondary)
+        VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+            InkSectionHeader(text: Self.fullNames[day.weekday - 1])
             TextField("Название дня, например «Ноги»", text: $titleDraft)
-                .font(.title3.weight(.semibold))
-                .foregroundColor(DS.Colors.textPrimary)
+                .inkText(.body)
+                .foregroundColor(Ink.Colors.fg)
                 .submitLabel(.done)
+                .padding(.horizontal, Ink.Metrics.framePadding)
+                .frame(minHeight: Ink.Metrics.minHit)
+                .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: Ink.Metrics.cellLine))
                 .onChange(of: titleDraft) { _, text in
                     // Each typed letter is too small a change to offer «Отменить».
                     store.updateProgram(label: nil) { WorkoutProgram.setDayTitle($0, weekday: weekday, title: text) }
@@ -132,92 +141,95 @@ struct WorkoutBuilderView: View {
     }
 
     private func exerciseCard(_ exercise: WorkoutExercisePlan, id: String, isFirst: Bool, isLast: Bool) -> some View {
-        Card {
-            HStack(alignment: .firstTextBaseline) {
-                Text(exercise.name)
-                    .font(.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Menu {
-                    Button { renameText = exercise.name; renaming = RenameTarget(id: id, name: exercise.name) } label: {
-                        Label("Переименовать", systemImage: "pencil")
-                    }
-                    Button { store.updateProgram(label: "Упражнение продублировано") { try WorkoutProgram.duplicateExercise($0, weekday: weekday, id: id) } } label: {
-                        Label("Дублировать", systemImage: "plus.square.on.square")
-                    }
-                    if !isFirst {
-                        Button { store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: -1) } } label: {
-                            Label("Выше", systemImage: "arrow.up")
+        InkPanel {
+            VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(exercise.name)
+                        .inkText(.headline, weight: .bold)
+                        .foregroundColor(Ink.Colors.fg)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Menu {
+                        Button { renameText = exercise.name; renaming = RenameTarget(id: id, name: exercise.name) } label: {
+                            Label("Переименовать", systemImage: "pencil")
                         }
-                    }
-                    if !isLast {
-                        Button { store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: 1) } } label: {
-                            Label("Ниже", systemImage: "arrow.down")
+                        Button { store.updateProgram(label: "Упражнение продублировано") { try WorkoutProgram.duplicateExercise($0, weekday: weekday, id: id) } } label: {
+                            Label("Дублировать", systemImage: "plus.square.on.square")
                         }
-                    }
-                    // No question first: the toast offers «Отменить».
-                    Button(role: .destructive) {
-                        store.updateProgram(label: "Упражнение удалено") { try WorkoutProgram.deleteExercise($0, weekday: weekday, id: id) }
+                        if !isFirst {
+                            Button { store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: -1) } } label: {
+                                Label("Выше", systemImage: "arrow.up")
+                            }
+                        }
+                        if !isLast {
+                            Button { store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: 1) } } label: {
+                                Label("Ниже", systemImage: "arrow.down")
+                            }
+                        }
+                        // No question first: the toast offers «Отменить».
+                        Button(role: .destructive) {
+                            store.updateProgram(label: "Упражнение удалено") { try WorkoutProgram.deleteExercise($0, weekday: weekday, id: id) }
+                        } label: {
+                            Label("Удалить", systemImage: "trash")
+                        }
                     } label: {
-                        Label("Удалить", systemImage: "trash")
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(Ink.Colors.fg)
+                            .frame(width: Ink.Metrics.minHit, height: Ink.Metrics.minHit)
+                            .contentShape(Rectangle())
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+                    .accessibilityLabel("Действия с упражнением")
                 }
-                .accessibilityLabel("Действия с упражнением")
-            }
 
-            ValueStepperRow(
-                title: "Подходы",
-                value: "\(exercise.sets)",
-                canDecrease: exercise.sets > WorkoutProgram.setsRange.lowerBound,
-                canIncrease: exercise.sets < WorkoutProgram.setsRange.upperBound,
-                onDecrease: { edit(id) { $0.sets -= 1 } },
-                onIncrease: { edit(id) { $0.sets += 1 } }
-            )
-            ValueStepperRow(
-                title: exercise.perSide ? "Повторы на сторону" : "Повторы",
-                value: "\(exercise.reps)",
-                canDecrease: exercise.reps > WorkoutProgram.repsRange.lowerBound,
-                canIncrease: exercise.reps < WorkoutProgram.repsRange.upperBound,
-                onDecrease: { edit(id) { $0.reps -= 1 } },
-                onIncrease: { edit(id) { $0.reps += 1 } }
-            )
-            ValueStepperRow(
-                title: "Отдых между подходами",
-                value: WorkoutFormat.rest(exercise.restSeconds),
-                canDecrease: exercise.restSeconds > WorkoutProgram.restRange.lowerBound,
-                canIncrease: exercise.restSeconds < WorkoutProgram.restRange.upperBound,
-                onDecrease: { edit(id) { $0.restSeconds -= WorkoutProgram.restStep } },
-                onIncrease: { edit(id) { $0.restSeconds += WorkoutProgram.restStep } }
-            )
-            let afterExercise = exercise.restAfterExercise ?? exercise.restSeconds
-            ValueStepperRow(
-                title: "Отдых после упражнения",
-                value: WorkoutFormat.rest(afterExercise),
-                canDecrease: afterExercise > WorkoutProgram.restRange.lowerBound,
-                canIncrease: afterExercise < WorkoutProgram.restRange.upperBound,
-                onDecrease: { edit(id) { $0.restAfterExercise = afterExercise - WorkoutProgram.restStep } },
-                onIncrease: { edit(id) { $0.restAfterExercise = afterExercise + WorkoutProgram.restStep } }
-            )
-            Toggle("На каждую сторону", isOn: Binding(
-                get: { exercise.perSide },
-                set: { value in edit(id) { $0.perSide = value } }
-            ))
-            .font(.subheadline)
-            .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.controlTint)
-            Toggle("Свой вес", isOn: Binding(
-                get: { exercise.bodyweight ?? false },
-                set: { value in edit(id) { $0.bodyweight = value } }
-            ))
-            .font(.subheadline)
-            .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.controlTint)
-            weightRows(exercise, id: id)
+                InkStepper(
+                    title: "Подходы",
+                    value: "\(exercise.sets)",
+                    canDecrease: exercise.sets > WorkoutProgram.setsRange.lowerBound,
+                    canIncrease: exercise.sets < WorkoutProgram.setsRange.upperBound,
+                    onDecrease: { edit(id) { $0.sets -= 1 } },
+                    onIncrease: { edit(id) { $0.sets += 1 } }
+                )
+                InkStepper(
+                    title: exercise.perSide ? "Повторы на сторону" : "Повторы",
+                    value: "\(exercise.reps)",
+                    canDecrease: exercise.reps > WorkoutProgram.repsRange.lowerBound,
+                    canIncrease: exercise.reps < WorkoutProgram.repsRange.upperBound,
+                    onDecrease: { edit(id) { $0.reps -= 1 } },
+                    onIncrease: { edit(id) { $0.reps += 1 } }
+                )
+                InkStepper(
+                    title: "Отдых между подходами",
+                    value: WorkoutFormat.rest(exercise.restSeconds),
+                    canDecrease: exercise.restSeconds > WorkoutProgram.restRange.lowerBound,
+                    canIncrease: exercise.restSeconds < WorkoutProgram.restRange.upperBound,
+                    onDecrease: { edit(id) { $0.restSeconds -= WorkoutProgram.restStep } },
+                    onIncrease: { edit(id) { $0.restSeconds += WorkoutProgram.restStep } }
+                )
+                let afterExercise = exercise.restAfterExercise ?? exercise.restSeconds
+                InkStepper(
+                    title: "Отдых после упражнения",
+                    value: WorkoutFormat.rest(afterExercise),
+                    canDecrease: afterExercise > WorkoutProgram.restRange.lowerBound,
+                    canIncrease: afterExercise < WorkoutProgram.restRange.upperBound,
+                    onDecrease: { edit(id) { $0.restAfterExercise = afterExercise - WorkoutProgram.restStep } },
+                    onIncrease: { edit(id) { $0.restAfterExercise = afterExercise + WorkoutProgram.restStep } }
+                )
+                Toggle("На каждую сторону", isOn: Binding(
+                    get: { exercise.perSide },
+                    set: { value in edit(id) { $0.perSide = value } }
+                ))
+                .inkText(.body)
+                .foregroundColor(Ink.Colors.fg)
+                .tint(Ink.Colors.accent)
+                Toggle("Свой вес", isOn: Binding(
+                    get: { exercise.bodyweight ?? false },
+                    set: { value in edit(id) { $0.bodyweight = value } }
+                ))
+                .inkText(.body)
+                .foregroundColor(Ink.Colors.fg)
+                .tint(Ink.Colors.accent)
+                weightRows(exercise, id: id)
+            }
         }
     }
 
@@ -227,7 +239,7 @@ struct WorkoutBuilderView: View {
         let bodyweight = exercise.bodyweight ?? false
         let step = exercise.weightStepKg ?? WorkoutSessionEdit.defaultStepKg
         let weight = exercise.weightKg
-        ValueStepperRow(
+        InkStepper(
             title: bodyweight ? "Доп. вес" : "Вес",
             value: WorkoutFormat.weight(weight, bodyweight: bodyweight),
             canDecrease: (weight ?? 0) > 0,
@@ -242,7 +254,7 @@ struct WorkoutBuilderView: View {
                 edit(id) { $0.weightKg = WorkoutSessionEdit.roundWeight(min(($0.weightKg ?? 0) + step, WorkoutSessionEdit.weightRange.upperBound)) }
             }
         )
-        ValueStepperRow(
+        InkStepper(
             title: "Шаг прибавки",
             value: WorkoutFormat.kilograms(step),
             canDecrease: step > (WorkoutFormat.steps.first ?? step),
@@ -335,54 +347,6 @@ struct ValueStepperRow: View {
         .foregroundColor(enabled ? DS.Colors.accent : DS.Colors.textSecondary.opacity(0.4))
         .disabled(!enabled)
         .accessibilityLabel(label)
-    }
-}
-
-/// Picks an exercise from the library or takes the typed name as a new one.
-struct ExerciseLibrarySheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    let onPick: (String) -> Void
-
-    var body: some View {
-        NavigationStack {
-            List {
-                let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !typed.isEmpty && !ExerciseLibrary.allExercises.contains(where: { $0.caseInsensitiveCompare(typed) == .orderedSame }) {
-                    Section {
-                        Button {
-                            pick(typed)
-                        } label: {
-                            Label("Добавить «\(typed)»", systemImage: "plus.circle.fill")
-                                .foregroundColor(DS.Colors.accent)
-                        }
-                    }
-                }
-                ForEach(ExerciseLibrary.search(query)) { group in
-                    Section(group.title) {
-                        ForEach(group.exercises, id: \.self) { name in
-                            Button(name) { pick(name) }
-                                .foregroundColor(DS.Colors.textPrimary)
-                        }
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(DS.Colors.canvas.ignoresSafeArea())
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Найти или ввести своё")
-            .navigationTitle("Упражнение")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Закрыть") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func pick(_ name: String) {
-        onPick(name)
-        dismiss()
     }
 }
 

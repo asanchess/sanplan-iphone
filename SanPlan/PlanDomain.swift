@@ -595,17 +595,10 @@ public enum PlanDomain {
             ))
         }
 
-        let todayStr = today(now: Date(timeIntervalSince1970: TimeInterval(nowEpochMs) / 1000), timeZone: timeZone)
-        // Today and the future first (nearest on top), then overdue tasks (most recent first), undated last.
-        func group(_ d: String?) -> Int {
-            guard let d, !d.isEmpty else { return 2 }
-            return d >= todayStr ? 0 : 1
-        }
         results.sort { a, b in
-            let ga = group(a.item.date), gb = group(b.item.date)
-            if ga != gb { return ga < gb }
-            let ad = a.item.date ?? "", bd = b.item.date ?? ""
-            if ad != bd { return ga == 1 ? ad > bd : ad < bd }
+            let ad = a.item.date ?? "9999-99-99"
+            let bd = b.item.date ?? "9999-99-99"
+            if ad != bd { return ad < bd }
             let at = a.item.time ?? "23:59"
             let bt = b.item.time ?? "23:59"
             if at != bt { return at < bt }
@@ -613,42 +606,6 @@ public enum PlanDomain {
             return a.item.title.localizedCaseInsensitiveCompare(b.item.title) == .orderedAscending
         }
 
-        return results
-    }
-
-    /// «Готово»: completed tasks and events that have ended, newest first.
-    public static func getCompletedItems(
-        plans: [PlanItem],
-        nowEpochMs: Int64,
-        timeZone: String = defaultTimeZone
-    ) -> [AgendaItem] {
-        var results: [AgendaItem] = []
-        for it in visibleItems(plans) {
-            if it.kind == "task" {
-                guard it.completed == true else { continue }
-            } else {
-                guard let d = it.date, !d.isEmpty else { continue }
-                guard var endMs = zonedEpoch(dateStr: d, timeStr: it.time ?? "23:59", timeZone: it.timeZone.isEmpty ? timeZone : it.timeZone) else { continue }
-                endMs += Int64((it.durationMinutes ?? 0) * 60000)
-                if endMs >= nowEpochMs { continue }
-            }
-            let displayDate = it.date ?? ""
-            results.append(AgendaItem(
-                item: it,
-                startMin: nil,
-                endMin: nil,
-                displayTime: formatAgendaTime(item: it, targetDate: displayDate.isEmpty ? nil : displayDate, targetTimeZone: timeZone),
-                displayDate: displayDate,
-                badge: getItemSourceBadge(item: it)
-            ))
-        }
-        results.sort { a, b in
-            let ad = a.item.date ?? "", bd = b.item.date ?? ""
-            if ad != bd { return ad > bd }
-            let at = a.item.time ?? "", bt = b.item.time ?? ""
-            if at != bt { return at > bt }
-            return a.item.title.localizedCaseInsensitiveCompare(b.item.title) == .orderedAscending
-        }
         return results
     }
 

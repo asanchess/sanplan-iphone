@@ -51,6 +51,8 @@ struct WorkoutSwipeAction: Identifiable {
     let title: String
     let icon: String
     let color: Color
+    /// Цвет подписи и значка на заливке `color`.
+    var textColor: Color = .white
     let run: () -> Void
 }
 
@@ -74,9 +76,9 @@ struct WorkoutSwipeRow<Content: View>: View {
                     } label: {
                         VStack(spacing: 4) {
                             Image(systemName: action.icon).font(.title3)
-                            Text(action.title).font(.caption.weight(.semibold))
+                            Text(action.title).inkText(.subheadline, weight: .bold)
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(action.textColor)
                         .frame(width: actionWidth)
                         .frame(maxHeight: .infinity)
                         .background(action.color)
@@ -85,7 +87,7 @@ struct WorkoutSwipeRow<Content: View>: View {
                     .accessibilityHidden(!open)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+            .clipShape(Rectangle())
             .opacity(offset < 0 ? 1 : 0)
             .allowsHitTesting(open)
 

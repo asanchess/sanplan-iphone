@@ -28,32 +28,24 @@ public struct WorkoutScreen: View {
         #endif
     }
 
+    private var sectionItems: [(value: Part, title: String)] {
+        let running = store.activeSession.map { $0.phase != .complete } == true
+        return Part.allCases.map { (value: $0, title: $0 == .plan && running ? "Тренировка" : $0.rawValue) }
+    }
+
     public var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                DS.Colors.canvas.ignoresSafeArea()
+                InkStarBackground()
 
                 VStack(spacing: 0) {
-                    ScreenHeader("Тренировка") {
-                        CircleIconButton(
-                            icon: "person.crop.circle",
-                            accessibilityLabel: "Настройки"
-                        ) {
-                            showSettings = true
-                        }
-                    }
-                    .padding(.horizontal, DS.Metrics.screenGutter)
-                    .padding(.top, DS.Metrics.spacing16)
+                    InkScreenHeader(title: "Тренировка") { showSettings = true }
+                        .padding(.horizontal, Ink.Metrics.page)
+                        .padding(.top, Ink.Metrics.page)
 
-                    Picker("Раздел", selection: $section) {
-                        ForEach(Part.allCases) { item in
-                            Text(item == .plan && store.activeSession.map { $0.phase != .complete } == true ? "Тренировка" : item.rawValue)
-                                .tag(item)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, DS.Metrics.screenGutter)
-                    .padding(.vertical, DS.Metrics.spacing8)
+                    InkSegmented(selection: $section, items: sectionItems)
+                        .padding(.horizontal, Ink.Metrics.page)
+                        .padding(.vertical, Ink.Metrics.gutter)
 
                     switch section {
                     case .history:
@@ -62,9 +54,12 @@ public struct WorkoutScreen: View {
                         planContent
                     }
                 }
+                .frame(maxWidth: Ink.Metrics.maxWidth)
 
                 WorkoutUndoToast(store: store)
+                    .frame(maxWidth: Ink.Metrics.maxWidth)
             }
+            .frame(maxWidth: .infinity)
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
@@ -97,69 +92,56 @@ public struct WorkoutScreen: View {
 
     private func savedPlanOverview(training: WorkoutTrainingPlan) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+            VStack(alignment: .leading, spacing: Ink.Metrics.stack) {
                 if let warning = store.restAlarm.warningMessage {
-                    ErrorBanner(message: warning)
+                    InkBanner(message: warning)
                 }
                 if let error = store.errorMessage {
-                    ErrorBanner(message: error) {
+                    InkBanner(message: error) {
                         store.errorMessage = nil
                     }
                 }
 
                 HStack {
-                    SectionHeader("Дни тренировок")
+                    InkSectionHeader(text: "Дни тренировок")
                     Spacer()
-                    Button("Изменить") {
+                    InkButton(title: "Изменить", kind: .text) {
                         isEditingPlan = true
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(DS.Colors.accent)
-                    .frame(minHeight: DS.Metrics.minHitTarget)
                 }
 
-                ForEach(training.days, id: \.weekday) { day in
-                    Card {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(day.title ?? WorkoutFormat.weekdayNames[day.weekday - 1])
-                                    .font(.headline.weight(.semibold))
-                                    .foregroundColor(DS.Colors.textPrimary)
-                                if day.title != nil {
-                                    Text(WorkoutFormat.weekdayNames[day.weekday - 1])
-                                        .font(.caption)
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                }
-                            }
-                            Spacer()
-                            Text("\(day.exercises.count) упр.")
-                                .font(.subheadline)
-                                .foregroundColor(DS.Colors.textSecondary)
-                        }
-
-                        ForEach(day.exercises, id: \.self) { ex in
-                            HStack {
-                                Text(ex.name)
-                                    .font(.subheadline)
-                                    .foregroundColor(DS.Colors.textPrimary)
-                                Spacer()
-                                Text(WorkoutFormat.exerciseSummary(ex))
-                                    .font(.footnote.monospacedDigit())
-                                    .foregroundColor(DS.Colors.textSecondary)
-                            }
-                            .padding(.vertical, 2)
-                        }
-
-                        PillButton("Начать тренировку", icon: "play.fill", style: .primary) {
+                // Одна главная кнопка на экран: у сегодняшнего дня, а если сегодня отдых — у первого в списке.
+                let todayIndex = Self.weekday(of: Date())
+                let primary = Self.primaryWeekday(in: training.days)
+                VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+                    ForEach(Array(training.days.enumerated()), id: \.element.weekday) { offset, day in
+                        InkDayPanel(
+                            day: day,
+                            isPrimary: day.weekday == primary,
+                            isToday: day.weekday == todayIndex,
+                            showsMascot: offset == 0
+                        ) {
                             store.startWorkout(day: day)
                         }
-                        .padding(.top, DS.Metrics.spacing8)
                     }
                 }
             }
-            .padding(.horizontal, DS.Metrics.screenGutter)
-            .padding(.vertical, DS.Metrics.spacing16)
-            .padding(.bottom, 80)
+            .padding(.horizontal, Ink.Metrics.page)
+            .padding(.vertical, Ink.Metrics.gutter)
+            .padding(.bottom, 96)
         }
+    }
+
+    /// Номер дня недели: 1 — понедельник.
+    static func weekday(of date: Date) -> Int {
+        let calendar = Calendar(identifier: .gregorian)
+        return (calendar.component(.weekday, from: date) + 5) % 7 + 1
+    }
+
+    /// День с главной кнопкой: сегодняшний, а если сегодня тренировки нет — первый в списке.
+    static func primaryWeekday(in days: [WorkoutDayPlan], today: Date = Date()) -> Int? {
+        let todayIndex = weekday(of: today)
+        if days.contains(where: { $0.weekday == todayIndex }) { return todayIndex }
+        return days.first?.weekday
     }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// «История»: the week streak, this week or month against the one before, a calendar of training days,
-/// and every workout, each of which opens for editing.
+/// and every workout, each of which opens for editing. Оформление — «Тушь» (DESIGN-INK 11.8).
 struct WorkoutHistoryView: View {
     @ObservedObject var store: WorkoutStore
 
@@ -30,73 +30,77 @@ struct WorkoutHistoryView: View {
         let totals = WorkoutHistory.periods(records, component: period == .week ? .weekOfYear : .month, now: now, calendar: calendar)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+            VStack(alignment: .leading, spacing: Ink.Metrics.stack) {
                 if let error = store.errorMessage {
-                    ErrorBanner(message: error) { store.errorMessage = nil }
+                    InkBanner(message: error) { store.errorMessage = nil }
                 }
 
-                streakCard(streak)
-
-                Picker("Период", selection: $period) {
-                    ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
+                VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+                    streakCard(streak)
+                    InkSegmented(selection: $period, items: Period.allCases.map { (value: $0, title: $0.rawValue) })
+                    totalsGrid(totals.current, previous: totals.previous)
                 }
-                .pickerStyle(.segmented)
 
-                totalsGrid(totals.current, previous: totals.previous)
-
-                Card {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                InkPanel {
+                    VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
                         Text("Последние 16 недель")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(DS.Colors.textPrimary)
+                            .inkText(.headline, weight: .bold)
+                            .foregroundColor(Ink.Colors.fg)
                         WorkoutHeatmap(days: WorkoutHistory.activeDays(records, calendar: calendar), now: now, calendar: calendar)
                     }
                 }
 
-                HStack {
-                    SectionHeader("Тренировки")
-                    Spacer()
-                    Button {
-                        editing = EditorTarget(record: WorkoutHistory.manualRecord(endingAt: WorkoutStore.nowMs()), isNew: true)
-                    } label: {
-                        Label("Добавить", systemImage: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(minHeight: DS.Metrics.minHitTarget)
+                VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
+                    HStack {
+                        InkSectionHeader(text: "Тренировки")
+                        Spacer()
+                        InkButton(title: "Добавить", icon: "plus", kind: .text) {
+                            editing = EditorTarget(record: WorkoutHistory.manualRecord(endingAt: WorkoutStore.nowMs()), isNew: true)
+                        }
+                        .disabled(store.isSignedOut)
                     }
-                    .foregroundColor(DS.Colors.accent)
-                    .disabled(store.isSignedOut)
-                }
 
-                if records.isEmpty {
-                    EmptyState(
-                        title: "Пока пусто",
-                        message: "Завершённые тренировки появятся здесь. Прошлую можно добавить вручную.",
-                        icon: "calendar"
-                    )
-                } else {
-                    ForEach(monthGroups(records), id: \.title) { group in
-                        Text(group.title)
-                            .font(.footnote.weight(.semibold))
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .padding(.top, DS.Metrics.spacing4)
-                        ForEach(group.records) { record in
-                            WorkoutSwipeRow(actions: [
-                                WorkoutSwipeAction(id: "repeat", title: "Повторить", icon: "arrow.counterclockwise", color: DS.Colors.accent) {
-                                    store.repeatWorkout(from: record)
-                                },
-                                WorkoutSwipeAction(id: "delete", title: "Удалить", icon: "trash", color: DS.Colors.destructive) {
-                                    // Без вопроса: внизу экрана появится «Отменить».
-                                    store.deleteRecord(id: record.id)
-                                },
-                            ]) {
-                                recordRow(record)
+                    if records.isEmpty {
+                        InkPanel {
+                            HStack(alignment: .center, spacing: Ink.Metrics.framePadding) {
+                                InkMascotSlot(pose: .sleepy, size: 72)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Пока пусто")
+                                        .inkText(.headline, weight: .bold)
+                                        .foregroundColor(Ink.Colors.fg)
+                                    Text("Завершённые тренировки появятся здесь. Прошлую можно добавить вручную.")
+                                        .inkText(.body)
+                                        .foregroundColor(Ink.Colors.muted)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    } else {
+                        ForEach(monthGroups(records), id: \.title) { group in
+                            Text(group.title)
+                                .inkText(.subheadline, weight: .bold)
+                                .foregroundColor(Ink.Colors.muted)
+                                .padding(.top, 4)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(group.records) { record in
+                                WorkoutSwipeRow(actions: [
+                                    WorkoutSwipeAction(id: "repeat", title: "Повторить", icon: "arrow.counterclockwise", color: Ink.Colors.accent, textColor: Ink.Colors.onAccent) {
+                                        store.repeatWorkout(from: record)
+                                    },
+                                    WorkoutSwipeAction(id: "delete", title: "Удалить", icon: "trash", color: Ink.Colors.fg, textColor: Ink.Colors.bg) {
+                                        // Без вопроса: внизу экрана появится «Отменить».
+                                        store.deleteRecord(id: record.id)
+                                    },
+                                ]) {
+                                    recordRow(record)
+                                }
                             }
                         }
                     }
                 }
             }
-            .padding(.horizontal, DS.Metrics.screenGutter)
-            .padding(.top, DS.Metrics.spacing8)
+            .padding(.horizontal, Ink.Metrics.page)
+            .padding(.top, Ink.Metrics.gutter)
             .padding(.bottom, 96)
         }
         .sheet(item: $editing) { target in
@@ -120,28 +124,31 @@ struct WorkoutHistoryView: View {
     // MARK: - Streak and totals
 
     private func streakCard(_ streak: WeekStreak) -> some View {
-        Card {
-            HStack(alignment: .center, spacing: DS.Metrics.spacing16) {
+        InkPanel {
+            HStack(alignment: .center, spacing: Ink.Metrics.page) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Серия")
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .inkText(.subheadline, weight: .medium)
+                        .foregroundColor(Ink.Colors.muted)
                     Text(weeksText(streak.weeks))
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                        .foregroundColor(streak.weeks > 0 ? DS.Colors.accent : DS.Colors.textPrimary)
+                        .inkPoster(20, relativeTo: .headline)
+                        .foregroundColor(Ink.Colors.fg)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(weekProgressText(streak))
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundColor(DS.Colors.textPrimary)
+                        .inkText(.subheadline, weight: .bold, numeric: true)
+                        .foregroundColor(Ink.Colors.fg)
+                        .multilineTextAlignment(.trailing)
                     HStack(spacing: 4) {
                         ForEach(0..<max(streak.goal, streak.thisWeek), id: \.self) { i in
-                            Capsule()
-                                .fill(i < streak.thisWeek ? DS.Colors.accent : DS.Colors.textSecondary.opacity(0.2))
-                                .frame(width: 14, height: 6)
+                            Rectangle()
+                                .fill(i < streak.thisWeek ? Ink.Colors.accent : Ink.Colors.soft)
+                                .frame(width: 14, height: 10)
+                                .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: 1.5))
                         }
                     }
+                    .accessibilityHidden(true)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -160,28 +167,26 @@ struct WorkoutHistoryView: View {
         let footnote = period == .week
             ? "Сравнение с прошлой неделей по этот же день"
             : "Сравнение с прошлым месяцем по это же число"
-        return VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
+        return VStack(alignment: .leading, spacing: 4) {
             statTiles(current, previous: previous, against: against)
             Text(footnote)
-                .font(.caption)
-                .foregroundColor(DS.Colors.textSecondary)
+                .inkText(.subheadline, weight: .medium)
+                .foregroundColor(Ink.Colors.muted)
         }
     }
 
     private func statTiles(_ current: PeriodSummary, previous: PeriodSummary, against: String) -> some View {
-        let columns = [GridItem(.flexible(), spacing: DS.Metrics.spacing8), GridItem(.flexible(), spacing: DS.Metrics.spacing8)]
-        return LazyVGrid(columns: columns, spacing: DS.Metrics.spacing8) {
+        let columns = [GridItem(.flexible(), spacing: Ink.Metrics.gutter), GridItem(.flexible(), spacing: Ink.Metrics.gutter)]
+        return LazyVGrid(columns: columns, spacing: Ink.Metrics.gutter) {
             WorkoutStatTile(
                 title: "Тренировки",
                 value: "\(current.workouts)",
-                detail: delta(Double(current.workouts - previous.workouts), against: against) { String(Int($0)) },
-                detailColor: deltaColor(current.workouts - previous.workouts)
+                detail: delta(Double(current.workouts - previous.workouts), against: against) { String(Int($0)) }
             )
             WorkoutStatTile(
                 title: "Время всего",
                 value: WorkoutFormat.duration(current.totalSeconds),
-                detail: delta(Double(current.totalSeconds - previous.totalSeconds), against: against) { WorkoutFormat.duration(Int($0)) },
-                detailColor: deltaColor(current.totalSeconds - previous.totalSeconds)
+                detail: delta(Double(current.totalSeconds - previous.totalSeconds), against: against) { WorkoutFormat.duration(Int($0)) }
             )
             WorkoutStatTile(
                 title: "В среднем",
@@ -192,8 +197,7 @@ struct WorkoutHistoryView: View {
             WorkoutStatTile(
                 title: "Тоннаж",
                 value: WorkoutFormat.tonnage(current.tonnageKg),
-                detail: delta(current.tonnageKg - previous.tonnageKg, against: against) { WorkoutFormat.tonnage($0) },
-                detailColor: deltaColor(Int(current.tonnageKg - previous.tonnageKg))
+                detail: delta(current.tonnageKg - previous.tonnageKg, against: against) { WorkoutFormat.tonnage($0) }
             )
         }
     }
@@ -202,10 +206,6 @@ struct WorkoutHistoryView: View {
     private func delta(_ value: Double, against: String, format: (Double) -> String) -> String {
         if abs(value) < 0.5 { return "столько же" }
         return (value > 0 ? "+" : "−") + format(abs(value)) + " " + against
-    }
-
-    private func deltaColor(_ value: Int) -> Color {
-        value > 0 ? DS.Colors.positive : DS.Colors.textSecondary
     }
 
     private func weeksText(_ weeks: Int) -> String {
@@ -242,44 +242,44 @@ struct WorkoutHistoryView: View {
         Button {
             editing = EditorTarget(record: record, isNew: false)
         } label: {
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                    HStack(alignment: .firstTextBaseline) {
+            InkPanel {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: Ink.Metrics.gutter) {
                         Text(record.title ?? record.weekday.map { WorkoutFormat.weekdayNames[$0 - 1] } ?? "Тренировка")
-                            .font(.headline)
-                            .foregroundColor(DS.Colors.textPrimary)
+                            .inkText(.headline, weight: .bold)
+                            .foregroundColor(Ink.Colors.fg)
                         if record.manual {
                             Text("вручную")
-                                .font(.caption2)
-                                .foregroundColor(DS.Colors.textSecondary)
+                                .inkText(.subheadline, weight: .medium)
+                                .foregroundColor(Ink.Colors.muted)
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                         Text(WorkoutFormat.duration(record.durationSeconds))
-                            .font(.subheadline.monospacedDigit())
-                            .foregroundColor(DS.Colors.textSecondary)
+                            .inkText(.subheadline, weight: .bold, numeric: true)
+                            .foregroundColor(Ink.Colors.muted)
                     }
                     Text(Self.dayFormatter.string(from: WorkoutHistory.date(record.startedAt)))
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.textSecondary)
+                        .inkText(.subheadline, weight: .medium)
+                        .foregroundColor(Ink.Colors.muted)
                     if !record.exercises.isEmpty {
                         Text(record.exercises.map(\.name).joined(separator: " · "))
-                            .font(.subheadline)
-                            .foregroundColor(DS.Colors.textPrimary)
+                            .inkText(.body)
+                            .foregroundColor(Ink.Colors.fg)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
-                    HStack(spacing: DS.Metrics.spacing12) {
+                    HStack(spacing: Ink.Metrics.framePadding) {
                         Label("\(record.doneSetCount) из \(record.plannedSetCount)", systemImage: "checkmark.circle")
                         if record.tonnageKg > 0 {
                             Label(WorkoutFormat.tonnage(record.tonnageKg), systemImage: "scalemass")
                         }
                         if record.note != nil {
-                            Image(systemName: "text.bubble")
+                            Image(systemName: "note.text")
                                 .accessibilityLabel("Есть заметка")
                         }
                     }
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(DS.Colors.textSecondary)
+                    .inkText(.subheadline, weight: .bold, numeric: true)
+                    .foregroundColor(Ink.Colors.muted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -309,270 +309,66 @@ struct WorkoutHistoryView: View {
 }
 
 /// Sixteen weeks of training days, Monday on top, the current week on the right.
+/// Клетки квадратные: пустой день — `soft`, один подход дня — точки акцентом, два и больше — сплошной акцент, сегодня — рамка `fg`.
 struct WorkoutHeatmap: View {
     let days: [Date: Int]
     let now: Date
     let calendar: Calendar
 
     private let weeks = 16
-    private let cell: CGFloat = 14
-    private let gap: CGFloat = 3
+    private let gap: CGFloat = 2
 
     var body: some View {
         let thisWeek = WorkoutHistory.weekStart(now, calendar: calendar)
         let today = calendar.startOfDay(for: now)
         let total = days.filter { $0.key >= (calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: thisWeek) ?? thisWeek) }
             .values.reduce(0, +)
-        HStack(alignment: .top, spacing: gap) {
-            ForEach(0..<weeks, id: \.self) { column in
-                let start = calendar.date(byAdding: .weekOfYear, value: column - (weeks - 1), to: thisWeek) ?? thisWeek
-                VStack(spacing: gap) {
-                    ForEach(0..<7, id: \.self) { row in
-                        let day = calendar.startOfDay(for: calendar.date(byAdding: .day, value: row, to: start) ?? start)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(color(count: days[day] ?? 0, future: day > today))
-                            .frame(width: cell, height: cell)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(DS.Colors.textPrimary.opacity(day == today ? 0.6 : 0), lineWidth: 1)
-                            )
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement()
-        .accessibilityLabel("Календарь тренировок: \(total) за последние \(weeks) недель")
-    }
-
-    private func color(count: Int, future: Bool) -> Color {
-        if future { return .clear }
-        switch count {
-        case 0: return DS.Colors.textSecondary.opacity(0.14)
-        case 1: return DS.Colors.accent.opacity(0.55)
-        default: return DS.Colors.accent
-        }
-    }
-}
-
-// MARK: - Editing a past workout
-
-/// Everything about one workout in the history: when it started and ended, its exercises and sets, a note.
-/// Also used to add a workout afterwards. Saved only with «Сохранить»; deleting asks first and can be undone.
-struct WorkoutRecordEditor: View {
-    @ObservedObject var store: WorkoutStore
-    let original: WorkoutRecord
-    let isNew: Bool
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft: WorkoutRecord
-    @State private var problem: String?
-    @State private var isConfirmingDelete = false
-    @State private var isAddingExercise = false
-
-    init(store: WorkoutStore, original: WorkoutRecord, isNew: Bool) {
-        self.store = store
-        self.original = original
-        self.isNew = isNew
-        self._draft = State(initialValue: original)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if let problem {
-                    Section {
-                        Text(problem)
-                            .foregroundColor(DS.Colors.destructive)
-                    }
-                }
-                Section("Когда") {
-                    DatePicker("Начало", selection: startBinding, displayedComponents: [.date, .hourAndMinute])
-                    DatePicker("Конец", selection: endBinding, displayedComponents: [.date, .hourAndMinute])
-                    LabeledContent("Длительность", value: WorkoutFormat.duration(draft.durationSeconds))
-                }
-                Section("Название") {
-                    TextField("Например, «Ноги»", text: Binding(
-                        get: { draft.title ?? "" },
-                        set: { draft.title = $0.isEmpty ? nil : $0 }
-                    ))
-                }
-                ForEach(draft.exercises.indices, id: \.self) { index in
-                    exerciseSection(index)
-                }
-                Section {
-                    Button {
-                        isAddingExercise = true
-                    } label: {
-                        Label("Добавить упражнение", systemImage: "plus")
-                    }
-                }
-                Section("Заметка") {
-                    TextField("Как прошло", text: Binding(
-                        get: { draft.note ?? "" },
-                        set: { draft.note = $0.isEmpty ? nil : $0 }
-                    ), axis: .vertical)
-                    .lineLimit(2...6)
-                }
-                if !isNew {
-                    Section {
-                        Button("Удалить тренировку", role: .destructive) {
-                            isConfirmingDelete = true
+        GeometryReader { proxy in
+            let cell = max(10, min(18, (proxy.size.width - gap * CGFloat(weeks - 1)) / CGFloat(weeks)))
+            HStack(alignment: .top, spacing: gap) {
+                ForEach(0..<weeks, id: \.self) { column in
+                    let start = calendar.date(byAdding: .weekOfYear, value: column - (weeks - 1), to: thisWeek) ?? thisWeek
+                    VStack(spacing: gap) {
+                        ForEach(0..<7, id: \.self) { row in
+                            let day = calendar.startOfDay(for: calendar.date(byAdding: .day, value: row, to: start) ?? start)
+                            HeatCell(count: days[day] ?? 0, future: day > today, isToday: day == today)
+                                .frame(width: cell, height: cell)
                         }
                     }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(DS.Colors.canvas.ignoresSafeArea())
-            .navigationTitle(isNew ? "Новая тренировка" : "Тренировка")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Отмена") { dismiss() }
+        }
+        .frame(height: 7 * 18 + 6 * gap)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement()
+        .accessibilityLabel("Календарь тренировок: \(total) за последние \(weeks) недель")
+    }
+}
+
+private struct HeatCell: View {
+    let count: Int
+    let future: Bool
+    let isToday: Bool
+
+    var body: some View {
+        ZStack {
+            if !future {
+                Rectangle().fill(count >= 2 ? Ink.Colors.accent : Ink.Colors.soft)
+                if count == 1 {
+                    Canvas { context, size in
+                        var y: CGFloat = 1
+                        while y < size.height {
+                            var x: CGFloat = 1
+                            while x < size.width {
+                                context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2, height: 2)), with: .color(Ink.Colors.accent))
+                                x += 4
+                            }
+                            y += 4
+                        }
+                    }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Сохранить") { save() }
-                        .disabled(draft == original && !isNew)
-                }
-            }
-            .confirmationDialog("Удалить тренировку?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-                Button("Удалить", role: .destructive) {
-                    store.deleteRecord(id: original.id)
-                    dismiss()
-                }
-                Button("Отмена", role: .cancel) {}
-            } message: {
-                Text("Её можно будет вернуть кнопкой «Отменить» в течение нескольких секунд.")
-            }
-            .sheet(isPresented: $isAddingExercise) {
-                ExerciseLibrarySheet { name in addExercise(name) }
             }
         }
-    }
-
-    private func exerciseSection(_ index: Int) -> some View {
-        Section {
-            TextField("Упражнение", text: Binding(
-                get: { draft.exercises.indices.contains(index) ? draft.exercises[index].name : "" },
-                set: { if draft.exercises.indices.contains(index) { draft.exercises[index].name = $0 } }
-            ))
-            .font(.headline)
-            Toggle("Свой вес", isOn: Binding(
-                get: { draft.exercises.indices.contains(index) && draft.exercises[index].bodyweight },
-                set: { if draft.exercises.indices.contains(index) { draft.exercises[index].bodyweight = $0 } }
-            ))
-            .tint(DS.Colors.controlTint)
-            if draft.exercises.indices.contains(index) {
-                ForEach(draft.exercises[index].sets.indices, id: \.self) { set in
-                    setRow(index, set)
-                }
-                .onDelete { offsets in
-                    guard draft.exercises.indices.contains(index) else { return }
-                    draft.exercises[index].sets.remove(atOffsets: offsets)
-                }
-            }
-            Button {
-                guard draft.exercises.indices.contains(index) else { return }
-                let last = draft.exercises[index].sets.last
-                draft.exercises[index].sets.append(WorkoutRecordSet(done: true, weightKg: last?.weightKg, reps: last?.reps))
-            } label: {
-                Label("Подход", systemImage: "plus")
-            }
-            Button("Удалить упражнение", role: .destructive) {
-                guard draft.exercises.indices.contains(index) else { return }
-                draft.exercises.remove(at: index)
-            }
-        }
-    }
-
-    private func setRow(_ exercise: Int, _ set: Int) -> some View {
-        HStack(spacing: DS.Metrics.spacing8) {
-            Button {
-                update(exercise, set) { $0.done.toggle() }
-            } label: {
-                Image(systemName: value(exercise, set)?.done == true ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(value(exercise, set)?.done == true ? DS.Colors.positive : DS.Colors.textSecondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(value(exercise, set)?.done == true ? "Сделан" : "Не сделан")
-            Text("\(set + 1)")
-                .font(.subheadline.monospacedDigit())
-                .foregroundColor(DS.Colors.textSecondary)
-                .frame(width: 22, alignment: .leading)
-            TextField("0", value: Binding(
-                get: { value(exercise, set)?.weightKg ?? 0 },
-                set: { new in update(exercise, set) { $0.weightKg = new > 0 ? new : nil } }
-            ), format: .number)
-            .keyboardType(.decimalPad)
-            .multilineTextAlignment(.trailing)
-            .frame(maxWidth: 80)
-            Text("кг")
-                .foregroundColor(DS.Colors.textSecondary)
-            TextField("0", value: Binding(
-                get: { value(exercise, set)?.reps ?? 0 },
-                set: { new in update(exercise, set) { $0.reps = new } }
-            ), format: .number)
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.trailing)
-            .frame(maxWidth: 56)
-            Text("повт.")
-                .foregroundColor(DS.Colors.textSecondary)
-        }
-        .font(.subheadline.monospacedDigit())
-    }
-
-    private func value(_ exercise: Int, _ set: Int) -> WorkoutRecordSet? {
-        guard draft.exercises.indices.contains(exercise), draft.exercises[exercise].sets.indices.contains(set) else { return nil }
-        return draft.exercises[exercise].sets[set]
-    }
-
-    private func update(_ exercise: Int, _ set: Int, _ change: (inout WorkoutRecordSet) -> Void) {
-        guard draft.exercises.indices.contains(exercise), draft.exercises[exercise].sets.indices.contains(set) else { return }
-        change(&draft.exercises[exercise].sets[set])
-    }
-
-    private var startBinding: Binding<Date> {
-        Binding(
-            get: { WorkoutHistory.date(draft.startedAt) },
-            set: { date in
-                // Moving the start keeps the length, so changing the day moves the whole workout.
-                let length = max(0, draft.endedAt - draft.startedAt)
-                draft.startedAt = Int64(date.timeIntervalSince1970 * 1000)
-                draft.endedAt = draft.startedAt + length
-            }
-        )
-    }
-
-    private var endBinding: Binding<Date> {
-        Binding(
-            get: { WorkoutHistory.date(draft.endedAt) },
-            set: { draft.endedAt = Int64($0.timeIntervalSince1970 * 1000) }
-        )
-    }
-
-    /// A plan exercise of the same name lends its id, so the history and «В прошлый раз» stay together.
-    private func addExercise(_ name: String) {
-        let planned = store.program.days.flatMap(\.exercises).first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
-        let reps = planned?.reps ?? WorkoutProgram.defaultReps
-        let sets = planned?.sets ?? WorkoutProgram.defaults(of: store.program).sets
-        draft.exercises.append(WorkoutRecordExercise(
-            exerciseId: planned?.id,
-            name: name,
-            bodyweight: planned?.bodyweight ?? false,
-            targetReps: reps,
-            perSide: planned?.perSide ?? false,
-            sets: Array(repeating: WorkoutRecordSet(done: true, weightKg: planned?.weightKg, reps: reps), count: sets)
-        ))
-    }
-
-    private func save() {
-        do {
-            guard !draft.exercises.isEmpty else { throw WorkoutDomainError("Добавьте хотя бы одно упражнение") }
-            _ = try WorkoutHistory.validated(draft)
-            store.saveRecord(draft)
-            dismiss()
-        } catch {
-            problem = error.localizedDescription
-        }
+        .overlay(Rectangle().strokeBorder(Ink.Colors.fg, lineWidth: isToday ? 2 : 0))
     }
 }
