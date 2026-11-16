@@ -284,7 +284,6 @@ struct WorkoutDefaultsSection: View {
             Card {
                 AlertSoundRow(title: "Звук конца отдыха", choice: sounds.rest, onSelect: sounds.setRest, volume: sounds.restVolume, onVolume: sounds.setRestVolume)
             }
-            WorkoutHealthRow(store: store, health: WorkoutHealthExport.shared)
         }
     }
 
@@ -295,28 +294,3 @@ struct WorkoutDefaultsSection: View {
     }
 }
 
-/// Writing finished workouts to Apple Health. Off until turned on here.
-struct WorkoutHealthRow: View {
-    @ObservedObject var store: WorkoutStore
-    @ObservedObject var health: WorkoutHealthExport
-
-    var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                Toggle(isOn: Binding(
-                    get: { health.isEnabled },
-                    set: { health.setEnabled($0, records: store.records) }
-                )) {
-                    Text("Записывать в «Здоровье»")
-                        .font(.body)
-                        .foregroundColor(DS.Colors.textPrimary)
-                }
-                .tint(DS.Colors.accent)
-                .disabled(health.isWorking)
-                Text(health.problem ?? "Тренировки из истории, с правками и удалениями.")
-                    .font(.caption)
-                    .foregroundColor(health.problem == nil ? DS.Colors.textSecondary : DS.Colors.destructive)
-            }
-        }
-    }
-}

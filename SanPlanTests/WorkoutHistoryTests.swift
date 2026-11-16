@@ -523,38 +523,4 @@ final class WorkoutHistoryTests: XCTestCase {
         let decoded = try JSONDecoder().decode(WorkoutHistoryFile.self, from: JSONEncoder().encode(file))
         XCTAssertEqual(decoded, file)
     }
-
-    // MARK: - Apple Health
-
-    func testHealthChangesWriteNewRemoveDeletedAndRewriteMovedWorkouts() {
-        let a = record(id: "a", start: t0)
-        let b = record(id: "b", start: t0 + 86_400_000)
-        let empty = record(id: "e", start: t0 + 2 * 86_400_000, sets: [WorkoutRecordSet(done: false)])
-
-        let added = WorkoutHealthPlan.changes(previous: [a], next: [a, b, empty])
-        XCTAssertEqual(added.remove, [])
-        XCTAssertEqual(added.write.map { $0.id }, ["b"], "a workout with nothing done is not exported")
-
-        let removed = WorkoutHealthPlan.changes(previous: [a, b], next: [b])
-        XCTAssertEqual(removed.remove, ["a"])
-        XCTAssertTrue(removed.write.isEmpty)
-
-        var noted = a
-        noted.note = "лёгкая"
-        noted.exercises[0].sets[0].weightKg = 65
-        let unchanged = WorkoutHealthPlan.changes(previous: [a], next: [noted])
-        XCTAssertTrue(unchanged.remove.isEmpty && unchanged.write.isEmpty, "Health does not see notes or weights")
-
-        var moved = a
-        moved.endedAt += 600_000
-        let rewritten = WorkoutHealthPlan.changes(previous: [a], next: [moved])
-        XCTAssertEqual(rewritten.remove, ["a"])
-        XCTAssertEqual(rewritten.write.map { $0.endedAt }, [moved.endedAt])
-
-        var emptied = a
-        emptied.exercises[0].sets[0].done = false
-        let dropped = WorkoutHealthPlan.changes(previous: [a], next: [emptied])
-        XCTAssertEqual(dropped.remove, ["a"])
-        XCTAssertTrue(dropped.write.isEmpty)
-    }
 }
