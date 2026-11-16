@@ -25,6 +25,7 @@ struct ActiveWorkoutView: View {
     @State private var editingExercise: WorkoutIndexRef?
     @State private var replacingExercise: WorkoutIndexRef?
     @State private var isAddingExercise = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var current: SessionExercise { session.exercises[session.exerciseIndex] }
 
@@ -46,8 +47,10 @@ struct ActiveWorkoutView: View {
                 .padding(.top, session.phase == .alerting ? 28 : 0)
                 .animation(.easeInOut(duration: 0.25), value: session.phase == .alerting)
 
-                // Отклонение от DESIGN-INK 11.5: кнопки в прокрутке, а не в закреплённой панели (см. UI-тесты 07/08).
-                WorkoutActionButtons(store: store, session: session)
+                // На крупных размерах текста кнопки идут в прокрутке, иначе закреплены внизу (DESIGN-INK 11.5).
+                if typeSize.isAccessibilitySize {
+                    WorkoutActionButtons(store: store, session: session)
+                }
 
                 VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
                     InkSectionHeader(text: "Упражнения")
@@ -71,6 +74,16 @@ struct ActiveWorkoutView: View {
             .padding(.horizontal, Ink.Metrics.page)
             .padding(.top, Ink.Metrics.gutter)
             .padding(.bottom, 24)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Закреплённая панель: кнопки фазы. Прокрутка кончается над ней, так что «Завершить досрочно» в конце списка достижима.
+            if !typeSize.isAccessibilitySize {
+                WorkoutActionButtons(store: store, session: session)
+                    .padding(.horizontal, Ink.Metrics.page)
+                    .padding(.vertical, Ink.Metrics.gutter)
+                    .background(Ink.Colors.bg)
+                    .overlay(alignment: .top) { InkRule() }
+            }
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
             WorkoutHaptics.feedback(from: old, to: new)
@@ -384,6 +397,7 @@ struct WorkoutActionButtons: View {
     var body: some View {
         VStack(spacing: Ink.Metrics.gutter) {
             primary
+            if hasRestControls {
             HStack(spacing: Ink.Metrics.gutter) {
                 if session.phase == .resting {
                     InkIconButton(icon: "pause.fill", accessibilityLabel: "Пауза") {
@@ -408,7 +422,13 @@ struct WorkoutActionButtons: View {
                     }
                 }
             }
+            }
         }
+    }
+
+    /// В подготовке и в подходе ряда значков нет: пустой ряд не должен добавлять отступ в панель.
+    private var hasRestControls: Bool {
+        session.phase == .resting || session.phase == .paused || session.phase == .alerting
     }
 
     @ViewBuilder

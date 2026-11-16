@@ -21,6 +21,7 @@ public struct PlanScreen: View {
     @State private var viewMode: ViewMode = .day
     @State private var section: PlansSection = PlansSection.stored()
     @State private var isShowingAlarms: Bool = false
+    @State private var isEditingSaved: Bool = false
     @State private var isConfirmingDraftReset: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -28,6 +29,7 @@ public struct PlanScreen: View {
         case day = "Сегодня"
         case week = "Неделя"
         case upcoming = "Все"
+        case done = "Готово"
         public var id: String { rawValue }
     }
 
@@ -133,6 +135,8 @@ public struct PlanScreen: View {
                                 weekView
                             case .upcoming:
                                 upcomingList
+                            case .done:
+                                completedList
                             }
                         case .habits:
                             HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone), streakSources: streakSources)
@@ -159,6 +163,29 @@ public struct PlanScreen: View {
         }
         .onChange(of: store.selectedDate) { _, _ in
             Task { await store.ensureRangeLoaded() }
+        }
+        .sheet(isPresented: $isEditingSaved) {
+            NavigationStack {
+                ScrollView {
+                    if store.draftPlans.isEmpty {
+                        EmptyState(title: "Сохранено", message: "Изменения записаны.", icon: "checkmark.circle")
+                    } else {
+                        draftsSection
+                    }
+                }
+                .padding(.horizontal, DS.Metrics.screenGutter)
+                .background(DS.Colors.canvas.ignoresSafeArea())
+                .navigationTitle("Изменить план")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Закрыть") { isEditingSaved = false }
+                    }
+                }
+            }
+            .onChange(of: store.draftPlans.isEmpty) { _, empty in
+                if empty { isEditingSaved = false }
+            }
         }
         .sheet(isPresented: $isShowingAlarms) {
             AlarmsScreen(store: store)
@@ -277,7 +304,43 @@ public struct PlanScreen: View {
         }
     }
 
+    private var completedList: some View {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            SectionHeader("Выполненные и прошедшие")
+            let items = store.completedAgenda
+            if items.isEmpty {
+                EmptyState(
+                    title: "Пока пусто",
+                    message: "Здесь появятся выполненные задачи и прошедшие события.",
+                    icon: "checkmark.circle"
+                )
+            } else {
+                ForEach(Array(items.prefix(200))) { it in
+                    agendaRow(it)
+                }
+            }
+        }
+    }
+
+    /// Saved ARNA plans open for editing on tap; Google calendar events and drafts don't.
+    private func isEditable(_ it: AgendaItem) -> Bool {
+        it.item.savedAt != nil && it.item.source != "google"
+    }
+
+    private func openEditor(_ it: AgendaItem) {
+        guard isEditable(it) else { return }
+        store.beginEdit(it.item)
+        isEditingSaved = true
+    }
+
     private func agendaRow(_ it: AgendaItem) -> some View {
+        agendaCard(it)
+            .contentShape(Rectangle())
+            .onTapGesture { openEditor(it) }
+            .accessibilityAction(named: "Изменить") { openEditor(it) }
+    }
+
+    private func agendaCard(_ it: AgendaItem) -> some View {
         Card {
             HStack(alignment: .top, spacing: DS.Metrics.spacing12) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -286,7 +349,7 @@ public struct PlanScreen: View {
                         .foregroundColor(DS.Colors.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if !it.displayDate.isEmpty && viewMode == .upcoming {
+                    if !it.displayDate.isEmpty && (viewMode == .upcoming || viewMode == .done) {
                         Text(formatShortDate(it.displayDate))
                             .font(.caption2)
                             .foregroundColor(DS.Colors.textSecondary)
