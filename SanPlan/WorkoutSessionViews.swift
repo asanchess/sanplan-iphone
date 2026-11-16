@@ -91,7 +91,7 @@ struct ActiveWorkoutView: View {
             }
             .padding(.horizontal, Ink.Metrics.page)
             .padding(.top, Ink.Metrics.gutter)
-            .padding(.bottom, typeSize.isAccessibilitySize ? 96 : 24)
+            .padding(.bottom, 96)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !typeSize.isAccessibilitySize {
