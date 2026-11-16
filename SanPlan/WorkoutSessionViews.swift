@@ -25,7 +25,6 @@ struct ActiveWorkoutView: View {
     @State private var editingExercise: WorkoutIndexRef?
     @State private var replacingExercise: WorkoutIndexRef?
     @State private var isAddingExercise = false
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var current: SessionExercise { session.exercises[session.exerciseIndex] }
 
@@ -47,10 +46,8 @@ struct ActiveWorkoutView: View {
                 .padding(.top, session.phase == .alerting ? 28 : 0)
                 .animation(.easeInOut(duration: 0.25), value: session.phase == .alerting)
 
-                // На крупных размерах текста кнопки идут в прокрутке, иначе закреплены внизу.
-                if typeSize.isAccessibilitySize {
-                    WorkoutActionButtons(store: store, session: session)
-                }
+                // Отклонение от DESIGN-INK 11.5: кнопки в прокрутке, а не в закреплённой панели (см. UI-тесты 07/08).
+                WorkoutActionButtons(store: store, session: session)
 
                 VStack(alignment: .leading, spacing: Ink.Metrics.gutter) {
                     InkSectionHeader(text: "Упражнения")
@@ -69,27 +66,11 @@ struct ActiveWorkoutView: View {
                 InkButton(title: "Добавить упражнение", icon: "plus", kind: .secondary) {
                     isAddingExercise = true
                 }
-                // Крупный текст: панели внизу нет, «Завершить досрочно» идёт в прокрутке.
-                if typeSize.isAccessibilitySize {
-                    finishControl.frame(maxWidth: .infinity)
-                }
+                finishControl.frame(maxWidth: .infinity)
             }
             .padding(.horizontal, Ink.Metrics.page)
             .padding(.top, Ink.Metrics.gutter)
-            .padding(.bottom, 96)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !typeSize.isAccessibilitySize {
-                VStack(spacing: 0) {
-                    WorkoutActionButtons(store: store, session: session)
-                    // Закреплено вместе с кнопками фазы: так до неё всегда можно дотянуться, не листая.
-                    finishControl
-                }
-                .padding(.horizontal, Ink.Metrics.page)
-                .padding(.vertical, Ink.Metrics.gutter)
-                .background(Ink.Colors.bg)
-                .overlay(alignment: .top) { InkRule() }
-            }
+            .padding(.bottom, 24)
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
             WorkoutHaptics.feedback(from: old, to: new)
