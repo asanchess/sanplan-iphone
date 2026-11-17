@@ -244,6 +244,7 @@ final class ARNAUITests: XCTestCase {
         let plus30 = exactButton("Добавить 30 секунд")
         XCTAssertTrue(plus30.exists, "+30 s control missing")
 
+        scrollTo(plus30)
         let before = restSeconds()
         XCTAssertNotNil(before, "Rest timer (mm:ss) not found")
         plus30.tap()

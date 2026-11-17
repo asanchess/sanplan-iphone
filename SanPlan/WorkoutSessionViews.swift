@@ -40,9 +40,15 @@ struct ActiveWorkoutView: View {
 
                 WorkoutTimerCard(store: store, session: session)
 
-                CurrentSetCard(store: store, session: session)
-
-                WorkoutActionButtons(store: store, session: session)
+                // During a rest its controls (+30 s, pause, skip) come right under the timer, above the
+                // set's numbers; under the shared bottom bar they had dropped below the fold.
+                if session.phase == .resting || session.phase == .paused || session.phase == .alerting {
+                    WorkoutActionButtons(store: store, session: session)
+                    CurrentSetCard(store: store, session: session)
+                } else {
+                    CurrentSetCard(store: store, session: session)
+                    WorkoutActionButtons(store: store, session: session)
+                }
 
                 SectionHeader("Упражнения")
                 ForEach(session.exercises.indices, id: \.self) { index in
