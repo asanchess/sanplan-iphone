@@ -361,7 +361,8 @@ private struct WorkoutTab: View {
 }
 
 /// The «+» a screen shows; the screen places it inside its own NavigationStack, because a
-/// safe-area inset added outside a NavigationStack does not reach the scroll content inside it.
+/// safe-area inset added outside a NavigationStack does not reach the scroll content inside it
+/// (seen in CI video: the builder's «Готово» under the «+», the Today «+» under the bar).
 struct ShellCapture {
     var isEnabled: Bool
     var action: () -> Void
@@ -380,7 +381,10 @@ private struct ShellCaptureButton: ViewModifier {
     @Environment(\.shellCapture) private var capture
 
     func body(content: Content) -> some View {
-        content.captureButton(isEnabled: capture?.isEnabled ?? false, action: { capture?.action() })
+        // The shell's bar inset does not reach inside a NavigationStack either: reserve it here, outermost.
+        content
+            .captureButton(isEnabled: capture?.isEnabled ?? false, action: { capture?.action() })
+            .clearOfShellBar()
     }
 }
 

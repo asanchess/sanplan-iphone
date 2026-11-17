@@ -387,6 +387,8 @@ public struct SectionHeader: View {
             .tracking(0.8)
             .foregroundColor(DS.Colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // VoiceOver reads the words as written, not a shouted spelling.
+            .accessibilityLabel(title)
             .accessibilityAddTraits(.isHeader)
     }
 }
