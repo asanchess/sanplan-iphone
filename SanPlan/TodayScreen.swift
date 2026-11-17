@@ -64,6 +64,7 @@ public struct TodayScreen: View {
                 }
                 .refreshable { await plans.reload() }
             }
+            .shellCaptureButton()
             .toolbar(.hidden, for: .navigationBar)
         }
         .onChange(of: reviewRequest) { _, _ in reviewSheet = .day }

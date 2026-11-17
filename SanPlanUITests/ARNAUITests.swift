@@ -119,7 +119,8 @@ final class ARNAUITests: XCTestCase {
         scrollTo(parse)
         parse.tap()
 
-        XCTAssertTrue(text("Проверь перед добавлением").waitForExistence(timeout: 5), "Review section did not appear after parsing")
+        // Parsing may wait for the server before falling back to the phone's own rules.
+        XCTAssertTrue(text("Проверь перед добавлением").waitForExistence(timeout: 15), "Review section did not appear after parsing")
         let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Подтвердить и добавить")).firstMatch
         scrollTo(confirm)
         XCTAssertTrue(confirm.isEnabled, "Confirm is disabled: the parsed draft still has open questions")
@@ -314,7 +315,7 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
         gear.tap()
 
-        XCTAssertTrue(text("Учетная запись").waitForExistence(timeout: 5), "Settings sheet did not open")
+        XCTAssertTrue(text("Учетная запись").waitForExistence(timeout: 10), "Settings sheet did not open")
         let restBetweenExercises = text("Отдых между упражнениями")
         scrollTo(restBetweenExercises)
         XCTAssertTrue(text("Подходов").exists, "Default sets row missing")

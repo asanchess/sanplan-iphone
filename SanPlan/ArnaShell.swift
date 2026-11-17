@@ -536,7 +536,7 @@ struct PetLayer: View {
     }
 
     private func wander() {
-        guard visible, !busy, hiddenSide == 0, dragStart == nil, bubble == nil, area.width > size.width * 2 else { return }
+        guard visible, !Self.offForTests, !keyboardUp, !busy, hiddenSide == 0, dragStart == nil, bubble == nil, area.width > size.width * 2 else { return }
         let x = CGFloat.random(in: 8...(area.width - size.width - 8))
         pose = [.think, .yawn, .cheer].randomElement() ?? .think
         walk(to: CGPoint(x: x, y: laneY)) { pose = .think }

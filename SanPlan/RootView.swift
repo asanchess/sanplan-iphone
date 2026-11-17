@@ -295,7 +295,7 @@ public struct RootView: View {
                 reviewRequest: reviewNotifications.dayReviewRequests,
                 review: model.reviews
             )
-            .captureButton(action: openCapture)
+            .environment(\.shellCapture, ShellCapture(isEnabled: true, action: openCapture))
         case .plans:
             // Plans and Money keep their own composer at the bottom, so no second «+» there.
             PlanScreen(
@@ -356,8 +356,36 @@ private struct WorkoutTab: View {
         WorkoutScreen(store: store, showSettings: $showSettings)
             .keyboardDismissBar()
             // A running workout owns the screen: no stray tap opens a composer over the timer.
-            .captureButton(isEnabled: store.activeSession == nil, action: onCapture)
+            .environment(\.shellCapture, ShellCapture(isEnabled: store.activeSession == nil, action: onCapture))
     }
+}
+
+/// The «+» a screen shows; the screen places it inside its own NavigationStack, because a
+/// safe-area inset added outside a NavigationStack does not reach the scroll content inside it.
+struct ShellCapture {
+    var isEnabled: Bool
+    var action: () -> Void
+}
+
+private struct ShellCaptureKey: EnvironmentKey { static let defaultValue: ShellCapture? = nil }
+
+extension EnvironmentValues {
+    var shellCapture: ShellCapture? {
+        get { self[ShellCaptureKey.self] }
+        set { self[ShellCaptureKey.self] = newValue }
+    }
+}
+
+private struct ShellCaptureButton: ViewModifier {
+    @Environment(\.shellCapture) private var capture
+
+    func body(content: Content) -> some View {
+        content.captureButton(isEnabled: capture?.isEnabled ?? false, action: { capture?.action() })
+    }
+}
+
+extension View {
+    func shellCaptureButton() -> some View { modifier(ShellCaptureButton()) }
 }
 
 /// The round «+» that opens the shared composer, hidden while the keyboard is up. It sits in the safe area, so lists scroll clear of it.

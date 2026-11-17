@@ -69,6 +69,7 @@ public struct WorkoutScreen: View {
 
                 WorkoutUndoToast(store: store)
             }
+            .shellCaptureButton()
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
