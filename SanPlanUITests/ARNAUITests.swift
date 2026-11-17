@@ -282,7 +282,9 @@ final class ARNAUITests: XCTestCase {
         launch(tab: 3, activeWorkout: "working")
 
         XCTAssertTrue(text("Рабочий подход").waitForExistence(timeout: 10), "Seeded working phase not shown")
-        XCTAssertTrue(text("Жим лёжа").exists, "Seeded exercise name missing")
+        // Round 6: the name may sit inside a combined card label, so look for it in any element.
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Жим лёжа")).firstMatch.waitForExistence(timeout: 5),
+                      "Seeded exercise name missing")
         XCTAssertTrue(text("Подход 1 из 4").exists, "Set counter missing")
         XCTAssertTrue(text("Время подхода").exists, "Set stopwatch caption missing")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "В прошлый раз")).firstMatch.exists,
@@ -341,9 +343,12 @@ final class ARNAUITests: XCTestCase {
         let back = exactButton("Назад")
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         back.tap()
+        // The profile root stays in the hierarchy under a pushed page; wait for the pop to finish before closing.
+        XCTAssertTrue(waitUntil(5) { !restBetweenExercises.exists }, "Workout settings did not close")
 
         let close = exactButton("Закрыть профиль")
         XCTAssertTrue(close.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
         close.tap()
         XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
     }
