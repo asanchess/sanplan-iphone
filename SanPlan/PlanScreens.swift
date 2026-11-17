@@ -195,11 +195,11 @@ public struct PlanScreen: View {
     private var plansKicker: String {
         let tasks = store.daySummary(for: PlanDomain.today(timeZone: store.timeZone)).total
         // Zero counts say nothing and push the tag past the header buttons, so only non-zero parts are shown.
-        let parts = [
+        let parts: [String] = [
             (tasks, ReviewFormat.plural(tasks, "дело", "дела", "дел")),
             (habits.activeHabits.count, ReviewFormat.plural(habits.activeHabits.count, "привычка", "привычки", "привычек")),
             (goals.activeGoals.count, ReviewFormat.plural(goals.activeGoals.count, "цель", "цели", "целей"))
-        ].filter { $0.0 > 0 }.map(\.1)
+        ].filter { $0.0 > 0 }.map { $0.1 }
         return parts.isEmpty ? ReviewFormat.plural(0, "дело", "дела", "дел") : parts.joined(separator: " · ")
     }
 
