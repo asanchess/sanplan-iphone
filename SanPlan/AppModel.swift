@@ -249,6 +249,7 @@ public final class AppModel: ObservableObject {
 
     public func becameActive() {
         finance.reloadIfUnavailable()
+        finance.retryMoveIfNeeded()
         workouts.reloadIfUnavailable()
         workouts.reconcileClock()
         if case .signedIn = auth.phase {

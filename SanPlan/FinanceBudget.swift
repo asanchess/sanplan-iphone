@@ -28,6 +28,9 @@ public struct FinanceBudget: Codable, Equatable {
     public var manualPaid: [String]?
     /// Months in which the offer to set aside from the free balance was answered, accepted or not.
     public var freeOfferMonths: [String]?
+    /// Every move into or out of an envelope, oldest first, so the envelope shows «отложил / забрал» and each line
+    /// can be taken back. The web keeps this field untouched (it carries unknown budget fields over).
+    public var envelopeLog: [EnvelopeLogEntry]?
 
     public init(
         limits: [String: Int64]? = nil,
@@ -39,8 +42,10 @@ public struct FinanceBudget: Codable, Equatable {
         handledIncomes: [String]? = nil,
         reviewedMonths: [String]? = nil,
         manualPaid: [String]? = nil,
-        freeOfferMonths: [String]? = nil
+        freeOfferMonths: [String]? = nil,
+        envelopeLog: [EnvelopeLogEntry]? = nil
     ) {
+        self.envelopeLog = envelopeLog
         self.limits = limits
         self.savePercent = savePercent
         self.analysisStart = analysisStart
@@ -55,6 +60,7 @@ public struct FinanceBudget: Codable, Equatable {
 
     static let maxLimits = 64
     static let maxAnswers = 1000
+    static let maxLogEntries = 500
 
     /// Throws on values that cannot be right; quietly drops answers about records that no longer exist.
     static func validated(_ b: FinanceBudget, records: [FinanceRecord]) throws -> FinanceBudget? {
@@ -97,6 +103,13 @@ public struct FinanceBudget: Codable, Equatable {
             let parts = mark.split(separator: "|").map(String.init)
             return parts.count == 2 && obligations.contains(parts[0]) && (isValidMonthString(parts[1]) || isValidDateString(parts[1]))
         }
+        // Lines of a deleted envelope go with it; a malformed line is dropped rather than blocking the money.
+        var seenLines = Set<String>()
+        let log = (b.envelopeLog ?? []).filter { e in
+            goals.contains(e.goalId) && isValidDateString(e.date) && e.amountMinor != 0 && e.amountMinor != .min
+                && isValidMoney(abs(e.amountMinor)) && (e.raisedTargetMinor ?? 0) >= 0 && !e.id.isEmpty && seenLines.insert(e.id).inserted
+        }
+        out.envelopeLog = log.isEmpty ? nil : Array(log.suffix(maxLogEntries))
         return out == FinanceBudget() ? nil : out
     }
 
@@ -104,6 +117,27 @@ public struct FinanceBudget: Codable, Equatable {
         var seen = Set<String>()
         let clean = (list ?? []).filter { keep($0) && seen.insert($0).inserted }
         return clean.isEmpty ? nil : Array(clean.suffix(maxAnswers))
+    }
+}
+
+/// One line of an envelope's history: money set aside (positive) or taken out (negative).
+public struct EnvelopeLogEntry: Codable, Equatable, Identifiable {
+    public var id: String
+    public var goalId: String
+    public var amountMinor: Int64
+    public var date: String
+    /// The money was or is outside the accounts (cash, a deposit).
+    public var outside: Bool?
+    /// How much the envelope's target grew with this set-aside, so taking it back shrinks the target again.
+    public var raisedTargetMinor: Int64?
+
+    public init(id: String, goalId: String, amountMinor: Int64, date: String, outside: Bool? = nil, raisedTargetMinor: Int64? = nil) {
+        self.id = id
+        self.goalId = goalId
+        self.amountMinor = amountMinor
+        self.date = date
+        self.outside = outside
+        self.raisedTargetMinor = raisedTargetMinor
     }
 }
 
@@ -569,7 +603,8 @@ public enum FinanceBudgeting {
     /// With `raiseTarget` an envelope that is full or nearly full grows its target instead of refusing.
     /// With `outsideAccounts` the money is not on the accounts at all (cash, a deposit), so «Чистыми» stays as it is.
     public static func setAside(_ state: FinanceState, amountMinor: Int64, goalId: String, incomeId: String? = nil,
-                                raiseTarget: Bool = false, outsideAccounts: Bool = false) throws -> FinanceState {
+                                raiseTarget: Bool = false, outsideAccounts: Bool = false,
+                                date: String? = nil, lineId: String? = nil) throws -> FinanceState {
         var next = try validateFinance(state)
         guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
             throw FinanceError.invalidAmount("Нечего откладывать: сумма должна быть больше нуля")
@@ -579,8 +614,10 @@ public enum FinanceBudgeting {
         }
         let (saved, overflow) = (next.records[i].savedMinor ?? 0).addingReportingOverflow(amountMinor)
         guard !overflow, isValidMoney(saved) else { throw FinanceError.invalidAmount("Слишком большая сумма") }
+        var raised: Int64 = 0
         if saved > (next.records[i].amountMinor ?? 0) {
             guard raiseTarget else { throw FinanceError.invalidAmount("Больше, чем осталось до цели") }
+            raised = saved - (next.records[i].amountMinor ?? 0)
             next.records[i].amountMinor = saved
         }
         next.records[i].savedMinor = saved
@@ -590,14 +627,66 @@ public enum FinanceBudgeting {
         var budget = next.budget ?? FinanceBudget()
         budget.savingsGoalId = goalId
         if let incomeId { budget.handledIncomes = (budget.handledIncomes ?? []) + [incomeId] }
+        budget.envelopeLog = (budget.envelopeLog ?? []) + [EnvelopeLogEntry(
+            id: lineId ?? "env-" + UUID().uuidString.lowercased(), goalId: goalId, amountMinor: amountMinor,
+            date: date ?? logDate(), outside: outsideAccounts ? true : nil, raisedTargetMinor: raised > 0 ? raised : nil)]
         next.budget = budget
+        return try validateFinance(next)
+    }
+
+    /// Today in the money's time zone, for history lines made without an explicit date.
+    static func logDate() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "Asia/Qyzylorda") ?? TimeZone(secondsFromGMT: 5 * 3600)!
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    /// The history of one envelope, newest first.
+    public static func envelopeHistory(_ state: FinanceState, goalId: String) -> [EnvelopeLogEntry] {
+        (state.budget?.envelopeLog ?? []).filter { $0.goalId == goalId }.reversed()
+    }
+
+    /// Takes one history line back: a set-aside leaves the envelope (and its target shrinks back if it grew), a
+    /// withdrawal returns. Fails, changing nothing, when the envelope no longer holds what the line put in.
+    public static func undoEnvelopeLine(_ state: FinanceState, lineId: String) throws -> FinanceState {
+        var next = try validateFinance(state)
+        guard var log = next.budget?.envelopeLog, let li = log.firstIndex(where: { $0.id == lineId }),
+              let i = next.records.firstIndex(where: { $0.id == log[li].goalId && $0.kind == "goal" }) else {
+            throw FinanceError.invalidState("Этой записи уже нет")
+        }
+        let line = log[li]
+        let outside = line.outside == true
+        let amount = abs(line.amountMinor)
+        let saved = next.records[i].savedMinor ?? 0
+        let held = next.records[i].outsideMinor ?? 0
+        if line.amountMinor > 0 {
+            guard (outside ? held : saved - held) >= amount else {
+                throw FinanceError.invalidAmount("В конверте уже меньше, чем было отложено этой записью")
+            }
+            next.records[i].savedMinor = saved - amount
+            if outside { next.records[i].outsideMinor = held - amount > 0 ? held - amount : nil }
+            if let raised = line.raisedTargetMinor, raised > 0 {
+                let target = next.records[i].amountMinor ?? 0
+                next.records[i].amountMinor = max(target - raised, saved - amount, 1)
+            }
+        } else {
+            let (back, overflow) = saved.addingReportingOverflow(amount)
+            guard !overflow, isValidMoney(back) else { throw FinanceError.invalidAmount("Слишком большая сумма") }
+            next.records[i].savedMinor = back
+            if back > (next.records[i].amountMinor ?? 0) { next.records[i].amountMinor = back }
+            if outside { next.records[i].outsideMinor = held + amount }
+        }
+        log.remove(at: li)
+        next.budget?.envelopeLog = log.isEmpty ? nil : log
         return try validateFinance(next)
     }
 
     /// Takes money back out of an envelope: from the part on the accounts (it becomes «Чистыми» again) or from the
     /// part kept outside them (nothing on the accounts changes).
     public static func withdraw(_ state: FinanceState, amountMinor: Int64, goalId: String,
-                                outsideAccounts: Bool = false) throws -> FinanceState {
+                                outsideAccounts: Bool = false, date: String? = nil) throws -> FinanceState {
         var next = try validateFinance(state)
         guard amountMinor > 0, let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
             throw FinanceError.invalidAmount("Нельзя забрать больше, чем отложено")
@@ -613,6 +702,11 @@ public enum FinanceBudgeting {
             let left = outside - amountMinor
             next.records[i].outsideMinor = left > 0 ? left : nil
         }
+        var budget = next.budget ?? FinanceBudget()
+        budget.envelopeLog = (budget.envelopeLog ?? []) + [EnvelopeLogEntry(
+            id: "env-" + UUID().uuidString.lowercased(), goalId: goalId, amountMinor: -amountMinor,
+            date: date ?? logDate(), outside: outsideAccounts ? true : nil)]
+        next.budget = budget
         return try validateFinance(next)
     }
 

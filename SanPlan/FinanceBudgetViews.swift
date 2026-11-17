@@ -455,11 +455,12 @@ struct FinanceOverviewTab: View {
                             .foregroundColor(DS.Colors.textSecondary)
                         PillButton("Создать конверт", icon: "plus", style: .primary) { creatingEnvelope = true }
                     }
+                    let goals = FinanceEnvelopes.goals(store.state)
                     ForEach(offers.prefix(3)) { offer in
-                        SetAsideOfferRow(offer: offer, goal: goal, apply: apply)
+                        SetAsideOfferRow(offer: offer, goal: goal, goals: goals, apply: apply)
                     }
                     if let freeOffer {
-                        FreeOfferRow(offer: freeOffer, goal: goal, apply: apply)
+                        FreeOfferRow(offer: freeOffer, goal: goal, goals: goals, apply: apply)
                     }
                 }
             }
@@ -519,12 +520,76 @@ struct HintRow: View {
 struct FreeOfferRow: View {
     let offer: FreeBalanceOffer
     let goal: FinanceRecord?
+    let goals: [FinanceRecord]
     let apply: FinanceApply
 
+    @State private var choosing = false
+
     var body: some View {
-        let amount = offer.suggestedMinor
+        SetAsideOfferBody(
+            caption: "Свободно \(FinanceText.money(offer.freeMinor)) после накоплений и платежей плана",
+            amount: offer.suggestedMinor, goal: goal, choosing: $choosing,
+            onSetAside: { goalId, amount in setAside(goalId, amount) },
+            onSkip: { apply(nil) { try FinanceBudgeting.answerFreeOffer($0, month: offer.month) } }
+        )
+        .sheet(isPresented: $choosing) {
+            SetAsideChoiceSheet(goals: goals, initialGoalId: goal?.id, suggestedMinor: offer.suggestedMinor,
+                                commit: { setAside($0, $1) }, onClose: { choosing = false })
+        }
+    }
+
+    @discardableResult
+    private func setAside(_ goalId: String, _ amount: Int64) -> String? {
+        let title = goals.first { $0.id == goalId }?.title ?? ""
+        return apply("Отложено \(FinanceText.money(amount)) в «\(title)».") {
+            let saved = try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goalId, raiseTarget: true)
+            return try FinanceBudgeting.answerFreeOffer(saved, month: offer.month)
+        }
+    }
+}
+
+struct SetAsideOfferRow: View {
+    let offer: SetAsideOffer
+    let goal: FinanceRecord?
+    let goals: [FinanceRecord]
+    let apply: FinanceApply
+
+    @State private var choosing = false
+
+    var body: some View {
+        SetAsideOfferBody(
+            caption: "\(offer.incomeTitle) · \(FinanceText.money(offer.incomeMinor)) · \(FinanceText.dayMonth(offer.date))",
+            amount: offer.suggestedMinor, goal: goal, choosing: $choosing,
+            onSetAside: { goalId, amount in setAside(goalId, amount) },
+            onSkip: { apply(nil) { try FinanceBudgeting.skipSetAside($0, incomeId: offer.incomeId) } }
+        )
+        .sheet(isPresented: $choosing) {
+            SetAsideChoiceSheet(goals: goals, initialGoalId: goal?.id, suggestedMinor: offer.suggestedMinor,
+                                commit: { setAside($0, $1) }, onClose: { choosing = false })
+        }
+    }
+
+    @discardableResult
+    private func setAside(_ goalId: String, _ amount: Int64) -> String? {
+        let title = goals.first { $0.id == goalId }?.title ?? ""
+        return apply("Отложено \(FinanceText.money(amount)) в «\(title)».") {
+            try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goalId, incomeId: offer.incomeId, raiseTarget: true)
+        }
+    }
+}
+
+/// The shared look of a set-aside offer: the button names the envelope and the amount, «Изменить» picks others.
+struct SetAsideOfferBody: View {
+    let caption: String
+    let amount: Int64
+    let goal: FinanceRecord?
+    @Binding var choosing: Bool
+    let onSetAside: (_ goalId: String, _ amount: Int64) -> Void
+    let onSkip: () -> Void
+
+    var body: some View {
         VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-            Text("Свободно \(FinanceText.money(offer.freeMinor)) после накоплений и платежей плана")
+            Text(caption)
                 .font(.subheadline)
                 .foregroundColor(DS.Colors.textPrimary)
                 .lineLimit(2)
@@ -533,55 +598,15 @@ struct FreeOfferRow: View {
                     .font(.caption)
                     .foregroundColor(DS.Colors.textSecondary)
             }
-            HStack(spacing: DS.Metrics.spacing12) {
-                if let goal {
-                    PillButton("Отложить \(FinanceText.money(amount))", style: .primary) {
-                        apply("Отложено \(FinanceText.money(amount)) в «\(goal.title)».") {
-                            let saved = try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, raiseTarget: true)
-                            return try FinanceBudgeting.answerFreeOffer(saved, month: offer.month)
-                        }
-                    }
-                }
-                PillButton("Не сейчас", style: .secondary) {
-                    apply(nil) { try FinanceBudgeting.answerFreeOffer($0, month: offer.month) }
-                }
-            }
-        }
-        .padding(12)
-        .background(DS.Colors.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-    }
-}
-
-struct SetAsideOfferRow: View {
-    let offer: SetAsideOffer
-    let goal: FinanceRecord?
-    let apply: FinanceApply
-
-    var body: some View {
-        let amount = offer.suggestedMinor
-        let grows = goal.map { FinanceEnvelopes.room($0) < amount } ?? false
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-            Text("\(offer.incomeTitle) · \(FinanceText.money(offer.incomeMinor)) · \(FinanceText.dayMonth(offer.date))")
-                .font(.subheadline)
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineLimit(2)
-            if let goal, grows {
-                Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + amount)).")
-                    .font(.caption)
-                    .foregroundColor(DS.Colors.textSecondary)
+            if let goal, amount > 0 {
+                PillButton("В «\(goal.title)» \(FinanceText.money(amount))", style: .primary) { onSetAside(goal.id, amount) }
+                    .accessibilityIdentifier("set-aside-offer")
             }
             HStack(spacing: DS.Metrics.spacing12) {
-                if let goal, amount > 0 {
-                    PillButton("Отложить \(FinanceText.money(amount))", style: .primary) {
-                        apply("Отложено \(FinanceText.money(amount)) в «\(goal.title)».") {
-                            try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goal.id, incomeId: offer.incomeId, raiseTarget: true)
-                        }
-                    }
+                if goal != nil {
+                    PillButton("Изменить", style: .secondary) { choosing = true }
                 }
-                PillButton("Не сейчас", style: .secondary) {
-                    apply(nil) { try FinanceBudgeting.skipSetAside($0, incomeId: offer.incomeId) }
-                }
+                PillButton("Не сейчас", style: .secondary, action: onSkip)
             }
         }
         .padding(12)
@@ -818,7 +843,13 @@ struct FinancePlanTab: View {
                         canChoose: goals.count > 1,
                         onAdd: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: false) },
                         onWithdraw: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: true) },
-                        onChoose: { apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savingsGoalId = g.id } } }
+                        onChoose: { apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savingsGoalId = g.id } } },
+                        history: FinanceBudgeting.envelopeHistory(store.state, goalId: g.id),
+                        onUndoLine: { line in
+                            apply("\(line.amountMinor > 0 ? "Отложенные" : "Забранные") \(FinanceText.money(abs(line.amountMinor))) возвращены.") {
+                                try FinanceBudgeting.undoEnvelopeLine($0, lineId: line.id)
+                            }
+                        }
                     )
                 }
                 PillButton("Новый конверт", icon: "plus", style: .secondary) { creatingEnvelope = true }
@@ -939,6 +970,10 @@ struct EnvelopeRow: View {
     let onAdd: () -> Void
     let onWithdraw: () -> Void
     let onChoose: () -> Void
+    var history: [EnvelopeLogEntry] = []
+    var onUndoLine: (EnvelopeLogEntry) -> Void = { _ in }
+
+    @State private var showsAllHistory = false
 
     var body: some View {
         let saved = goal.savedMinor ?? 0
@@ -977,10 +1012,122 @@ struct EnvelopeRow: View {
             .font(.subheadline)
             .foregroundColor(DS.Colors.accent)
             .frame(minHeight: DS.Metrics.minHitTarget)
+            if !history.isEmpty {
+                Divider().overlay(DS.Colors.hairline)
+                ForEach(showsAllHistory ? history : Array(history.prefix(3))) { line in
+                    EnvelopeHistoryLine(line: line) { onUndoLine(line) }
+                }
+                if history.count > 3 {
+                    Button(showsAllHistory ? "Свернуть историю" : "Вся история (\(history.count))") { showsAllHistory.toggle() }
+                        .font(.caption)
+                        .foregroundColor(DS.Colors.accent)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
+                }
+            }
         }
         .padding(12)
         .background(DS.Colors.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+    }
+}
+
+/// «12 ноября · отложил 82 000 ₸ · Отменить»
+struct EnvelopeHistoryLine: View {
+    let line: EnvelopeLogEntry
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack(spacing: DS.Metrics.spacing8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(line.amountMinor > 0 ? "Отложил" : "Забрал") \(FinanceText.money(abs(line.amountMinor)))")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundColor(line.amountMinor > 0 ? DS.Colors.positive : DS.Colors.textPrimary)
+                Text(FinanceText.dayMonth(line.date) + (line.outside == true ? " · вне счетов" : ""))
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            Spacer()
+            Button("Отменить", action: onUndo)
+                .font(.caption)
+                .foregroundColor(DS.Colors.accent)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .accessibilityLabel("Отменить: \(line.amountMinor > 0 ? "отложил" : "забрал") \(FinanceText.money(abs(line.amountMinor)))")
+        }
+    }
+}
+
+/// Picks the envelope and the amount for a set-aside offer; the offer's own button keeps the suggested ones.
+struct SetAsideChoiceSheet: View {
+    let goals: [FinanceRecord]
+    let suggestedMinor: Int64
+    /// Runs the set-aside; returns the reason when it failed.
+    let commit: (_ goalId: String, _ amountMinor: Int64) -> String?
+    let onClose: () -> Void
+
+    @State private var goalId: String
+    @State private var amount: String
+    @State private var error: String? = nil
+
+    init(goals: [FinanceRecord], initialGoalId: String?, suggestedMinor: Int64,
+         commit: @escaping (_ goalId: String, _ amountMinor: Int64) -> String?, onClose: @escaping () -> Void) {
+        self.goals = goals
+        self.suggestedMinor = suggestedMinor
+        self.commit = commit
+        self.onClose = onClose
+        _goalId = State(initialValue: initialGoalId ?? goals.first?.id ?? "")
+        _amount = State(initialValue: FinanceText.field(suggestedMinor))
+    }
+
+    private var goal: FinanceRecord? { goals.first { $0.id == goalId } }
+
+    private var buttonTitle: String {
+        guard let goal, let tenge = FinanceText.tenge(amount), tenge > 0 else { return "Отложить" }
+        return "В «\(goal.title)» \(FinanceText.money(tenge * 100))"
+    }
+
+    var body: some View {
+        FinanceSheet(title: "Куда отложить", onClose: onClose) {
+            ForEach(goals) { g in
+                Button { goalId = g.id; error = nil } label: {
+                    HStack {
+                        Image(systemName: g.id == goalId ? "largecircle.fill.circle" : "circle")
+                            .foregroundColor(g.id == goalId ? DS.Colors.accent : DS.Colors.textSecondary)
+                            .accessibilityHidden(true)
+                        Text(g.title).foregroundColor(DS.Colors.textPrimary)
+                        Spacer()
+                        Text("\(FinanceText.money(g.savedMinor ?? 0)) из \(FinanceText.money(g.amountMinor ?? 0))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(DS.Colors.textSecondary)
+                    }
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(g.id == goalId ? .isSelected : [])
+            }
+            TextField("Сумма, ₸", text: $amount)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: amount) { _, _ in error = nil }
+            if let goal, let tenge = FinanceText.tenge(amount), tenge * 100 > FinanceEnvelopes.room(goal) {
+                Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + tenge * 100)).")
+                    .font(.caption)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            if let error {
+                Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
+            }
+            PillButton(buttonTitle, style: .primary, isEnabled: goal != nil && !amount.isEmpty) { save() }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func save() {
+        guard let tenge = FinanceText.tenge(amount), tenge > 0 else {
+            error = "Введи сумму в тенге."
+            return
+        }
+        if let failure = commit(goalId, tenge * 100) { error = failure } else { onClose() }
     }
 }
 

@@ -142,13 +142,33 @@ public final class FinanceStore: ObservableObject {
             return
         }
         storage = .migrating
-        let local = state
+        // Edits made while the upload runs are saved to the phone's file as usual (the owner keeps working);
+        // each round uploads what changed since the previous one, and the file goes only when nothing is left.
+        var local = state
         let stamp = Int64(Date().timeIntervalSince1970 * 1000)
         _ = collection.importMany(FinanceCloud.entries(local, updatedAt: stamp))
-        guard await collection.whenSynced(), self.collection === collection else {
-            storage = .local
-            notice = "Финансы пока не выгружены в облако: нет связи. Данные остаются на телефоне."
-            return
+        var rounds = 0
+        while true {
+            let synced = await collection.whenSynced()
+            // Signed out or another account meanwhile: `detach` already put the store back on the phone's file.
+            guard self.collection === collection, storage == .migrating else { return }
+            guard synced else {
+                storage = .local
+                notice = "Финансы пока не выгружены в облако: нет связи. Данные сохранены на телефоне, выгрузка повторится позже."
+                return
+            }
+            if state == local { break }
+            rounds += 1
+            guard rounds < 4 else {
+                storage = .local
+                notice = nil
+                return
+            }
+            local = state
+            do { try writeToCollection(local, collection) } catch {
+                storage = .local
+                return
+            }
         }
         let remote = FinanceCloud.state(from: collection.items)
         guard FinanceCloud.isVerified(local: local, remote: remote) else {
@@ -242,9 +262,7 @@ public final class FinanceStore: ObservableObject {
         if isUnavailable {
             throw FinanceVaultError.decryptionFailed("Финансы недоступны, пока телефон заблокирован.")
         }
-        if storage == .migrating {
-            throw FinanceError.invalidState("Идёт перенос финансов в облако, подождите несколько секунд.")
-        }
+        // While the move runs, edits go to the phone's file below; the move uploads them before removing it.
         if storage == .cloud, let collection, collection.isAvailable {
             let clean = try validateFinance(newState)
             try writeToCollection(clean, collection)
@@ -272,6 +290,12 @@ public final class FinanceStore: ObservableObject {
             loadInitialState()
             if collection != nil { Task { await self.moveToCollectionIfNeeded() } }
         }
+    }
+
+    /// The app is back in front: a move that stopped for lack of a connection tries again.
+    public func retryMoveIfNeeded() {
+        guard collection != nil, storage == .local, !isUnavailable else { return }
+        Task { await self.moveToCollectionIfNeeded() }
     }
 
     private func loadInitialState() {

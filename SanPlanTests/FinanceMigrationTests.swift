@@ -59,18 +59,41 @@ final class FinanceMigrationTests: XCTestCase {
         XCTAssertEqual(Set(FinanceCloud.state(from: other.items).records.map(\.id)), ["old-rec-0001", "old-rec-0002"])
     }
 
-    func testNoConnectionLeavesTheFileInPlace() async throws {
+    /// The owner's phone, 17 November: the server failed during the move, the move waited forever and every change of
+    /// money answered «Идёт перенос финансов в облако». Now a failed upload hands the money back to the phone's file,
+    /// changes keep working, and the next return to the app finishes the move with them.
+    func testNoConnectionKeepsMoneyEditableOnThePhoneAndRetriesLater() async throws {
         let store = FinanceStore(owner: .account(email), baseDirectory: base)
         let server = MemoryVaultTransport(), key = SymmetricKey(size: .bits256)
         let c = collection(server, key)
         await c.sync()
         server.failNext = true
         store.attach(collection: c)
-        // Offline the move waits for the server (live sync retries); the file stays meanwhile.
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(store.storage, .migrating)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: accountFolder.appendingPathComponent("finance_state.json").path), "nothing is removed before the server confirms")
-        // Signing out while waiting gives up the move; the file is still there.
+        for _ in 0..<100 where store.storage != .local || store.notice == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(store.storage, .local, "a failed upload must not leave the move waiting")
+        XCTAssertNotNil(store.notice)
+        let file = accountFolder.appendingPathComponent("finance_state.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "nothing is removed before the server confirms")
+
+        var next = store.state
+        next.records.append(FinanceRecord(id: "new-rec-0003", kind: "expense", title: "Обед", amountMinor: 2_500_00, date: "2026-11-12", category: "Кафе"))
+        XCTAssertNoThrow(try store.replaceState(with: next, today: "2026-11-12"), "money stays editable without the cloud")
+        let saved = try JSONDecoder().decode(FinanceState.self, from: Data(contentsOf: file))
+        XCTAssertEqual(saved.records.count, 3)
+
+        store.retryMoveIfNeeded()
+        for _ in 0..<100 where store.storage != .cloud { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(store.storage, .cloud)
+        XCTAssertEqual(Set(store.state.records.map(\.id)), ["old-rec-0001", "old-rec-0002", "new-rec-0003"], "the change made offline reached the cloud")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testSigningOutDuringTheMoveKeepsTheFile() async throws {
+        let store = FinanceStore(owner: .account(email), baseDirectory: base)
+        let server = MemoryVaultTransport(), key = SymmetricKey(size: .bits256)
+        let c = collection(server, key)
+        await c.sync()
+        store.attach(collection: c)
         c.detach()
         for _ in 0..<50 where store.storage != .local { try await Task.sleep(for: .milliseconds(20)) }
         XCTAssertEqual(store.storage, .local)

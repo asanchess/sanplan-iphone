@@ -73,7 +73,7 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     private var generation = 0
     /// Highest server `seq` received; live sync asks only for records after it (nil/0: everything).
     public private(set) var syncCursor = 0
-    private var waiters: [CheckedContinuation<Bool, Never>] = []
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
     /// Callers of `sync()` that arrived while a pass was running; they resume when that pass (re-run for them) ends.
     private var passWaiters: [CheckedContinuation<Void, Never>] = []
     private let fileManager: FileManager
@@ -142,9 +142,7 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         syncState = .idle
         isSyncing = false
         syncAgain = false
-        let pending = waiters
-        waiters = []
-        pending.forEach { $0.resume(returning: false) }
+        answerWaiters(false)
         let passes = passWaiters
         passWaiters = []
         passes.forEach { $0.resume() }
@@ -194,13 +192,35 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         return (written, skipped)
     }
 
-    /// True once every local edit is on the server; false if the account changes first.
+    /// True once every local edit is on the server; false if the account changes first, the server fails or answers
+    /// with an error, or nothing is confirmed within `timeout`. It always returns: a migration waiting on it must never
+    /// hang, because writes are held back while it waits (the money «Идёт перенос» freeze).
     /// Local copies of migrated data may be deleted only after this returns true.
-    public func whenSynced() async -> Bool {
+    public func whenSynced(timeout: Duration = .seconds(20)) async -> Bool {
         guard key != nil else { return false }
         if pendingCount == 0 { return true }
+        let id = UUID()
+        let started = generation
         scheduleSync(after: .zero)
-        return await withCheckedContinuation { waiters.append($0) }
+        return await withCheckedContinuation { continuation in
+            waiters.append((id, continuation))
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                guard let self, self.generation == started else { return }
+                self.answerWaiter(id, false)
+            }
+        }
+    }
+
+    private func answerWaiter(_ id: UUID, _ value: Bool) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(returning: value)
+    }
+
+    private func answerWaiters(_ value: Bool) {
+        let pending = waiters
+        waiters = []
+        pending.forEach { $0.continuation.resume(returning: value) }
     }
 
     private func write(_ item: VaultItem<Payload>) -> Bool {
@@ -253,18 +273,17 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
             guard generation == started else { return }
             syncState = .idle
             hasSynced = true
-            if pendingCount == 0 {
-                let done = waiters
-                waiters = []
-                done.forEach { $0.resume(returning: true) }
-            }
+            if pendingCount == 0 { answerWaiters(true) }
         } catch APIError.unauthorized {
             guard generation == started else { return }
             syncState = .offline(unauthorizedMessage)
+            answerWaiters(false)
             onUnauthorized?()
         } catch {
             guard generation == started else { return }
             syncState = .offline(offlineMessage)
+            // Before this, a failed pass left waiters suspended for good.
+            answerWaiters(false)
         }
     }
 

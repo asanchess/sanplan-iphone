@@ -653,4 +653,68 @@ final class FinanceBudgetTests: XCTestCase {
         XCTAssertEqual(cushion.note, "наличные дома")
         XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, 70_000_00)
     }
+
+    // MARK: Envelope history
+
+    /// The owner's phone, 17 November: «Чистыми» dropped by the set-aside but no envelope showed it. Every move now
+    /// lands in the chosen envelope and in its history, and taking the line back restores «Чистыми» exactly.
+    func testSetAsideGoesIntoTheChosenEnvelopeAndItsHistoryCanBeUndone() throws {
+        var start = november()
+        start.records.append(FinanceRecord(id: "trip", kind: "goal", title: "Поездка", amountMinor: 100_000_00, savedMinor: 0))
+        let cleanBefore = try XCTUnwrap(FinanceBudgeting.snapshot(start, today: "2026-11-10").cleanMinor)
+
+        var state = try FinanceBudgeting.setAside(start, amountMinor: 30_000_00, goalId: "trip", date: "2026-11-10")
+        XCTAssertEqual(state.records.first { $0.id == "trip" }?.savedMinor, 30_000_00, "the money is in the envelope the owner chose")
+        XCTAssertEqual(state.records.first { $0.id == "cushion" }?.savedMinor, 50_000_00, "the other envelope is untouched")
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, cleanBefore - 30_000_00)
+        let history = FinanceBudgeting.envelopeHistory(state, goalId: "trip")
+        XCTAssertEqual(history.map(\.amountMinor), [30_000_00])
+        XCTAssertEqual(history.first?.date, "2026-11-10")
+
+        state = try FinanceBudgeting.withdraw(state, amountMinor: 10_000_00, goalId: "trip", date: "2026-11-11")
+        XCTAssertEqual(FinanceBudgeting.envelopeHistory(state, goalId: "trip").map(\.amountMinor), [-10_000_00, 30_000_00], "newest first")
+
+        let withdrawal = try XCTUnwrap(FinanceBudgeting.envelopeHistory(state, goalId: "trip").first)
+        state = try FinanceBudgeting.undoEnvelopeLine(state, lineId: withdrawal.id)
+        XCTAssertEqual(state.records.first { $0.id == "trip" }?.savedMinor, 30_000_00)
+        let setAside = try XCTUnwrap(FinanceBudgeting.envelopeHistory(state, goalId: "trip").first)
+        state = try FinanceBudgeting.undoEnvelopeLine(state, lineId: setAside.id)
+        XCTAssertEqual(state.records.first { $0.id == "trip" }?.savedMinor, 0)
+        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").cleanMinor, cleanBefore)
+        XCTAssertTrue(FinanceBudgeting.envelopeHistory(state, goalId: "trip").isEmpty)
+    }
+
+    func testUndoingASetAsideThatGrewTheTargetShrinksItBack() throws {
+        var state = try FinanceBudgeting.setAside(november(), amountMinor: 460_000_00, goalId: "cushion", raiseTarget: true, date: "2026-11-10")
+        XCTAssertEqual(state.records.first { $0.id == "cushion" }?.amountMinor, 510_000_00)
+        let line = try XCTUnwrap(FinanceBudgeting.envelopeHistory(state, goalId: "cushion").first)
+        XCTAssertEqual(line.raisedTargetMinor, 10_000_00)
+        state = try FinanceBudgeting.undoEnvelopeLine(state, lineId: line.id)
+        let cushion = try XCTUnwrap(state.records.first { $0.id == "cushion" })
+        XCTAssertEqual(cushion.savedMinor, 50_000_00)
+        XCTAssertEqual(cushion.amountMinor, 500_000_00)
+    }
+
+    func testUndoRefusesWhenTheMoneyIsAlreadyTakenOutAndChangesNothing() throws {
+        var state = try FinanceBudgeting.setAside(november(), amountMinor: 20_000_00, goalId: "cushion", outsideAccounts: true, date: "2026-11-10")
+        let line = try XCTUnwrap(FinanceBudgeting.envelopeHistory(state, goalId: "cushion").first)
+        state = try FinanceBudgeting.withdraw(state, amountMinor: 15_000_00, goalId: "cushion", outsideAccounts: true, date: "2026-11-11")
+        XCTAssertThrowsError(try FinanceBudgeting.undoEnvelopeLine(state, lineId: line.id))
+        XCTAssertThrowsError(try FinanceBudgeting.undoEnvelopeLine(state, lineId: "env-missing"))
+    }
+
+    func testHistoryOfADeletedEnvelopeGoesAwayAndSurvivesTheCloud() throws {
+        var start = november()
+        start.records.append(FinanceRecord(id: "trip", kind: "goal", title: "Поездка", amountMinor: 100_000_00, savedMinor: 0))
+        var state = try FinanceBudgeting.setAside(start, amountMinor: 5_000_00, goalId: "trip", date: "2026-11-10")
+        state = try FinanceBudgeting.setAside(state, amountMinor: 5_000_00, goalId: "cushion", date: "2026-11-10")
+
+        let entries = FinanceCloud.plan(existing: [:], state: state).puts
+        let back = FinanceCloud.state(from: entries.map { VaultItem(id: $0.id, updatedAt: 1, data: $0.data) })
+        XCTAssertEqual(back.budget?.envelopeLog, state.budget?.envelopeLog, "the history travels with the money")
+
+        state.records.removeAll { $0.id == "trip" }
+        let clean = try validateFinance(state)
+        XCTAssertEqual(clean.budget?.envelopeLog?.map(\.goalId), ["cushion"])
+    }
 }
