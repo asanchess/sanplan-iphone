@@ -19,12 +19,14 @@ struct NotesScreen: View {
             if vault.phase == .ready {
                 NavigationSplitView(columnVisibility: $columnVisibility) {
                     list
+                        .clearOfShellBar()
                         .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 420)
                         .toolbar(.hidden, for: .navigationBar)
                 } detail: {
                     if let id = selection, store.note(id) != nil {
                         NoteEditorView(store: store, noteID: id, onMakePlan: onMakePlan, onMakeExpense: onMakeExpense)
                             .id(id)
+                            .clearOfShellBar()
                     } else {
                         ZStack {
                             DS.Colors.canvas.ignoresSafeArea()

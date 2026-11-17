@@ -45,6 +45,7 @@ public struct RootView: View {
     @State private var showCapture = false
     @State private var showProgress = false
     @State private var keyboardVisible = false
+    @State private var tabBarHeight: CGFloat = 0
     @State private var mounted: Set<MainTab> = []
     @ObservedObject private var undoCenter = UndoCenter.shared
     @ObservedObject private var reviewNotifications = ReviewNotifications.shared
@@ -225,6 +226,7 @@ public struct RootView: View {
                 if mounted.contains(tab) || tab == selectedTab {
                     TabStage(isActive: tab == selectedTab) { screen(for: tab) }
                         .environment(\.sectionAccent, tab.accent)
+                        .environment(\.shellBarInset, keyboardVisible ? 0 : tabBarHeight)
                 }
             }
         }
@@ -249,6 +251,7 @@ public struct RootView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
                 ArnaTabBar(selection: $selectedTab, tabs: MainTab.ordered)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
             }
         }
         .onChange(of: selectedTab, initial: true) { _, tab in mounted.insert(tab) }

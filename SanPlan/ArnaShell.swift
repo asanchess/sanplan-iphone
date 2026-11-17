@@ -112,13 +112,36 @@ struct TabStage<Content: View>: View {
 }
 
 private struct TabIsActiveKey: EnvironmentKey { static let defaultValue = true }
+private struct ShellBarInsetKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
 
 extension EnvironmentValues {
+    /// Height of the shared bottom bar. UIKit-backed containers (NavigationSplitView) do not receive
+    /// the shell's safe-area inset, so they reserve this space themselves via `clearOfShellBar()`.
+    var shellBarInset: CGFloat {
+        get { self[ShellBarInsetKey.self] }
+        set { self[ShellBarInsetKey.self] = newValue }
+    }
+
     /// False for a tab kept alive in the background: its «+» and shortcuts must not answer.
     var tabIsActive: Bool {
         get { self[TabIsActiveKey.self] }
         set { self[TabIsActiveKey.self] = newValue }
     }
+}
+
+private struct ClearOfShellBar: ViewModifier {
+    @Environment(\.shellBarInset) private var inset
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: inset).accessibilityHidden(true)
+        }
+    }
+}
+
+extension View {
+    /// Keeps content (and its «+») above the shared bottom bar inside a NavigationSplitView column.
+    func clearOfShellBar() -> some View { modifier(ClearOfShellBar()) }
 }
 
 // MARK: - Undo
