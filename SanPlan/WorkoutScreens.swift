@@ -52,13 +52,9 @@ public struct WorkoutScreen: View {
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, DS.Metrics.spacing16)
 
-                    Picker("Раздел", selection: $section) {
-                        ForEach(Part.allCases) { item in
-                            Text(item == .plan && store.activeSession.map { $0.phase != .complete } == true ? "Тренировка" : item.rawValue)
-                                .tag(item)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    ArnaSegmented("Раздел тренировки", selection: $section, options: Part.allCases.map { item in
+                        (item, item == .plan && store.activeSession.map { $0.phase != .complete } == true ? "Тренировка" : item.rawValue)
+                    })
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.vertical, DS.Metrics.spacing8)
                     .petTip("Здесь план тренировки и история. Время считается от старта до финиша.")

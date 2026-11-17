@@ -419,7 +419,7 @@ final class ARNAUITests: XCTestCase {
     @MainActor
     private func assertPlansVisible(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(composerField(Labels.plansComposer).waitForExistence(timeout: 10), "Plans composer not shown", file: file, line: line)
-        XCTAssertTrue(exactButton("Открыть настройки").exists, "Plans settings button missing", file: file, line: line)
+        XCTAssertTrue(exactButton("Профиль и настройки").exists, "Plans profile button missing", file: file, line: line)
         XCTAssertTrue(text("Планы").exists, "Plans heading missing", file: file, line: line)
     }
 

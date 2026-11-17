@@ -546,3 +546,58 @@ public func hideKeyboard() {
 public extension View {
     func keyboardDismissBar() -> some View { modifier(KeyboardDismissBar()) }
 }
+
+// MARK: - Section switcher (canvas «seg»: skewed accent pill on a dark track)
+
+/// Replaces the grey system segmented control for a screen's own sections.
+public struct ArnaSegmented<Value: Hashable>: View {
+    private let title: String
+    @Binding private var selection: Value
+    private let options: [(value: Value, label: String)]
+    @Environment(\.sectionAccent) private var accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public init(_ title: String, selection: Binding<Value>, options: [(value: Value, label: String)]) {
+        self.title = title
+        self._selection = selection
+        self.options = options
+    }
+
+    public var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options.indices, id: \.self) { index in
+                let option = options[index]
+                let isOn = option.value == selection
+                Button {
+                    withAnimation(.easeOut(duration: reduceMotion ? 0.12 : 0.2)) { selection = option.value }
+                } label: {
+                    Text(option.label)
+                        .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundColor(isOn ? DS.Colors.canvas : DS.Colors.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background {
+                            if isOn {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(accent)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .fill(DS.Colors.ink)
+                                            .offset(x: 3, y: 3)
+                                    )
+                                    .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.087, d: 1, tx: 2, ty: 0))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? [.isSelected] : [])
+            }
+        }
+        .padding(4)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+    }
+}

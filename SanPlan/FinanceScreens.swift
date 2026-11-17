@@ -113,25 +113,14 @@ public struct FinanceScreen: View {
                     headerBar(proxy)
                         .padding(.horizontal, DS.Metrics.screenGutter)
 
-                    if !store.state.records.isEmpty {
-                        VStack(spacing: DS.Metrics.spacing12) {
-                            Picker("Раздел", selection: $tab) {
-                                ForEach(FinanceTab.allCases) { Text($0.title).tag($0) }
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                        .padding(.horizontal, DS.Metrics.screenGutter)
-                        .padding(.bottom, DS.Metrics.spacing12)
-                    }
-
                     ScrollView {
                         VStack(spacing: DS.Metrics.spacing24) {
-                            // Сводка прокручивается вместе с разделом и не закрывает его содержимое.
+                            // As on the canvas: the day's number first, then the section switcher.
                             if !store.state.records.isEmpty {
-                                VStack(spacing: DS.Metrics.spacing12) {
-                                    CleanHeader(snapshot: snapshot) { showBreakdown = true }
+                                VStack(spacing: DS.Metrics.spacing16) {
                                     CanSpendTodayCard(result: store.canSpendToday(on: todayString), month: monthSpending)
                                         .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
+                                    ArnaSegmented("Раздел денег", selection: $tab, options: FinanceTab.allCases.map { ($0, $0.title) })
                                 }
                             }
                             messages
@@ -245,8 +234,8 @@ public struct FinanceScreen: View {
                 record: record,
                 onSave: { edit in
                     do {
-                        try store.replaceState(with: StatementImport.edit(record.id, edit, in: store.state), today: todayString)
-                        statusMessage = "Запись обновлена."
+                        try store.replaceStateUndoable(with: StatementImport.edit(record.id, edit, in: store.state), today: todayString, message: "Запись обновлена")
+                        statusMessage = nil
                     } catch {
                         errorMessage = error.localizedDescription
                     }
@@ -285,6 +274,7 @@ public struct FinanceScreen: View {
     private var tabContent: some View {
         switch tab {
         case .overview:
+            CleanHeader(snapshot: snapshot) { showBreakdown = true }
             FinanceOverviewTab(
                 store: store,
                 today: todayString,

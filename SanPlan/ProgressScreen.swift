@@ -26,11 +26,7 @@ struct ProgressScreen: View {
                     ScreenHeader("Прогресс", kicker: "Собрано из ваших данных") {
                         CircleIconButton(icon: "xmark", accessibilityLabel: "Закрыть") { dismiss() }
                     }
-                    Picker("Период", selection: $month) {
-                        Text("Неделя").tag(false)
-                        Text("Месяц").tag(true)
-                    }
-                    .pickerStyle(.segmented)
+                    ArnaSegmented("Период", selection: $month, options: [(false, "Неделя"), (true, "Месяц")])
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         ForEach(trends) { trend in
                             Button { dismiss(); onOpen(trend.tab) } label: { trendCard(trend) }

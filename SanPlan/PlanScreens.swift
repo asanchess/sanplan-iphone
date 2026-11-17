@@ -101,10 +101,7 @@ public struct PlanScreen: View {
 
                 ScrollView {
                     VStack(spacing: DS.Metrics.spacing16) {
-                        Picker("Раздел", selection: $section) {
-                            ForEach(PlansSection.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
+                        ArnaSegmented("Раздел планов", selection: $section, options: PlansSection.allCases.map { ($0, $0.rawValue) })
 
                         if recorder.isRecordingOrPaused {
                             recorderSection
