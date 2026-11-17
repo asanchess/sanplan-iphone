@@ -65,7 +65,10 @@ public struct FinanceScreen: View {
 
     /// «НОЯБРЬ · ЧИСТЫМИ 182 400 ₸» from the canvas; without a balance only the month.
     private var moneyKicker: String {
-        let month = Date().formatted(.dateTime.month(.standaloneWide).locale(Locale(identifier: "ru_RU")))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "LLLL"
+        let month = formatter.string(from: Date())
         guard let clean = (try? FinanceBudgeting.snapshot(store.state, today: todayString))?.cleanMinor else { return month }
         return "\(month) · чистыми \(FinanceText.money(clean))"
     }

@@ -28,13 +28,26 @@ public struct WorkoutScreen: View {
         #endif
     }
 
+    /// «РИТМ НЕДЕЛИ · 2 ИЗ 3»: workouts done since Monday out of the days in the program.
+    private var rhythmKicker: String? {
+        let planned = store.program.days.filter { !$0.exercises.isEmpty }.count
+        guard planned > 0 else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 2
+        calendar.timeZone = WorkoutSummary.zone
+        guard let monday = calendar.dateInterval(of: .weekOfYear, for: Date())?.start else { return nil }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let done = WorkoutSummary.period(store.records, from: WorkoutSummary.dayKey(Int64(monday.timeIntervalSince1970 * 1000)), to: WorkoutSummary.dayKey(nowMs)).completed
+        return "Ритм недели · \(done) из \(planned)"
+    }
+
     public var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 DS.Colors.canvas.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeader("Тренировка") {
+                    ScreenHeader("Тренировка", kicker: rhythmKicker) {
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, DS.Metrics.spacing16)

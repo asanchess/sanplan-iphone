@@ -194,8 +194,18 @@ public struct PlanScreen: View {
         }
     }
 
+    /// «5 ДЕЛ · 4 ПРИВЫЧКИ · 2 ЦЕЛИ» from the canvas: tasks for today, active habits and goals.
+    private var plansKicker: String {
+        let tasks = store.daySummary(for: PlanDomain.today(timeZone: store.timeZone)).total
+        return [
+            ReviewFormat.plural(tasks, "дело", "дела", "дел"),
+            ReviewFormat.plural(habits.activeHabits.count, "привычка", "привычки", "привычек"),
+            ReviewFormat.plural(goals.activeGoals.count, "цель", "цели", "целей")
+        ].joined(separator: " · ")
+    }
+
     private var topBar: some View {
-        ScreenHeader("Планы") {
+        ScreenHeader("Планы", kicker: plansKicker) {
             HeaderTextButton("Будильники", icon: "alarm") {
                 isShowingAlarms = true
             }
