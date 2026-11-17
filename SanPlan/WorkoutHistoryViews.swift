@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// «История»: the week streak, this week or month against the one before, a calendar of training days,
-/// and every workout, each of which opens for editing.
+/// «История»: week or month, its numbers against the one before, a chart of the last weeks or months, the streak,
+/// a calendar of training days, and every workout, each of which opens for editing.
 struct WorkoutHistoryView: View {
     @ObservedObject var store: WorkoutStore
+    /// Owned by the screen, so a deep link can pick it.
+    @Binding var period: Period
+    /// A workout to open in the editor (deep link «.workoutSession(id)»); cleared once shown.
+    @Binding var openRecordId: String?
+    @Environment(\.sectionAccent) private var accent
 
-    @State private var period: Period = .week
     @State private var editing: EditorTarget?
     @State private var deleting: WorkoutRecord?
 
@@ -35,26 +39,23 @@ struct WorkoutHistoryView: View {
                     ErrorBanner(message: error) { store.errorMessage = nil }
                 }
 
-                streakCard(streak)
-
-                Picker("Период", selection: $period) {
-                    ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
+                ArnaSegmented("Период", selection: $period, options: Period.allCases.map { ($0, $0.rawValue) })
 
                 totalsGrid(totals.current, previous: totals.previous)
 
+                activityChart(records, now: now)
+
+                streakCard(streak)
+
                 Card {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                        Text("Последние 16 недель")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(DS.Colors.textPrimary)
+                        TrainingKicker(text: "Дни тренировок · 16 недель")
                         WorkoutHeatmap(days: WorkoutHistory.activeDays(records, calendar: calendar), now: now, calendar: calendar)
                     }
                 }
 
                 HStack {
-                    SectionHeader("Тренировки")
+                    TrainingKicker(text: "Тренировки")
                     Spacer()
                     Button {
                         editing = EditorTarget(record: WorkoutHistory.manualRecord(endingAt: WorkoutStore.nowMs()), isNew: true)
@@ -63,7 +64,7 @@ struct WorkoutHistoryView: View {
                             .font(.subheadline.weight(.semibold))
                             .frame(minHeight: DS.Metrics.minHitTarget)
                     }
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundColor(accent)
                     .disabled(store.isSignedOut)
                 }
 
@@ -81,7 +82,7 @@ struct WorkoutHistoryView: View {
                             .padding(.top, DS.Metrics.spacing4)
                         ForEach(group.records) { record in
                             WorkoutSwipeRow(actions: [
-                                WorkoutSwipeAction(id: "repeat", title: "Повторить", icon: "arrow.counterclockwise", color: DS.Colors.accent) {
+                                WorkoutSwipeAction(id: "repeat", title: "Повторить", icon: "arrow.counterclockwise", color: accent) {
                                     store.repeatWorkout(from: record)
                                 },
                                 WorkoutSwipeAction(id: "delete", title: "Удалить", icon: "trash", color: DS.Colors.destructive) {
@@ -97,11 +98,13 @@ struct WorkoutHistoryView: View {
             }
             .padding(.horizontal, DS.Metrics.screenGutter)
             .padding(.top, DS.Metrics.spacing8)
-            .padding(.bottom, 96)
+            .padding(.bottom, 108)
         }
         .sheet(item: $editing) { target in
             WorkoutRecordEditor(store: store, original: target.record, isNew: target.isNew)
         }
+        .onAppear { openRequestedRecord() }
+        .onChange(of: openRecordId) { _, _ in openRequestedRecord() }
         .confirmationDialog(
             "Удалить тренировку?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -123,12 +126,10 @@ struct WorkoutHistoryView: View {
         Card {
             HStack(alignment: .center, spacing: DS.Metrics.spacing16) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Серия")
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.textSecondary)
+                    TrainingKicker(text: "Серия")
                     Text(weeksText(streak.weeks))
                         .font(.title2.weight(.semibold).monospacedDigit())
-                        .foregroundColor(streak.weeks > 0 ? DS.Colors.accent : DS.Colors.textPrimary)
+                        .foregroundColor(streak.weeks > 0 ? accent : DS.Colors.textPrimary)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
@@ -138,7 +139,7 @@ struct WorkoutHistoryView: View {
                     HStack(spacing: 4) {
                         ForEach(0..<max(streak.goal, streak.thisWeek), id: \.self) { i in
                             Capsule()
-                                .fill(i < streak.thisWeek ? DS.Colors.accent : DS.Colors.textSecondary.opacity(0.2))
+                                .fill(i < streak.thisWeek ? accent : DS.Colors.textSecondary.opacity(0.2))
                                 .frame(width: 14, height: 6)
                         }
                     }
@@ -169,8 +170,8 @@ struct WorkoutHistoryView: View {
     }
 
     private func statTiles(_ current: PeriodSummary, previous: PeriodSummary, against: String) -> some View {
-        let columns = [GridItem(.flexible(), spacing: DS.Metrics.spacing8), GridItem(.flexible(), spacing: DS.Metrics.spacing8)]
-        return LazyVGrid(columns: columns, spacing: DS.Metrics.spacing8) {
+        let columns = [GridItem(.flexible(), spacing: DS.Metrics.spacing12), GridItem(.flexible(), spacing: DS.Metrics.spacing12)]
+        return LazyVGrid(columns: columns, spacing: DS.Metrics.spacing12) {
             WorkoutStatTile(
                 title: "Тренировки",
                 value: "\(current.workouts)",
@@ -217,6 +218,60 @@ struct WorkoutHistoryView: View {
         else { word = "недель" }
         return "\(weeks) \(word)"
     }
+
+    // MARK: - Chart
+
+    /// Workouts in each of the last eight weeks, or the last six months; the current one in the workout colour.
+    private func activityChart(_ records: [WorkoutRecord], now: Date) -> some View {
+        let isWeek = period == .week
+        let count = isWeek ? 8 : 6
+        let component: Calendar.Component = isWeek ? .weekOfYear : .month
+        let current = isWeek
+            ? WorkoutHistory.weekStart(now, calendar: calendar)
+            : (calendar.dateInterval(of: .month, for: now)?.start ?? calendar.startOfDay(for: now))
+        let bars: [TrainingBarChart.Bar] = (0..<count).map { index in
+            let back = count - 1 - index
+            let start = calendar.date(byAdding: component, value: -back, to: current) ?? current
+            let end = calendar.date(byAdding: component, value: 1, to: start) ?? start
+            let done = records.filter { record in
+                let date = WorkoutHistory.date(record.startedAt)
+                return date >= start && date < end
+            }.count
+            let label = isWeek ? Self.weekLabelFormatter.string(from: start) : Self.monthLabelFormatter.string(from: start)
+            return TrainingBarChart.Bar(id: index, label: label, value: Double(done), isCurrent: back == 0)
+        }
+        let total = bars.reduce(0) { $0 + Int($1.value) }
+        let words = TrainingWords.plural(total, "тренировка", "тренировки", "тренировок")
+        return TrainingBarChart(
+            title: isWeek ? "По неделям" : "По месяцам",
+            total: "\(total) \(words)",
+            bars: bars,
+            accessibilitySummary: bars.map { "\($0.label): \(Int($0.value))" }.joined(separator: ", ")
+        )
+    }
+
+    /// Opens the workout a deep link asked for; one already deleted just leaves История open.
+    private func openRequestedRecord() {
+        guard let id = openRecordId else { return }
+        openRecordId = nil
+        if let record = store.records.first(where: { $0.id == id }) {
+            editing = EditorTarget(record: record, isNew: false)
+        }
+    }
+
+    static let weekLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "d.MM"
+        return formatter
+    }()
+
+    static let monthLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.dateFormat = "LLL"
+        return formatter
+    }()
 
     // MARK: - Records
 
@@ -313,6 +368,7 @@ struct WorkoutHeatmap: View {
     let days: [Date: Int]
     let now: Date
     let calendar: Calendar
+    @Environment(\.sectionAccent) private var accent
 
     private let weeks = 16
     private let cell: CGFloat = 14
@@ -349,8 +405,8 @@ struct WorkoutHeatmap: View {
         if future { return .clear }
         switch count {
         case 0: return DS.Colors.textSecondary.opacity(0.14)
-        case 1: return DS.Colors.accent.opacity(0.55)
-        default: return DS.Colors.accent
+        case 1: return accent.opacity(0.55)
+        default: return accent
         }
     }
 }
@@ -461,7 +517,7 @@ struct WorkoutRecordEditor: View {
                 get: { draft.exercises.indices.contains(index) && draft.exercises[index].bodyweight },
                 set: { if draft.exercises.indices.contains(index) { draft.exercises[index].bodyweight = $0 } }
             ))
-            .tint(DS.Colors.controlTint)
+            .tint(DS.Colors.workout)
             if draft.exercises.indices.contains(index) {
                 ForEach(draft.exercises[index].sets.indices, id: \.self) { set in
                     setRow(index, set)

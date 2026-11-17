@@ -89,7 +89,10 @@ public struct RootView: View {
             }
         }
         .sheet(isPresented: $showSettingsSheet) {
-            SettingsView()
+            SettingsView(onOpenProgress: {
+                showSettingsSheet = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showProgress = true }
+            }, plans: model.plans)
                 .environmentObject(onboarding)
         }
         .alert("Будильник", isPresented: Binding(
@@ -105,8 +108,12 @@ public struct RootView: View {
         }
         .task {
             if let tab = screenshotTab { selectedTab = tab }
+            // Round 6: sheets that a screenshot route opens straight away (sections handle their own sub-screens).
+            if ScreenshotRoute.is("progress") { showProgress = true }
+            if let screen = ScreenshotRoute.screen, screen.hasPrefix("profile") { showSettingsSheet = true }
             RecentlyDeleted.shared.register(HabitStore.shared)
             RecentlyDeleted.shared.register(GoalStore.shared)
+            RecentlyDeleted.shared.register(model.notes)
             seedScreenshotWorkout()
             openPendingAlarmText()
             if !isScreenshotSignedInMode {
@@ -259,8 +266,15 @@ public struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .tint(DS.Colors.accent)
         .onChange(of: reviewNotifications.dayReviewRequests) { _, _ in selectedTab = .today }
+        // Round 6: an exact place asked for by Progress/Today/Summary: switch the tab, close sheets; the section shows the place.
+        .onReceive(DeepLinks.shared.$pending) { link in
+            guard let link, let tab = MainTab(rawValue: link.tabRawValue) else { return }
+            showProgress = false
+            showSettingsSheet = false
+            selectedTab = tab
+        }
         .sheet(isPresented: $showProgress) {
-            ProgressScreen(plans: model.plans, finance: model.finance, workouts: model.workouts) { tab in selectedTab = tab }
+            ProgressScreen(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes)
         }
         .sheet(isPresented: $showCapture) {
             CaptureSheet(
@@ -398,6 +412,8 @@ private struct CaptureButton: ViewModifier {
     let action: () -> Void
     @State private var keyboardVisible = false
     @Environment(\.tabIsActive) private var tabIsActive
+    /// Round 6: the «+» takes the section colour (owner: «+ в цвет раздела»).
+    @Environment(\.sectionAccent) private var accent
 
     func body(content: Content) -> some View {
         content
@@ -406,9 +422,9 @@ private struct CaptureButton: ViewModifier {
                     Button(action: action) {
                         Image(systemName: "plus")
                             .font(.title2.weight(.semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(DS.Colors.ink)
                             .frame(width: 56, height: 56)
-                            .background(DS.Colors.accentDeep, in: Circle())
+                            .background(accent, in: Circle())
                             .overlay(Circle().stroke(DS.Colors.ink, lineWidth: 2))
                             .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
                     }

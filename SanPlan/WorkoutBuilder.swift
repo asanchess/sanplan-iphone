@@ -11,6 +11,7 @@ struct WorkoutBuilderView: View {
     @State private var renaming: RenameTarget?
     @State private var renameText = ""
     @State private var titleDraft = ""
+    @Environment(\.sectionAccent) private var accent
 
     private struct RenameTarget: Identifiable {
         let id: String
@@ -97,15 +98,15 @@ struct WorkoutBuilderView: View {
                         Text(Self.shortNames[value - 1])
                             .font(.subheadline.weight(.semibold))
                         Circle()
-                            .fill(isSelected ? DS.Colors.onAccent : DS.Colors.accent)
+                            .fill(isSelected ? DS.Colors.canvas : accent)
                             .frame(width: 5, height: 5)
                             .opacity(isTraining ? 1 : 0)
                     }
                     .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                    .foregroundColor(isSelected ? DS.Colors.onAccent : DS.Colors.textPrimary)
+                    .foregroundColor(isSelected ? DS.Colors.canvas : DS.Colors.textPrimary)
                     .background(
                         RoundedRectangle(cornerRadius: DS.Metrics.innerRadius)
-                            .fill(isSelected ? DS.Colors.accent : DS.Colors.surface)
+                            .fill(isSelected ? accent : DS.Colors.surface)
                     )
                 }
                 .buttonStyle(.plain)
@@ -209,14 +210,14 @@ struct WorkoutBuilderView: View {
             ))
             .font(.subheadline)
             .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.controlTint)
+            .tint(DS.Colors.workout)
             Toggle("Свой вес", isOn: Binding(
                 get: { exercise.bodyweight ?? false },
                 set: { value in edit(id) { $0.bodyweight = value } }
             ))
             .font(.subheadline)
             .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.controlTint)
+            .tint(DS.Colors.workout)
             weightRows(exercise, id: id)
         }
     }
@@ -271,6 +272,7 @@ struct ValueStepperRow: View {
 
     @State private var entering = false
     @State private var typed = ""
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
         HStack(spacing: DS.Metrics.spacing8) {
@@ -332,7 +334,7 @@ struct ValueStepperRow: View {
                 .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
         }
         .buttonStyle(.plain)
-        .foregroundColor(enabled ? DS.Colors.accent : DS.Colors.textSecondary.opacity(0.4))
+        .foregroundColor(enabled ? accent : DS.Colors.textSecondary.opacity(0.4))
         .disabled(!enabled)
         .accessibilityLabel(label)
     }
@@ -354,7 +356,7 @@ struct ExerciseLibrarySheet: View {
                             pick(typed)
                         } label: {
                             Label("Добавить «\(typed)»", systemImage: "plus.circle.fill")
-                                .foregroundColor(DS.Colors.accent)
+                                .foregroundColor(DS.Colors.workout)
                         }
                     }
                 }

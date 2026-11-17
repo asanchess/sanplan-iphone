@@ -1,326 +1,285 @@
 import SwiftUI
 
+/// Places inside «Профиль».
+enum ProfileRoute: Hashable {
+    case mascot
+    case settings(ProfileSettingsSection)
+    case recentlyDeleted
+}
+
+/// «Профиль» (canvas Profile.html, owner decision 17.11): avatar, name and current arc on top, then
+/// «Маскот», «Настройки» by section, «Недавно удалённые» and «Аккаунт». Shared, so it stays violet.
+/// The type keeps its old name: RootView opens it as the settings sheet.
 public struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authService: AuthService
-    @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
     @EnvironmentObject private var workouts: WorkoutStore
-    @EnvironmentObject private var onboarding: OnboardingModel
 
-    @State private var showSignOutConfirmation: Bool = false
-    @ObservedObject private var sounds = AlertSoundSettings.shared
+    @ObservedObject private var wardrobe = MascotWardrobe.shared
+    @ObservedObject private var deleted = RecentlyDeleted.shared
     @AppStorage("pet.visible") private var petVisible = true
+    @State private var path: [ProfileRoute] = []
 
-    public init() {}
+    private let onOpenProgress: (() -> Void)?
+    private let plans: PlanStore?
 
-    private var appVersionString: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-        return "\(version) (\(build))"
+    /// - onOpenProgress: «Открыть прогресс» in the arc card; hidden when nil. RootView closes this sheet in it.
+    /// - plans: lets the profile count arc weeks itself (with the workouts from the environment).
+    public init(onOpenProgress: (() -> Void)? = nil, plans: PlanStore? = nil) {
+        self.onOpenProgress = onOpenProgress
+        self.plans = plans
     }
 
     public var body: some View {
-        NavigationStack {
-            ZStack {
-                DS.Colors.canvas
-                    .ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: DS.Metrics.spacing24) {
-                        ScreenHeader("Профиль", kicker: "Настройки и данные") {
-                            CircleIconButton(icon: "xmark", accessibilityLabel: "Закрыть профиль") { dismiss() }
-                        }
-                        if let error = authService.errorMessage {
-                            ErrorBanner(message: error) {
-                                authService.errorMessage = nil
-                            }
-                        }
-
-                        // Учетная запись
-                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                            SectionHeader("Учетная запись")
-                            Card {
-                                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                                    Text("Электронная почта")
-                                        .font(.caption)
-                                        .foregroundColor(DS.Colors.textSecondary)
-
-                                    Text(accountEmailText)
-                                        .font(.body)
-                                        .foregroundColor(DS.Colors.textPrimary)
-                                }
-                            }
-                        }
-
-                        // Google Календарь
-                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                            SectionHeader("Google Календарь")
-                            Card {
-                                VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                                            Text("Синхронизация событий")
-                                                .font(.body.weight(.medium))
-                                                .foregroundColor(DS.Colors.textPrimary)
-                                            Text(calendarStatusSubtitle)
-                                                .font(.subheadline)
-                                                .foregroundColor(DS.Colors.textSecondary)
-                                        }
-                                        Spacer()
-                                    }
-
-                                    if isCalendarConnected {
-                                        PillButton(
-                                            "Отключить календарь",
-                                            style: .secondary,
-                                            isLoading: authService.isAuthenticating
-                                        ) {
-                                            Task {
-                                                await authService.disconnectCalendar()
-                                            }
-                                        }
-                                    } else {
-                                        PillButton(
-                                            "Подключить календарь",
-                                            style: .primary,
-                                            isLoading: authService.isAuthenticating
-                                        ) {
-                                            Task {
-                                                await authService.connectCalendar()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Будильники
-                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                            SectionHeader("Будильники")
-                            Card {
-                                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                                    HStack {
-                                        Text("Системный доступ AlarmKit")
-                                            .font(.body)
-                                            .foregroundColor(DS.Colors.textPrimary)
-                                        Spacer()
-                                        Text(alarmCoordinator.authorizationStatusText)
-                                            .font(.subheadline)
-                                            .foregroundColor(alarmCoordinator.isAuthorized ? DS.Colors.positive : DS.Colors.textSecondary)
-                                    }
-
-                                    if !alarmCoordinator.isAuthorized {
-                                        PillButton("Разрешить доступ", style: .secondary) {
-                                            Task {
-                                                await alarmCoordinator.requestAuthorization()
-                                            }
-                                        }
-                                        .padding(.top, DS.Metrics.spacing8)
-                                    }
-                                }
-                            }
-                            Card {
-                                AlertSoundRow(title: "Звук напоминаний", choice: sounds.plan, onSelect: sounds.setPlan, volume: sounds.planVolume, onVolume: sounds.setPlanVolume)
-                            }
-                        }
-
-                        WorkoutDefaultsSection(store: workouts)
-
-                        // Герой
-                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                            SectionHeader("Герой")
-                            Card {
-                                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                                    Toggle(isOn: $petVisible) {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text("Показывать героя")
-                                                .font(DS.Fonts.body)
-                                                .foregroundColor(DS.Colors.textPrimary)
-                                            Text("Ходит внизу экрана. Нажмите на него — покажет главное.")
-                                                .font(DS.Fonts.text(14, relativeTo: .footnote))
-                                                .foregroundColor(DS.Colors.textSecondary)
-                                        }
-                                    }
-                                    .tint(DS.Colors.today)
-                                    .accessibilityIdentifier("pet-toggle")
-                                }
-                            }
-                        }
-
-                        // Недавно удалённые
-                        NavigationLink {
-                            RecentlyDeletedScreen()
-                        } label: {
-                            HStack {
-                                Image(systemName: "trash")
-                                    .foregroundColor(DS.Colors.textSecondary)
-                                Text("Недавно удалённые")
-                                    .font(DS.Fonts.body)
-                                    .foregroundColor(DS.Colors.textPrimary)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundColor(DS.Colors.textMuted)
-                            }
-                            .padding(DS.Metrics.spacing16)
-                            .frame(minHeight: DS.Metrics.minHitTarget)
-                            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: DS.Metrics.cardRadius))
+        NavigationStack(path: $path) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    ProfileHeader(kicker: "Профиль и настройки", title: "Профиль", backLabel: "Закрыть профиль") { dismiss() }
+                    if let error = authService.errorMessage {
+                        ErrorBanner(message: error) { authService.errorMessage = nil }
+                    }
+                    arcCard
+                    mascotGroup
+                    settingsGroup
+                    ProfileGroup("Недавно удалённые") {
+                        ProfileNavRow(name: "Недавно удалённые", note: "Вернуть можно \(RecentlyDeleted.keepDays) дней",
+                                      value: deleted.items.isEmpty ? "Пусто" : "\(deleted.items.count)") {
+                            path.append(.recentlyDeleted)
                         }
                         .accessibilityIdentifier("recently-deleted")
-
-                        // О приложении
-                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                            SectionHeader("О приложении")
-                            Card {
-                                HStack {
-                                    Text("Версия ARNA")
-                                        .font(.body)
-                                        .foregroundColor(DS.Colors.textPrimary)
-                                    Spacer()
-                                    Text(appVersionString)
-                                        .font(.body.monospacedDigit())
-                                        .foregroundColor(DS.Colors.textSecondary)
-                                }
-                            }
-                        }
-
-                        OnboardingSettingsRow(model: onboarding, dismiss: { dismiss() })
-
-                        AccountDataSection { dismiss() }
-
-                        // Выход
-                        PillButton(
-                            "Выйти из аккаунта",
-                            style: .destructive,
-                            isLoading: authService.isAuthenticating
-                        ) {
-                            showSignOutConfirmation = true
-                        }
-                        .padding(.top, DS.Metrics.spacing8)
                     }
-                    .padding(.horizontal, DS.Metrics.screenGutter)
-                    .padding(.vertical, DS.Metrics.spacing24)
+                    AccountDataSection(email: accountEmailText, onDeleted: { dismiss() }, onSignedOut: { dismiss() })
+                }
+                .padding(.horizontal, DS.Metrics.screenGutter)
+                .padding(.top, 18)
+                .padding(.bottom, 24)
+            }
+            .background(DS.Colors.canvas.ignoresSafeArea())
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: ProfileRoute.self) { route in
+                switch route {
+                case .mascot:
+                    ProfileMascotScreen()
+                case .settings(let section):
+                    ProfileSettingsScreen(section: section, closeProfile: { dismiss() })
+                case .recentlyDeleted:
+                    RecentlyDeletedScreen()
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
-            .environment(\.sectionAccent, DS.Colors.today)
-            .confirmationDialog(
-                "Вы уверены, что хотите выйти?",
-                isPresented: $showSignOutConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Выйти", role: .destructive) {
-                    Task {
-                        await authService.signOut()
-                        // Plan titles must not keep ringing after the owner signed out on purpose.
-                        // A session that merely expired keeps its alarms: a missed alarm is the worse failure.
-                        if authService.phase == .signedOut {
-                            await alarmCoordinator.deleteAllOwnAlarms()
+        }
+        .environment(\.sectionAccent, DS.Colors.today)
+        .tint(DS.Colors.today)
+        .onAppear {
+            countArcWeeks()
+            openScreenshotRoute()
+        }
+    }
+
+    // MARK: Top
+
+    private var displayName: String {
+        if ScreenshotRoute.demoData { return "Алекс" }
+        let email = accountEmailText
+        guard let at = email.firstIndex(of: "@") else { return email }
+        let name = String(email[..<at])
+        return name.isEmpty ? email : name.prefix(1).uppercased() + name.dropFirst()
+    }
+
+    private var arcCard: some View {
+        let arc = wardrobe.currentArc
+        let weeks = wardrobe.weeksInCurrentArc
+        return HStack(alignment: .center, spacing: 14) {
+            MascotSkinImage(skin: wardrobe.skinID, pose: .shrug, height: 112)
+                .shadow(color: .black.opacity(0.4), radius: 4, y: 4)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("АРКА · \(arc.title.uppercased())")
+                    .font(DS.Fonts.text(13, .heavy, relativeTo: .caption))
+                    .tracking(0.8)
+                    .opacity(0.85)
+                    .accessibilityLabel("Арка «\(arc.title)»")
+                Text(displayName)
+                    .font(DS.Fonts.display(20, relativeTo: .title3))
+                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if wardrobe.isCounted {
+                    Text("Засчитано недель: \(weeks) из \(MascotArcs.weeksPerArc)")
+                        .font(DS.Fonts.text(15, .semibold, relativeTo: .subheadline))
+                        .opacity(0.9)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(DS.Colors.ink.opacity(0.45))
+                            Capsule().fill(Color.white)
+                                .frame(width: proxy.size.width * CGFloat(weeks) / CGFloat(MascotArcs.weeksPerArc))
                         }
-                        dismiss()
                     }
+                    .frame(height: 10)
+                    .accessibilityElement()
+                    .accessibilityLabel("Засчитано \(weeks) из \(MascotArcs.weeksPerArc) недель арки")
+                } else if let next = wardrobe.nextArc {
+                    Text("Дальше — «\(next.title)»: \(MascotArcs.weeksPerArc) засчитанных недель")
+                        .font(DS.Fonts.text(15, .semibold, relativeTo: .subheadline))
+                        .opacity(0.9)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Button("Отмена", role: .cancel) {}
+                if let onOpenProgress {
+                    Button {
+                        onOpenProgress()
+                    } label: {
+                        Text("Открыть прогресс")
+                            .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
+                            .underline()
+                            .frame(minHeight: 32)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundColor(.white)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack(alignment: .topTrailing) {
+                LinearGradient(colors: [DS.Colors.hex(0x6A48D7), DS.Colors.hex(0x8B6CF0)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 54, height: 400)
+                    .rotationEffect(.degrees(24)).offset(x: -34, y: -60)
+                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 18, height: 400)
+                    .rotationEffect(.degrees(24)).offset(x: 6, y: -60)
+            }
+            .accessibilityHidden(true)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .inked(cornerRadius: 24, shadow: 6)
+        .padding(.trailing, 6)
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Groups
+
+    private var mascotGroup: some View {
+        ProfileGroup("Маскот") {
+            ProfileToggleRow(name: "Показывать героя", note: "Гуляет внизу экрана и молчит, пока не спросите", isOn: $petVisible)
+                .accessibilityIdentifier("pet-toggle")
+            ProfileNavRow(name: "Образ", note: "Открытые образы можно надеть в любой арке",
+                          value: MascotArcs.skin(wardrobe.skinID)?.title) {
+                path.append(.mascot)
+            }
+            .accessibilityIdentifier("profile-mascot")
+        }
+    }
+
+    private var settingsGroup: some View {
+        ProfileGroup("Настройки") {
+            ForEach(ProfileSettingsSection.allCases) { section in
+                ProfileNavRow(name: section.title, note: section.note, marker: section.color) {
+                    path.append(.settings(section))
+                }
+                .accessibilityIdentifier("profile-settings-\(section.rawValue)")
             }
         }
     }
 
+    // MARK: Data
+
     private var accountEmailText: String {
-        if let email = authService.status?.account?.email, !email.isEmpty {
-            return email
-        }
-        if case .signedIn(let email) = authService.phase {
-            return email
-        }
+        if ScreenshotRoute.demoData { return "alex@example.com" }
+        if let email = authService.status?.account?.email, !email.isEmpty { return email }
+        if case .signedIn(let email) = authService.phase { return email }
         return "Неизвестно"
     }
 
-    private var isCalendarConnected: Bool {
-        authService.status?.google?.connected ?? false
+    private func countArcWeeks() {
+        guard let plans, !ScreenshotRoute.demoData else { return }
+        let today = PlanDomain.today(timeZone: plans.timeZone)
+        wardrobe.update(countedWeeks: MascotArcs.countedWeeks(plans: plans, records: workouts.records, today: today))
     }
 
-    private var calendarStatusSubtitle: String {
-        if let google = authService.status?.google {
-            if google.connected {
-                if google.needsReconnect == true {
-                    return "Требуется повторное подключение"
-                }
-                return "Подключен"
-            }
-            return "Не подключен"
-        }
-        return "Статус неизвестен"
+    private func openScreenshotRoute() {
+        guard path.isEmpty else { return }
+        if ScreenshotRoute.is("profile-mascot") { path = [.mascot] }
+        if ScreenshotRoute.is("profile-settings") { path = [.settings(.general)] }
     }
 }
 
-/// Starting values for exercises added in the builder. Existing exercises keep their own numbers.
+/// Starting values for exercises added in the builder, the weekly goal and the end-of-rest sound.
+/// Existing exercises keep their own numbers.
 struct WorkoutDefaultsSection: View {
     @ObservedObject var store: WorkoutStore
     @ObservedObject private var sounds = AlertSoundSettings.shared
+    @Environment(\.sectionAccent) private var accent
 
     private var defaults: WorkoutDefaults { WorkoutProgram.defaults(of: store.program) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            SectionHeader("Тренировка")
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                    ValueStepperRow(
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                ProfileGroup("Новые упражнения") {
+                    stepper(ValueStepperRow(
                         title: "Подходов",
                         value: "\(defaults.sets)",
                         canDecrease: defaults.sets > WorkoutProgram.setsRange.lowerBound,
                         canIncrease: defaults.sets < WorkoutProgram.setsRange.upperBound,
                         onDecrease: { change { $0.sets -= 1 } },
                         onIncrease: { change { $0.sets += 1 } }
-                    )
-                    ValueStepperRow(
+                    ))
+                    stepper(ValueStepperRow(
                         title: "Отдых между подходами",
                         value: WorkoutFormat.rest(defaults.restBetweenSets),
                         canDecrease: defaults.restBetweenSets > WorkoutProgram.restRange.lowerBound,
                         canIncrease: defaults.restBetweenSets < WorkoutProgram.restRange.upperBound,
                         onDecrease: { change { $0.restBetweenSets -= WorkoutProgram.restStep } },
                         onIncrease: { change { $0.restBetweenSets += WorkoutProgram.restStep } }
-                    )
-                    ValueStepperRow(
+                    ))
+                    stepper(ValueStepperRow(
                         title: "Отдых между упражнениями",
                         value: WorkoutFormat.rest(defaults.restBetweenExercises),
                         canDecrease: defaults.restBetweenExercises > WorkoutProgram.restRange.lowerBound,
                         canIncrease: defaults.restBetweenExercises < WorkoutProgram.restRange.upperBound,
                         onDecrease: { change { $0.restBetweenExercises -= WorkoutProgram.restStep } },
                         onIncrease: { change { $0.restBetweenExercises += WorkoutProgram.restStep } }
-                    )
-                    Text("Применяется к новым упражнениям. Уже добавленные не меняются.")
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.textSecondary)
+                    ))
                 }
+                Text("Применяется к новым упражнениям. Уже добавленные не меняются.")
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                    ValueStepperRow(
-                        title: "Тренировок в неделю для серии",
-                        value: "\(store.weeklyGoal)",
-                        canDecrease: store.weeklyGoal > WorkoutHistory.goalRange.lowerBound,
-                        canIncrease: store.weeklyGoal < WorkoutHistory.goalRange.upperBound,
-                        onDecrease: { store.setWeeklyGoal(store.weeklyGoal - 1) },
-                        onIncrease: { store.setWeeklyGoal(store.weeklyGoal + 1) }
-                    )
-                    if store.history.weeklyGoal != nil {
-                        Button("Как в плане: \(WorkoutHistory.effectiveGoal(nil, planDays: store.program.days.count))") {
-                            store.setWeeklyGoal(nil)
+            ProfileGroup("Серия") {
+                stepper(ValueStepperRow(
+                    title: "Тренировок в неделю для серии",
+                    value: "\(store.weeklyGoal)",
+                    canDecrease: store.weeklyGoal > WorkoutHistory.goalRange.lowerBound,
+                    canIncrease: store.weeklyGoal < WorkoutHistory.goalRange.upperBound,
+                    onDecrease: { store.setWeeklyGoal(store.weeklyGoal - 1) },
+                    onIncrease: { store.setWeeklyGoal(store.weeklyGoal + 1) }
+                ))
+                if store.history.weeklyGoal != nil {
+                    Button {
+                        store.setWeeklyGoal(nil)
+                    } label: {
+                        ProfileRow("Как в плане", note: "Цель по числу тренировочных дней") {
+                            ProfileValue("\(WorkoutHistory.effectiveGoal(nil, planDays: store.program.days.count))")
                         }
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.accent)
-                    } else {
-                        Text("Сейчас — по числу тренировочных дней в плане.")
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.textSecondary)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(ProfileRowButtonStyle())
+                } else {
+                    ProfileRow("Сейчас — по числу тренировочных дней в плане.")
                 }
             }
-            Card {
+            ProfileGroup("Звук") {
                 AlertSoundRow(title: "Звук конца отдыха", choice: sounds.rest, onSelect: sounds.setRest, volume: sounds.restVolume, onVolume: sounds.setRestVolume)
             }
         }
+    }
+
+    private func stepper(_ row: ValueStepperRow) -> some View {
+        row
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 64)
+            .overlay(alignment: .bottom) { ProfileDivider() }
     }
 
     private func change(_ edit: (inout WorkoutDefaults) -> Void) {
@@ -329,4 +288,3 @@ struct WorkoutDefaultsSection: View {
         store.updateProgram(label: nil) { try WorkoutProgram.setDefaults($0, next) }
     }
 }
-

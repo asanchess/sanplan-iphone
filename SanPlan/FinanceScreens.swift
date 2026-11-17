@@ -1,6 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Деньги, round 6: a 1:1 port of docs/design/canvas-r5/Money.html. The header scrolls with the content;
+/// the day limit and «Обзор / План / Операции» come first; the bottom bar «Кофе 1200 · Добавить» is the section's «+»
+/// (voice or text), and what it adds lands in «Операции». Everything takes the section colour from `sectionAccent`.
 public struct FinanceScreen: View {
     @Binding var showSettings: Bool
     @ObservedObject private var store: FinanceStore
@@ -24,19 +27,21 @@ public struct FinanceScreen: View {
     /// How the last phrase was read, shown above the drafts.
     @State private var parseNote: String? = nil
 
-    // Composer & stats visibility
-    @State private var showComposer: Bool = false
+    // Composer & stats
+    @FocusState private var composerFocused: Bool
     @State private var horizonDays: Int = 30
     @State private var recordToDelete: FinanceRecord? = nil
     @State private var recordToEdit: FinanceRecord? = nil
     @State private var recordToCategorize: FinanceRecord? = nil
 
-    // Tabs, pinned header and the operations feed
+    // Tabs and the operations feed
     @State private var tab: FinanceTab = .overview
+    /// «Траты по дням»: week or month; a deep link can ask for either.
+    @State private var period: DeepLink.Period = .week
     @State private var showBreakdown = false
     @State private var showReconcile = false
-    @State private var feedExpanded = false
     @State private var ledgerFilter = LedgerFilter(month: FinanceText.currentMonth())
+    @State private var didApplyScreenshotRoute = false
 
     // Vault Import / Export
     @State private var showExportSheet: Bool = false
@@ -51,6 +56,8 @@ public struct FinanceScreen: View {
     @State private var pendingImportEnvelope: FinanceVaultEnvelope? = nil
     @State private var pendingImportState: FinanceState? = nil
     @State private var exportedDocument: EncryptedVaultDocument? = nil
+
+    @Environment(\.sectionAccent) private var accent
 
     public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, client: APIClient? = nil, showSettings: Binding<Bool>) {
         self.store = store
@@ -81,6 +88,22 @@ public struct FinanceScreen: View {
         return (spent, limits.values.reduce(0, +) / FinanceBudgeting.oneTenge)
     }
 
+    /// «Чистыми X ₸» and why, under the day limit (was the pinned CleanHeader).
+    private var cleanLine: (amount: String, note: String, warns: Bool)? {
+        guard let s = snapshot else { return nil }
+        guard let clean = s.cleanMinor else {
+            return ("—", "Остаток не указан: напишите внизу «остаток 150000» или загрузите выписку", true)
+        }
+        let amount = FinanceText.money(clean)
+        if clean < 0 { return (amount, "Не хватает \(FinanceText.money(-clean)) на план месяца", true) }
+        if let asOf = s.asOf, s.isStale {
+            return (amount, "остаток на \(FinanceText.dayMonth(asOf)) · пора загрузить свежую выписку", true)
+        }
+        if s.limits.isEmpty { return (amount, "Лимитов нет — на повседневные траты ничего не учтено", true) }
+        guard let asOf = s.asOf else { return (amount, "на счетах", false) }
+        return (amount, "на счетах на \(FinanceText.dayMonth(asOf))", false)
+    }
+
     private var currentMonthString: String {
         String(todayString.prefix(7))
     }
@@ -107,34 +130,35 @@ public struct FinanceScreen: View {
     public var body: some View {
         ZStack {
             DS.Colors.canvas.ignoresSafeArea()
+            MoneyBackdrop(accent: accent)
+                .ignoresSafeArea(edges: .top)
 
             ScrollViewReader { proxy in
                 VStack(spacing: 0) {
-                    headerBar(proxy)
-                        .padding(.horizontal, DS.Metrics.screenGutter)
-
                     ScrollView {
-                        VStack(spacing: DS.Metrics.spacing24) {
+                        VStack(alignment: .leading, spacing: MoneyStyle.blockGap) {
+                            ScreenHeader("Деньги", kicker: moneyKicker) {}
+
                             // As on the canvas: the day's number first, then the section switcher.
                             if !store.state.records.isEmpty {
-                                VStack(spacing: DS.Metrics.spacing16) {
-                                    CanSpendTodayCard(result: store.canSpendToday(on: todayString), month: monthSpending)
-                                        .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
-                                    ArnaSegmented("Раздел денег", selection: $tab, options: FinanceTab.allCases.map { ($0, $0.title) })
-                                }
+                                CanSpendTodayCard(
+                                    result: store.canSpendToday(on: todayString),
+                                    month: monthSpending,
+                                    clean: cleanLine,
+                                    onBreakdown: { showBreakdown = true },
+                                    onSetLimits: { tab = .plan }
+                                )
+                                .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
+                                ArnaSegmented("Раздел денег", selection: $tab, options: FinanceTab.allCases.map { ($0, $0.title) })
                             }
                             messages
 
-                            if showComposer || !drafts.isEmpty {
-                                composerSection.id("composer")
-                                    .petTip("Пишите как удобно: «кофе 1200» — категорию подберу сам.")
-                            }
                             if !drafts.isEmpty {
-                                reviewSection
+                                reviewSection.id("review")
                             }
 
                             if store.state.records.isEmpty {
-                                if !showComposer && drafts.isEmpty {
+                                if drafts.isEmpty {
                                     emptyStateView
                                 }
                                 statementsSection
@@ -143,15 +167,38 @@ public struct FinanceScreen: View {
                                 tabContent
                             }
                         }
-                        .padding(.horizontal, DS.Metrics.screenGutter)
-                        .padding(.top, DS.Metrics.spacing4)
-                        .padding(.bottom, DS.Metrics.spacing32)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .padding(.bottom, 24)
                     }
+                    .scrollDismissesKeyboard(.interactively)
+                    .onChange(of: drafts.isEmpty) { _, isEmpty in
+                        guard !isEmpty else { return }
+                        withAnimation { proxy.scrollTo("review", anchor: .top) }
+                    }
+
+                    composerBar
                 }
             }
         }
         .onAppear {
+            applyScreenshotRoute()
             store.refreshSummary(today: todayString, horizonDays: horizonDays)
+        }
+        .onReceive(DeepLinks.shared.$pending) { link in
+            guard let link else { return }
+            switch link {
+            case .moneyOverview(let p):
+                tab = .overview
+                period = p
+            case .moneyPlan:
+                tab = .plan
+            case .moneyOperations:
+                tab = .operations
+            default:
+                return
+            }
+            DeepLinks.shared.consume()
         }
         .fileExporter(
             isPresented: $showExportSheet,
@@ -215,57 +262,80 @@ public struct FinanceScreen: View {
             Text(record.title)
         }
         .sheet(item: $recordToEdit) { record in
-            if record.importId == nil {
-                ManualEditSheet(
-                    record: record,
-                    onSave: { edit in
-                        let failure = applyChange("Запись обновлена.") { try FinanceBudgeting.editManual($0, id: record.id, edit) }
-                        if failure == nil { recordToEdit = nil }
-                        return failure
-                    },
-                    onDelete: {
-                        recordToEdit = nil
-                        recordToDelete = record
-                    },
-                    onCancel: { recordToEdit = nil }
-                )
-            } else {
-            RecordEditSheet(
-                record: record,
-                onSave: { edit in
-                    do {
-                        try store.replaceStateUndoable(with: StatementImport.edit(record.id, edit, in: store.state), today: todayString, message: "Запись обновлена")
-                        statusMessage = nil
-                    } catch {
-                        errorMessage = error.localizedDescription
-                    }
-                    recordToEdit = nil
-                },
-                onDelete: {
-                    recordToEdit = nil
-                    recordToDelete = record
-                },
-                onCancel: { recordToEdit = nil }
-            )
+            Group {
+                if record.importId == nil {
+                    ManualEditSheet(
+                        record: record,
+                        onSave: { edit in
+                            let failure = applyChange("Запись обновлена.") { try FinanceBudgeting.editManual($0, id: record.id, edit) }
+                            if failure == nil { recordToEdit = nil }
+                            return failure
+                        },
+                        onDelete: {
+                            recordToEdit = nil
+                            recordToDelete = record
+                        },
+                        onCancel: { recordToEdit = nil }
+                    )
+                } else {
+                    RecordEditSheet(
+                        record: record,
+                        onSave: { edit in
+                            do {
+                                try store.replaceStateUndoable(with: StatementImport.edit(record.id, edit, in: store.state), today: todayString, message: "Запись обновлена")
+                                statusMessage = nil
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
+                            recordToEdit = nil
+                        },
+                        onDelete: {
+                            recordToEdit = nil
+                            recordToDelete = record
+                        },
+                        onCancel: { recordToEdit = nil }
+                    )
+                }
             }
+            .environment(\.sectionAccent, accent)
+            .tint(accent)
         }
         .sheet(isPresented: $showBreakdown) {
             CleanBreakdownSheet(snapshot: snapshot, onSetLimits: {
                 showBreakdown = false
                 tab = .plan
             }) { showBreakdown = false }
+            .environment(\.sectionAccent, accent)
         }
         .sheet(isPresented: $showReconcile) {
             ReconcileSheet(today: todayString, apply: financeApply) { showReconcile = false }
+                .environment(\.sectionAccent, accent)
         }
         .onChange(of: store.state.records.isEmpty) { _, isEmpty in
             // Sign-out or a reset empties the state: nothing typed into the feed may outlive it.
             if isEmpty {
                 ledgerFilter = LedgerFilter(month: currentMonthString)
-                feedExpanded = false
                 tab = .overview
+                period = .week
             }
         }
+    }
+
+    /// Debug screenshots: made-up money in memory and the asked-for tab (money-overview / money-plan / money-ops).
+    private func applyScreenshotRoute() {
+        #if DEBUG
+        guard !didApplyScreenshotRoute else { return }
+        didApplyScreenshotRoute = true
+        if ScreenshotRoute.demoData {
+            store.showScreenshotDemo(MoneyDemo.state(today: todayString), today: todayString)
+        }
+        switch ScreenshotRoute.screen ?? "" {
+        case "money-overview": tab = .overview
+        case "money-plan": tab = .plan
+        case "money-ops": tab = .operations
+        default: break
+        }
+        #endif
     }
 
     // MARK: - Tabs
@@ -274,18 +344,17 @@ public struct FinanceScreen: View {
     private var tabContent: some View {
         switch tab {
         case .overview:
-            CleanHeader(snapshot: snapshot) { showBreakdown = true }
             FinanceOverviewTab(
                 store: store,
                 today: todayString,
                 apply: financeApply,
+                period: $period,
                 onCategory: { category in
                     ledgerFilter = LedgerFilter(
                         month: currentMonthString,
                         kind: .expense,
                         category: category == "Остальное" ? nil : category
                     )
-                    feedExpanded = true
                     tab = .operations
                 },
                 onOpenPlan: { tab = .plan }
@@ -293,15 +362,15 @@ public struct FinanceScreen: View {
         case .plan:
             FinancePlanTab(store: store, today: todayString, apply: financeApply)
         case .operations:
-            ManualEntriesCard(state: store.state) { recordToEdit = $0 }
             OperationsFeed(
-                store: store, filter: $ledgerFilter, expanded: $feedExpanded,
+                store: store, filter: $ledgerFilter,
                 onEdit: { recordToEdit = $0 },
                 onDelete: { recordToDelete = $0 },
                 onCategory: { recordToCategorize = $0 }
             )
-            ReconcileCard(snapshot: snapshot) { showReconcile = true }
+            ManualEntriesCard(state: store.state) { recordToEdit = $0 }
             statementsSection
+            ReconcileCard(snapshot: snapshot) { showReconcile = true }
             vaultActionsSection
         }
     }
@@ -323,8 +392,8 @@ public struct FinanceScreen: View {
         if let stat = statusMessage {
             Card {
                 Text(stat)
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.positive)
+                    .font(DS.Fonts.text(15, .medium))
+                    .foregroundColor(accent)
             }
         }
     }
@@ -371,23 +440,49 @@ public struct FinanceScreen: View {
         }
     }
 
-    // MARK: - Header Bar
+    // MARK: - Bottom composer (the section's «+»)
 
-    private func headerBar(_ proxy: ScrollViewProxy) -> some View {
-        ScreenHeader("Деньги", kicker: moneyKicker) {
-            CircleIconButton(
-                icon: "plus",
-                accessibilityLabel: "Добавить запись"
-            ) {
-                showComposer = true
-                // The composer sits above the tab content; bring it into view from any scroll position.
-                DispatchQueue.main.async {
-                    withAnimation { proxy.scrollTo("composer", anchor: .top) }
-                }
+    private var composerBar: some View {
+        VStack(spacing: 0) {
+            if let speechError = dictation.errorMessage {
+                Text(speechError)
+                    .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
             }
+            MoneyComposerBar(
+                text: Binding(get: { inputs.money }, set: { inputs.edit($0, for: .money) }),
+                focus: $composerFocused,
+                isListening: dictation.isListening(to: .money),
+                level: dictation.level,
+                isBusy: isParsing,
+                onMic: {
+                    if dictation.isListening(to: .money) {
+                        dictation.stop()
+                    } else {
+                        // Speech becomes text on the phone (Apple Speech); only the text is read by the server.
+                        Task { await dictation.start(into: .money) }
+                    }
+                },
+                onAdd: {
+                    // Empty field: «Добавить» opens the keyboard; with text it reads the phrase into drafts.
+                    if textInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        composerFocused = true
+                    } else {
+                        dictation.stop()
+                        composerFocused = false
+                        parseEnteredText()
+                    }
+                },
+                onClear: {
+                    dictation.stop()
+                    inputs.clear(.money)
+                }
+            )
         }
-        .padding(.top, DS.Metrics.spacing16)
-        .padding(.bottom, DS.Metrics.spacing12)
+        .background(DS.Colors.canvas)
     }
 
     // MARK: - Empty State
@@ -396,13 +491,13 @@ public struct FinanceScreen: View {
         Card {
             VStack(spacing: DS.Metrics.spacing16) {
                 EmptyState(
-                    title: "Финансовый учёт пуст",
-                    message: "Записывай остатки, доходы, расходы и регулярные платежи обычным текстом на русском языке.",
+                    title: "Сколько у вас денег сейчас?",
+                    message: "Напишите внизу обычным текстом: «остаток 100000», «обед 2500», «зарплата 300000». Можно голосом.",
                     icon: "creditcard"
                 )
 
-                PillButton("Добавить первую запись") {
-                    showComposer = true
+                MoneyPrimaryButton("Добавить первую запись") {
+                    composerFocused = true
                 }
                 .accessibilityIdentifier("money-first-record")
             }
@@ -410,79 +505,7 @@ public struct FinanceScreen: View {
         }
     }
 
-    // MARK: - Composer Section
-
-    private var composerSection: some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                HStack {
-                    SectionHeader(store.state.records.isEmpty ? "Сколько у тебя денег сейчас?" : "Новая запись")
-
-                    if !store.state.records.isEmpty {
-                        Button("Скрыть") {
-                            showComposer = false
-                        }
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.accent)
-                    }
-                }
-
-                Text("Например: «У меня сейчас 100 тысяч тенге» или «Вчера потратил 2500 на обед; получил 20000 за работу».")
-                    .font(.caption)
-                    .foregroundColor(DS.Colors.textSecondary)
-
-                Picker("Определить по фразе", selection: $kindHint) {
-                    Text("Определить по фразе").tag("")
-                    Text("Остаток сейчас").tag("balance")
-                    Text("Полученный доход").tag("income")
-                    Text("Расход").tag("expense")
-                    Text("Регулярный платёж").tag("obligation")
-                    Text("Цель накопления").tag("goal")
-                    Text("Ожидаемый доход").tag("planned_income")
-                }
-                .pickerStyle(.menu)
-                .accentColor(DS.Colors.accent)
-                .padding(.vertical, 4)
-
-                ComposerField(
-                    placeholder: "Например: потратил 2500 на обед",
-                    text: Binding(get: { inputs.money }, set: { inputs.edit($0, for: .money) }),
-                    isListening: dictation.isListening(to: .money),
-                    level: dictation.level,
-                    isBusy: isParsing,
-                    parseTitle: isParsing ? "Разбираю…" : "Разобрать",
-                    onMic: {
-                        if dictation.isListening(to: .money) {
-                            dictation.stop()
-                        } else {
-                            // Speech becomes text on the phone (Apple Speech); only the text is read by the server.
-                            Task { await dictation.start(into: .money) }
-                        }
-                    },
-                    onParse: {
-                        dictation.stop()
-                        parseEnteredText()
-                    },
-                    onClear: {
-                        dictation.stop()
-                        inputs.clear(.money)
-                    }
-                )
-
-                if let speechError = dictation.errorMessage {
-                    Text(speechError)
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.warning)
-                }
-
-                Text(client == nil
-                     ? "Текст разбирается на устройстве."
-                     : "Фразу читает Gemini (Google) через сервер ARNA. Сервер её не хранит, Google может хранить по своим правилам. Остатки и история остаются на телефоне.")
-                    .font(.caption2)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-        }
-    }
+    // MARK: - Parsing
 
     /// Gemini reads the phrase first, like in plans; without the network or quota the phone's own rules do.
     private func parseEnteredText() {
@@ -549,39 +572,60 @@ public struct FinanceScreen: View {
 
                 if let parseNote {
                     Text(parseNote)
-                        .font(.caption)
+                        .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
                         .foregroundColor(DS.Colors.textSecondary)
                 }
 
+                Picker("Определить по фразе", selection: $kindHint) {
+                    Text("Определить по фразе").tag("")
+                    Text("Остаток сейчас").tag("balance")
+                    Text("Полученный доход").tag("income")
+                    Text("Расход").tag("expense")
+                    Text("Регулярный платёж").tag("obligation")
+                    Text("Цель накопления").tag("goal")
+                    Text("Ожидаемый доход").tag("planned_income")
+                }
+                .pickerStyle(.menu)
+                .tint(accent)
+
                 if isDraftStale {
-                    Text("Текст изменён после разбора. Нажми «Разобрать» заново.")
-                        .font(.caption)
+                    Text("Текст изменён после разбора.")
+                        .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
                         .foregroundColor(DS.Colors.warning)
+                    MoneyOutlineButton("Разобрать заново", icon: "arrow.clockwise", isLoading: isParsing) {
+                        dictation.stop()
+                        parseEnteredText()
+                    }
                 }
 
                 if let f = firstQuestion {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Уточни запись \(f.index + 1): \(f.question.label)")
-                            .font(.subheadline.weight(.semibold))
+                            .font(DS.Fonts.text(15, .semibold))
                             .foregroundColor(DS.Colors.warning)
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(DS.Colors.surfaceRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
 
                 ForEach(drafts.indices, id: \.self) { index in
                     draftCard(index: index)
                 }
 
-                PillButton(
+                MoneyPrimaryButton(
                     "Подтвердить и добавить (\(drafts.count))",
-                    style: .primary,
                     isEnabled: !drafts.isEmpty && missingQuestions.isEmpty && !isDraftStale
                 ) {
                     confirmDrafts()
                 }
+
+                Text(client == nil
+                     ? "Текст разбирается на устройстве."
+                     : "Фразу читает Gemini (Google) через сервер ARNA. Сервер её не хранит, Google может хранить по своим правилам. Остатки и история остаются на телефоне.")
+                    .font(DS.Fonts.text(12, .medium, relativeTo: .caption2))
+                    .foregroundColor(DS.Colors.textSecondary)
             }
         }
     }
@@ -591,15 +635,16 @@ public struct FinanceScreen: View {
         return VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
             HStack {
                 Text("Запись \(index + 1)")
-                    .font(.caption.weight(.semibold))
+                    .font(DS.Fonts.text(13, .semibold, relativeTo: .caption))
                     .foregroundColor(DS.Colors.textSecondary)
                 Spacer()
                 Button("Убрать") {
                     drafts.remove(at: index)
                     draftEdited = true
                 }
-                .font(.caption)
+                .font(DS.Fonts.text(13, .semibold, relativeTo: .caption))
                 .foregroundColor(DS.Colors.destructive)
+                .frame(minHeight: DS.Metrics.minHitTarget)
             }
 
             // Kind selector
@@ -616,13 +661,14 @@ public struct FinanceScreen: View {
                 Text("Ожидаемый доход").tag("planned_income")
             }
             .pickerStyle(.menu)
+            .tint(accent)
 
             // Title field
             TextField(d.kind == "expense" ? "На что потрачено" : d.kind == "income" ? "Источник дохода" : "Название", text: Binding(
                 get: { d.title ?? "" },
                 set: { patchDraft(index: index, keyPath: \.title, value: $0.isEmpty ? nil : $0) }
             ))
-            .textFieldStyle(.roundedBorder)
+            .moneyField()
 
             // Amount field
             TextField("Сумма в ₸", text: Binding(
@@ -636,7 +682,7 @@ public struct FinanceScreen: View {
                 }
             ))
             .keyboardType(.numbersAndPunctuation)
-            .textFieldStyle(.roundedBorder)
+            .moneyField()
 
             // Date field
             if d.kind == "balance" || d.kind == "income" || d.kind == "expense" {
@@ -644,20 +690,15 @@ public struct FinanceScreen: View {
                     get: { d.date ?? "" },
                     set: { patchDraft(index: index, keyPath: \.date, value: $0.isEmpty ? nil : $0) }
                 ))
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
             }
 
             // Frequency field
             if d.kind == "obligation" || d.kind == "planned_income" {
-                Picker("Периодичность", selection: Binding(
+                ArnaSegmented("Периодичность", selection: Binding(
                     get: { d.frequency ?? "" },
                     set: { patchDraft(index: index, keyPath: \.frequency, value: $0.isEmpty ? nil : $0) }
-                )) {
-                    Text("Как часто?").tag("")
-                    Text("Каждый месяц").tag("monthly")
-                    Text("Каждую неделю").tag("weekly")
-                }
-                .pickerStyle(.segmented)
+                ), options: [("monthly", "Каждый месяц"), ("weekly", "Каждую неделю")])
             }
 
             // Goal fields
@@ -673,13 +714,13 @@ public struct FinanceScreen: View {
                     }
                 ))
                 .keyboardType(.numbersAndPunctuation)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
 
                 TextField("Срок (ГГГГ-ММ-ДД) — необязательно", text: Binding(
                     get: { d.dueDate ?? "" },
                     set: { patchDraft(index: index, keyPath: \.dueDate, value: $0.isEmpty ? nil : $0) }
                 ))
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
             }
 
             // Balance relation
@@ -693,11 +734,12 @@ public struct FinanceScreen: View {
                     Text("Нет, после остатка").tag("after")
                 }
                 .pickerStyle(.menu)
+                .tint(accent)
             }
         }
         .padding(12)
         .background(DS.Colors.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func patchDraft<T>(index: Int, keyPath: WritableKeyPath<FinanceDraft, T>, value: T) {
@@ -712,17 +754,16 @@ public struct FinanceScreen: View {
             try store.commit(drafts: drafts, today: todayString)
             self.drafts = []
             self.parseNote = nil
-            // What was just added shows first in «Добавлено вручную» on the operations tab.
+            // What was just added shows in the feed and first in «Добавлено вручную» on the operations tab.
             self.tab = .operations
             inputs.clear(.money)
             self.sourceText = ""
             self.kindHint = ""
             self.sourceHint = ""
             self.draftEdited = false
-            self.showComposer = false
             statusMessage = count == 1
-                ? "Добавлено. Запись — первая в «Добавлено вручную», её можно изменить или удалить."
-                : "Добавлено записей: \(count). Они первые в «Добавлено вручную», их можно изменить или удалить."
+                ? "Добавлено. Запись — в «Операциях» и первая в «Добавлено вручную», её можно изменить или удалить."
+                : "Добавлено записей: \(count). Они в «Операциях» и первые в «Добавлено вручную», их можно изменить или удалить."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -744,7 +785,7 @@ public struct FinanceScreen: View {
                 VStack(spacing: DS.Metrics.spacing12) {
                     if !store.state.records.isEmpty {
                         SecureField("Пароль для копии", text: $vaultPasswordPrompt)
-                            .textFieldStyle(.roundedBorder)
+                            .moneyField()
 
                         PillButton(
                             "Сохранить копию в Файлы",

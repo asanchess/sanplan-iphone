@@ -11,7 +11,7 @@ final class ARNAUITests: XCTestCase {
     private var app: XCUIApplication!
 
     private enum Labels {
-        static let moneyComposer = "Например: потратил 2500 на обед"
+        static let moneyComposer = "Новая операция"
         static let plansComposer = "Что запланировать?"
         static let hideKeyboard = "Скрыть клавиатуру"
     }
@@ -115,8 +115,9 @@ final class ARNAUITests: XCTestCase {
                       "Typed text did not reach the money field; value: \(value(of: field))")
         hideKeyboardIfNeeded()
 
-        let parse = button("Разобрать")
-        scrollTo(parse)
+        // «Добавить» in the bottom bar reads the phrase into drafts.
+        let parse = app.buttons["money-add"]
+        XCTAssertTrue(parse.waitForExistence(timeout: 5), "Money «Добавить» button missing")
         parse.tap()
 
         // Parsing may wait for the server before falling back to the phone's own rules.
@@ -223,7 +224,8 @@ final class ARNAUITests: XCTestCase {
             startNow.tap()
         }
         XCTAssertTrue(text("Рабочий подход").waitForExistence(timeout: 15), "Working set did not start")
-        XCTAssertTrue(exactButton("Завершить досрочно").exists)
+        // Nothing is ticked yet, so the finish button on top closes without saving.
+        XCTAssertEqual(workoutFinishButton().label, "Закрыть без сохранения", "Top finish button should close without saving before any set")
 
         let startRest = button("Подход сделан, отдых")
         if !startRest.waitForExistence(timeout: 3) {
@@ -288,11 +290,17 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Добавить подход")).firstMatch.exists, "Add-set control missing")
         XCTAssertTrue(button("Подход сделан, отдых").exists, "«Подход сделан, отдых» missing")
 
+        // Nothing ticked: the top button closes without saving. Tick the set by starting the rest, then it finishes with a question.
+        XCTAssertEqual(workoutFinishButton().label, "Закрыть без сохранения", "Top finish button should close without saving before any set")
+        button("Подход сделан, отдых").tap()
+        dismissSystemAlertIfPresent(timeout: 5) // AlarmKit asks on the first rest.
+        XCTAssertTrue(text("Отдых").waitForExistence(timeout: 5), "Rest phase did not start")
+
         // The finish dialog opens and can be cancelled without changing the workout.
-        let finish = exactButton("Завершить досрочно")
-        XCTAssertTrue(finish.exists)
+        let finish = workoutFinishButton()
+        XCTAssertTrue(waitUntil(5) { finish.label == "Завершить" }, "Top finish button did not switch to «Завершить» after a set")
         finish.tap()
-        let confirm = exactButton("Завершить")
+        let confirm = exactButton("Завершить и сохранить")
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finish confirmation did not appear")
         // iOS 26 shows the dialog as a popover without the cancel button; a tap outside cancels it.
         let keepGoing = exactButton("Продолжить тренировку")
@@ -301,8 +309,8 @@ final class ARNAUITests: XCTestCase {
         } else {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
         }
-        XCTAssertTrue(waitUntil(5) { !self.exactButton("Завершить").exists }, "The finish dialog did not close")
-        XCTAssertTrue(text("Рабочий подход").exists, "Cancelling the dialog changed the workout")
+        XCTAssertTrue(waitUntil(5) { !self.exactButton("Завершить и сохранить").exists }, "The finish dialog did not close")
+        XCTAssertTrue(text("Отдых").exists, "Cancelling the dialog changed the workout")
     }
 
     // MARK: - 8. Settings
@@ -316,7 +324,12 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
         gear.tap()
 
-        XCTAssertTrue(text("Учетная запись").waitForExistence(timeout: 10), "Settings sheet did not open")
+        // Round 6: the profile lists settings by section; «Тренировка» holds the workout defaults.
+        XCTAssertTrue(text("Электронная почта").waitForExistence(timeout: 10), "Profile sheet did not open")
+        let workoutSettings = app.buttons["profile-settings-workout"]
+        scrollTo(workoutSettings)
+        workoutSettings.tap()
+
         let restBetweenExercises = text("Отдых между упражнениями")
         scrollTo(restBetweenExercises)
         XCTAssertTrue(text("Подходов").exists, "Default sets row missing")
@@ -325,10 +338,14 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(exactButton("Меньше: Подходов").exists)
         XCTAssertTrue(text("Применяется к новым упражнениям. Уже добавленные не меняются.").exists)
 
+        let back = exactButton("Назад")
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+
         let close = exactButton("Закрыть профиль")
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.tap()
-        XCTAssertTrue(waitUntil(5) { !self.text("Учетная запись").exists }, "Settings sheet did not close")
+        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
     }
 
     // MARK: - 10. Notes and the shared «+»
@@ -406,12 +423,12 @@ final class ARNAUITests: XCTestCase {
     @MainActor
     private func assertMoneyVisible(file: StaticString = #filePath, line: UInt = #line) {
         let shown = waitUntil(10) {
-            self.app.buttons["statement-import"].exists || self.app.buttons["clean-header"].exists
+            self.app.buttons["statement-import"].exists || self.app.buttons["can-spend-today"].exists
         }
-        XCTAssertTrue(shown, "Money screen not shown (no statement import, no «Чистыми» header)", file: file, line: line)
+        XCTAssertTrue(shown, "Money screen not shown (no statement import, no «Можно потратить сегодня»)", file: file, line: line)
         XCTAssertTrue(text("Деньги").exists, "Money heading missing", file: file, line: line)
-        XCTAssertTrue(exactButton("Добавить запись").exists, "Money «+» button missing", file: file, line: line)
-        if app.buttons["clean-header"].exists {
+        XCTAssertTrue(app.buttons["money-add"].exists, "Money «Добавить» (the section's «+») missing", file: file, line: line)
+        if app.buttons["can-spend-today"].exists {
             for tab in ["Обзор", "План", "Операции"] {
                 XCTAssertTrue(exactButton(tab).exists, "Money tab «\(tab)» missing", file: file, line: line)
             }
@@ -430,7 +447,7 @@ final class ARNAUITests: XCTestCase {
         let shown = waitUntil(10) {
             self.button("Добавить упражнение").exists
                 || self.exactButton("Изменить").exists
-                || self.exactButton("Завершить досрочно").exists
+                || self.app.buttons["workout-finish"].exists
                 || self.text("Тренировка завершена").exists
         }
         XCTAssertTrue(shown, "Workout screen not shown (no builder, program, active or finished workout)", file: file, line: line)
@@ -508,34 +525,18 @@ final class ARNAUITests: XCTestCase {
         if segment.waitForExistence(timeout: 3) { segment.tap() }
     }
 
-    /// The operations feed is collapsed by default; opens it unless it is open already.
+    /// Round 6: the feed is the «Операции» tab itself, always open; waits for its search field.
     @MainActor
     private func expandOperationsFeed(file: StaticString = #filePath, line: UInt = #line) {
-        let toggle = app.buttons["operations-feed-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5), "Operations feed row missing", file: file, line: line)
-        if !app.textFields["operations-search"].exists {
-            scrollTo(toggle, file: file, line: line)
-            toggle.tap()
-        }
         XCTAssertTrue(app.textFields["operations-search"].waitForExistence(timeout: 5),
-                      "Operations feed did not open", file: file, line: line)
+                      "Operations feed is not shown", file: file, line: line)
     }
 
-    /// Opens the Money composer from the empty state, the «+» button or an unfinished draft.
+    /// Round 6: the Money composer is the bottom bar «Новая операция», always on screen.
     @MainActor
     private func openMoneyComposer(file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let field = composerField(Labels.moneyComposer)
-        if field.waitForExistence(timeout: 2) { return field }
-
-        let first = app.buttons["money-first-record"]
-        let another = exactButton("Добавить запись")
-        let resume = button("Продолжить черновик")
-        XCTAssertTrue(waitUntil(5) { first.exists || another.exists || resume.exists },
-                      "No way to open the money composer", file: file, line: line)
-        let opener = first.exists ? first : (another.exists ? another : resume)
-        scrollTo(opener, file: file, line: line)
-        opener.tap()
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "Money composer field did not appear", file: file, line: line)
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Money composer field «Новая операция» missing", file: file, line: line)
         return field
     }
 
@@ -652,18 +653,30 @@ final class ARNAUITests: XCTestCase {
 
     @MainActor
     private func finishWorkoutEarly() {
-        let finishEarly = exactButton("Завершить досрочно")
-        XCTAssertTrue(finishEarly.waitForExistence(timeout: 5))
-        finishEarly.tap()
-        let confirm = exactButton("Завершить")
+        let finish = workoutFinishButton()
+        XCTAssertTrue(finish.waitForExistence(timeout: 5))
+        XCTAssertEqual(finish.label, "Завершить", "A ticked set should make the top button «Завершить»")
+        finish.tap()
+        let confirm = exactButton("Завершить и сохранить")
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finish confirmation did not appear")
         confirm.tap()
+    }
+
+    /// «Завершить» on top of a running workout; «Закрыть без сохранения» until a set is ticked.
+    @MainActor
+    private func workoutFinishButton() -> XCUIElement {
+        app.buttons["workout-finish"]
     }
 
     /// A workout left running by an earlier failed test would hide the program; end it first.
     @MainActor
     private func endLeftoverWorkoutIfNeeded() {
-        if exactButton("Завершить досрочно").exists {
+        let finish = workoutFinishButton()
+        if finish.exists {
+            if finish.label == "Закрыть без сохранения" {
+                finish.tap()
+                return
+            }
             finishWorkoutEarly()
         }
         // A finished summary closes with «Готово», or «Закрыть без сохранения» when nothing was ticked.

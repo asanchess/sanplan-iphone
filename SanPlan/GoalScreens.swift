@@ -29,92 +29,181 @@ enum GoalText {
     }
 }
 
+/// «Цели» tab of «Планы» (canvas: sphere label, figure, name, a 10 pt bar and a note).
+/// Tap a card — the editor; milestones tick right under their goal. New goals come from the bottom field or «Новая цель».
 struct GoalsSection: View {
     @ObservedObject var goals: GoalStore
     @ObservedObject var habits: HabitStore
     let today: String
-    var savings: [GoalSavingsOption] = []
-    var weekRatings: [WeekReview] = []
+    var savings: [GoalSavingsOption]
+    var weekRatings: [WeekReview]
+    /// Made-up cards for screenshots: shown as is, never saved.
+    var demo: [PlansGoalCardModel]?
+    /// A goal read from the bottom field; «Настроить» opens it here in the editor.
+    @Binding var draftRequest: Goal?
     @State private var editorTarget: GoalEditorTarget?
     @State private var showSpheres = false
+    @Environment(\.sectionAccent) private var accent
+
+    init(
+        goals: GoalStore,
+        habits: HabitStore,
+        today: String,
+        savings: [GoalSavingsOption] = [],
+        weekRatings: [WeekReview] = [],
+        demo: [PlansGoalCardModel]? = nil,
+        draftRequest: Binding<Goal?> = .constant(nil)
+    ) {
+        self.goals = goals
+        self.habits = habits
+        self.today = today
+        self.savings = savings
+        self.weekRatings = weekRatings
+        self.demo = demo
+        self._draftRequest = draftRequest
+    }
 
     private var open: [Goal] { goals.activeGoals }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionHeader("Цели")
-                Spacer()
-                Button("Сферы") { showSpheres = true }
-                    .frame(minHeight: DS.Metrics.minHitTarget)
-            }
-
-            if let week = goals.weekGoal(today: today) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Цель недели").font(.footnote).foregroundColor(DS.Colors.textSecondary)
-                    Text(week.goal.title).font(.headline)
-                    GoalProgressLine(progress: week.progress)
+        VStack(alignment: .leading, spacing: 14) {
+            if let demo {
+                ForEach(demo) { model in
+                    PlansGoalCard(model: model)
                 }
-                .padding(DS.Metrics.spacing12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(DS.Colors.surface)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                .accessibilityElement(children: .combine)
+            } else {
+                if open.isEmpty {
+                    EmptyState(
+                        title: "Целей пока нет",
+                        message: "Напишите внизу, например: «накопить 500 000 ₸ к июню».",
+                        icon: "target"
+                    )
+                }
+                ForEach(open) { goal in
+                    goalBlock(goal)
+                }
             }
 
-            if open.isEmpty {
-                EmptyState(
-                    title: "Целей пока нет",
-                    message: "Добавь цель: сфера, срок и способ измерять прогресс — деньги, тренировки, привычка или этапы.",
-                    icon: "target"
-                )
-            }
-
-            ForEach(open) { goal in
-                GoalRowView(goal: goal, goals: goals, today: today) { editorTarget = .edit(goal) }
-            }
-
-            Button {
-                editorTarget = .new
-            } label: {
-                Label("Добавить цель", systemImage: "plus")
-                    .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-            }
-            .buttonStyle(.bordered)
-            .disabled(goals.owner == .none)
+            PlansOutlineLink(title: "Новая цель", icon: "plus") { editorTarget = .new }
+                .disabled(demo != nil || goals.owner == .none)
+            PlansOutlineLink(title: "Сферы", icon: "chart.pie") { showSpheres = true }
+                .disabled(demo != nil)
         }
         .sheet(item: $editorTarget) { target in
-            GoalEditorSheet(goals: goals, habits: habits, existing: target.goal, today: today, savings: savings)
+            GoalEditorSheet(goals: goals, habits: habits, existing: target.goal, today: today, savings: savings, draft: target.draft)
+                .environment(\.sectionAccent, DS.Colors.plans)
+                .tint(DS.Colors.plans)
         }
         .sheet(isPresented: $showSpheres) {
             SpheresSheet(goals: goals, habits: habits, today: today, weekRatings: weekRatings)
+                .environment(\.sectionAccent, DS.Colors.plans)
+                .tint(DS.Colors.plans)
         }
+        .onChange(of: draftRequest?.id) { _, _ in openDraftIfAsked() }
+        .onAppear(perform: openDraftIfAsked)
+    }
+
+    private func openDraftIfAsked() {
+        guard let draft = draftRequest else { return }
+        draftRequest = nil
+        editorTarget = .draft(draft)
+    }
+
+    private func goalBlock(_ goal: Goal) -> some View {
+        let progress = goals.progress(for: goal, today: today)
+        return VStack(alignment: .leading, spacing: 6) {
+            Button { editorTarget = .edit(goal) } label: {
+                PlansGoalCard(model: model(goal, progress: progress))
+            }
+            .buttonStyle(PressScaleStyle())
+            .accessibilityHint("Открывает настройки цели")
+
+            if case .milestones(let items) = goal.kind {
+                ForEach(items) { item in
+                    Button {
+                        goals.setMilestone(goalId: goal.id, milestoneId: item.id, done: !item.done)
+                    } label: {
+                        HStack(spacing: 12) {
+                            PlansCheckBox(done: item.done)
+                            Text(item.title)
+                                .font(DS.Fonts.text(16, .semibold, relativeTo: .body))
+                                .foregroundColor(item.done ? DS.Colors.textMuted : DS.Colors.textPrimary)
+                                .strikethrough(item.done, color: DS.Colors.textMuted)
+                                .multilineTextAlignment(.leading)
+                            if let due = item.dueDay {
+                                Text(GoalText.dateLabel(due))
+                                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                                    .foregroundColor(DS.Colors.textSecondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.leading, 16)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(item.done ? .isSelected : [])
+                    .sensoryFeedback(.selection, trigger: item.done)
+                }
+            }
+        }
+    }
+
+    private func model(_ goal: Goal, progress: GoalProgress) -> PlansGoalCardModel {
+        let overdue = GoalEngine.isOverdue(goal, today: today, progress: progress)
+        let percent = progress.fraction.map { "\(Int(($0 * 100).rounded()))%" }
+        let figure = progress.text.count <= 14 ? progress.text : (percent ?? "")
+        var parts: [String] = []
+        if progress.achieved { parts.append("Достигнута") }
+        if figure != progress.text { parts.append(progress.text) }
+        if let due = goal.dueDay {
+            parts.append(overdue ? "срок прошёл \(GoalText.dateLabel(due))" : "до \(GoalText.dateLabel(due))")
+        }
+        if parts.isEmpty { parts.append(GoalText.kindLabel(goal.kind)) }
+        return PlansGoalCardModel(
+            id: goal.id,
+            sphere: goals.sphereTitle(goal.sphereId),
+            title: goal.title,
+            figure: figure,
+            fraction: progress.fraction,
+            note: parts.joined(separator: " · "),
+            isOverdue: overdue,
+            isWeekGoal: goals.weekPick?.goalId == goal.id && goals.weekPick?.weekStart == HabitCalendar.weekStart(today)
+        )
     }
 }
 
 enum GoalEditorTarget: Identifiable {
     case new
     case edit(Goal)
+    /// A new goal prefilled from the bottom field.
+    case draft(Goal)
     var id: String {
         switch self {
         case .new: return "new"
         case .edit(let g): return g.id
+        case .draft(let g): return "draft-\(g.id)"
         }
     }
     var goal: Goal? {
         if case .edit(let g) = self { return g }
         return nil
     }
+    var draft: Goal? {
+        if case .draft(let g) = self { return g }
+        return nil
+    }
 }
 
 struct GoalProgressLine: View {
     let progress: GoalProgress
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let f = progress.fraction {
                 ProgressView(value: f)
-                    .tint(progress.achieved ? DS.Colors.positive : DS.Colors.accent)
+                    .tint(progress.achieved ? DS.Colors.positive : accent)
                     .accessibilityHidden(true)
             }
             Text(progress.achieved ? "Достигнута · \(progress.text)" : progress.text)
@@ -195,7 +284,18 @@ struct GoalEditorSheet: View {
     let existing: Goal?
     let today: String
     let savings: [GoalSavingsOption]
+    /// A new goal prefilled from the bottom field; saved as new, like «Новая цель».
+    let draft: Goal?
     @Environment(\.dismiss) private var dismiss
+
+    init(goals: GoalStore, habits: HabitStore, existing: Goal?, today: String, savings: [GoalSavingsOption], draft: Goal? = nil) {
+        self.goals = goals
+        self.habits = habits
+        self.existing = existing
+        self.today = today
+        self.savings = savings
+        self.draft = draft
+    }
 
     private enum KindChoice: String, CaseIterable, Identifiable {
         case milestones = "Этапы"
@@ -346,7 +446,7 @@ struct GoalEditorSheet: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
-        guard let g = existing else { return }
+        guard let g = existing ?? draft else { return }
         title = g.title
         sphereId = g.sphereId ?? ""
         if let d = g.dueDay, let date = Self.dayFormatter.date(from: d) { hasDue = true; due = date }
@@ -482,7 +582,7 @@ struct SphereRadar: View {
                 polygon(n: n, center: center, radius: radius) { i in
                     Double(ratings[spheres[i].id] ?? 0) / 10
                 }
-                .fill(DS.Colors.accent.opacity(0.25))
+                .fill(DS.Colors.plans.opacity(0.25))
                 if let previous {
                     polygon(n: n, center: center, radius: radius) { i in Double(previous[spheres[i].id] ?? 0) / 10 }
                         .stroke(DS.Colors.textSecondary, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
@@ -490,7 +590,7 @@ struct SphereRadar: View {
                 polygon(n: n, center: center, radius: radius) { i in
                     Double(ratings[spheres[i].id] ?? 0) / 10
                 }
-                .stroke(DS.Colors.accent, lineWidth: 2)
+                .stroke(DS.Colors.plans, lineWidth: 2)
                 ForEach(0..<n, id: \.self) { i in
                     let p = point(i, n, center, radius + 22)
                     Text(spheres[i].title)

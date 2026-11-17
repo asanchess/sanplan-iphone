@@ -1,198 +1,177 @@
 import SwiftUI
 
-/// «Заметки»: list and editor. On iPhone the editor pushes over the list; on iPad they sit side by side.
+/// «Заметки» (canvas `docs/design/canvas-r5/Notes.html`): the list, and the editor pushed over it.
+/// Encrypted: until the account's key is on this device, the vault gate (recovery-key transfer) is shown instead.
 struct NotesScreen: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var vault: VaultKeySession
     @Binding var showSettings: Bool
     let onMakePlan: (String) -> Void
     let onMakeExpense: (String) -> Void
-    /// Opens the shared «+» composer.
+    /// Opens the shared «+» composer (voice or text).
     let onCapture: () -> Void
 
-    @State private var selection: String?
+    @State private var path: [String] = []
     @State private var query = ""
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var routed = false
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
-        Group {
-            if vault.phase == .ready {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    list
-                        .shellRoot()
-                        .navigationSplitViewColumnWidth(min: 300, ideal: 360, max: 420)
-                        .toolbar(.hidden, for: .navigationBar)
-                } detail: {
-                    if let id = selection, store.note(id) != nil {
-                        NoteEditorView(store: store, noteID: id, onMakePlan: onMakePlan, onMakeExpense: onMakeExpense)
-                            .id(id)
-                            .shellRoot()
-                    } else {
-                        ZStack {
-                            DS.Colors.canvas.ignoresSafeArea()
-                            EmptyState(title: "Выберите заметку", icon: "note.text")
-                        }
-                    }
-                }
-                .navigationSplitViewStyle(.balanced)
-            } else {
-                NavigationStack {
-                    VaultGateView(vault: vault, showSettings: $showSettings)
-                        .shellRoot()
-                        .toolbar(.hidden, for: .navigationBar)
+        NavigationStack(path: $path) {
+            Group {
+                if vault.phase == .ready {
+                    NotesListView(store: store, query: $query, onCapture: onCapture)
+                } else {
+                    NotesVaultGateView(vault: vault)
                 }
             }
+            .navigationTitle("Заметки")
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: String.self) { id in
+                NoteEditorView(store: store, noteID: id, onMakePlan: onMakePlan, onMakeExpense: onMakeExpense)
+                    .id(id)
+                    .shellRoot()
+            }
         }
+        .tint(accent)
         .task(id: vault.phase) {
             if vault.phase == .idle { await vault.check() }
         }
-        .onChange(of: store.recentlyDeleted?.id) { _, deleted in
-            if let deleted, deleted == selection { selection = nil }
+        .task { applyScreenshotRoute() }
+        .onAppear { RecentlyDeleted.shared.register(store) }
+        // Round 6 deep link: «Заметки» opens on the list itself, not on a note left open earlier.
+        .onReceive(DeepLinks.shared.$pending) { link in
+            guard link == .notes else { return }
+            path.removeAll()
+            DeepLinks.shared.consume()
         }
     }
 
-    private var visible: [Note] { store.notes.filter { $0.matches(query) } }
+    /// Debug screenshots: `notes-list` is the default; `notes-editor` opens one demo note.
+    private func applyScreenshotRoute() {
+        #if DEBUG
+        guard !routed else { return }
+        routed = true
+        if ScreenshotRoute.demoData { NotesDemo.apply(to: store) }
+        if ScreenshotRoute.is("notes-editor") {
+            let id = store.note(NotesDemo.editorNoteID) != nil ? NotesDemo.editorNoteID : store.notes.first?.id
+            if let id { path = [id] }
+        }
+        #endif
+    }
+}
 
-    private var list: some View {
-        ZStack(alignment: .bottom) {
+/// The canvas list: header, search, pinned yellow cards, then a two-column grid.
+struct NotesListView: View {
+    @ObservedObject var store: NotesStore
+    @Binding var query: String
+    let onCapture: () -> Void
+    @Environment(\.sectionAccent) private var accent
+
+    var body: some View {
+        let all = store.notes
+        let visible = all.filter { $0.matches(query) }
+        let pinned = visible.filter(\.pinned)
+        let rest = visible.filter { !$0.pinned }
+        ZStack(alignment: .top) {
             DS.Colors.canvas.ignoresSafeArea()
-            List(selection: $selection) {
-                Section {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                        ScreenHeader("Заметки", kicker: "\(ReviewFormat.plural(store.notes.count, "заметка", "заметки", "заметок")) · зашифрованы") {
-                        }
-                        searchField
-                            .petTip("Поиск идёт по всем заметкам сразу.")
-                        syncLine
+            NotesBackdrop()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    ScreenHeader("Заметки", kicker: "\(ReviewFormat.plural(all.count, "заметка", "заметки", "заметок")) · зашифрованы") {
                     }
-                    .listRowInsets(EdgeInsets(top: DS.Metrics.spacing16, leading: DS.Metrics.screenGutter, bottom: DS.Metrics.spacing8, trailing: DS.Metrics.screenGutter))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .selectionDisabled()
-                }
-
-                if visible.isEmpty {
-                    EmptyState(
-                        title: query.isEmpty ? "Заметок пока нет" : "Ничего не найдено",
-                        message: query.isEmpty ? "Нажмите «+», чтобы записать мысль, идею или список." : nil,
-                        icon: query.isEmpty ? "note.text" : "magnifyingglass"
-                    )
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .selectionDisabled()
-                }
-
-                ForEach(visible) { note in
-                    NoteRow(note: note)
-                        .tag(note.id)
-                        .listRowBackground(selection == note.id ? DS.Colors.surfaceRaised : Color.clear)
-                        .listRowSeparatorTint(DS.Colors.hairline)
-                        .listRowInsets(EdgeInsets(top: 10, leading: DS.Metrics.screenGutter, bottom: 10, trailing: DS.Metrics.screenGutter))
-                        .swipeActions(edge: .leading) {
-                            Button { store.togglePin(note.id) } label: {
-                                Label(note.pinned ? "Открепить" : "Закрепить", systemImage: note.pinned ? "pin.slash" : "pin")
-                            }
-                            .tint(DS.Colors.accent)
+                    NotesSearchField(query: $query)
+                        .petTip("Поиск идёт по всем заметкам сразу.")
+                    syncLine
+                    if visible.isEmpty {
+                        emptyState(searching: !all.isEmpty)
+                    }
+                    ForEach(Array(pinned.enumerated()), id: \.element.id) { index, note in
+                        if index == 0 {
+                            pinnedCard(note).petTip("Закреплённая заметка всегда сверху и видна на «Сегодня».")
+                        } else {
+                            pinnedCard(note)
                         }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) { store.delete(note.id) } label: {
-                                Label("Удалить", systemImage: "trash")
-                            }
+                    }
+                    if !rest.isEmpty {
+                        NotesMasonry(notes: rest) { note in
+                            NoteGridCard(note: note) { store.togglePin(note.id) }
+                                .contextMenu { menu(for: note) }
                         }
-                        .contextMenu {
-                            Button { store.togglePin(note.id) } label: {
-                                Label(note.pinned ? "Открепить" : "Закрепить", systemImage: note.pinned ? "pin.slash" : "pin")
-                            }
-                            Button(role: .destructive) { store.delete(note.id) } label: { Label("Удалить", systemImage: "trash") }
-                        }
+                    }
                 }
+                .padding(.horizontal, DS.Metrics.screenGutter)
+                .padding(.top, 18)
+                // Room for the «+», as on the canvas.
+                .padding(.bottom, 90)
+                .frame(maxWidth: 720)
+                .frame(maxWidth: .infinity)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
             .refreshable { await store.sync() }
-            .captureButton(action: onCapture)
+        }
+        .notesCaptureButton(action: onCapture)
+        .shellRoot()
+    }
 
-            if let deleted = store.recentlyDeleted {
-                UndoBar(text: "Заметка «\(deleted.title)» удалена", onUndo: { store.undoDelete() }, onClose: { store.dismissUndo() })
-                    .padding(.horizontal, DS.Metrics.screenGutter)
-                    .padding(.bottom, DS.Metrics.spacing12)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+    private func pinnedCard(_ note: Note) -> some View {
+        NotePinnedCard(note: note) { store.togglePin(note.id) }
+            .contextMenu { menu(for: note) }
+    }
+
+    @ViewBuilder
+    private func menu(for note: Note) -> some View {
+        Button { store.togglePin(note.id) } label: {
+            Label(note.pinned ? "Открепить" : "Закрепить", systemImage: note.pinned ? "pin.slash" : "pin")
+        }
+        ShareLink(item: note.text) { Label("Поделиться", systemImage: "square.and.arrow.up") }
+        Button(role: .destructive) { NotesActions.delete(note.id, in: store) } label: {
+            Label("Удалить", systemImage: "trash")
         }
     }
 
-    private var searchField: some View {
-        HStack(spacing: DS.Metrics.spacing8) {
-            Image(systemName: "magnifyingglass").foregroundColor(DS.Colors.textSecondary)
-            TextField("Поиск по заметкам", text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+    private func emptyState(searching: Bool) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: searching ? "magnifyingglass" : "doc.text")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundColor(accent)
+                .accessibilityHidden(true)
+            Text(searching ? "Ничего не найдено" : "Заметок пока нет")
+                .font(DS.Fonts.text(17, .bold))
                 .foregroundColor(DS.Colors.textPrimary)
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundColor(DS.Colors.textSecondary)
-                }
-                .accessibilityLabel("Очистить поиск")
+            if !searching {
+                Text("Нажмите «+», чтобы записать мысль, идею или список.")
+                    .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
             }
         }
-        .padding(.horizontal, DS.Metrics.spacing12)
-        .frame(minHeight: DS.Metrics.minHitTarget)
-        .background(DS.Colors.surfaceRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(DS.Colors.hairline, lineWidth: 1))
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
     private var syncLine: some View {
         switch store.syncState {
         case .offline(let message):
-            Label(message, systemImage: "icloud.slash")
-                .font(.footnote)
-                .foregroundColor(DS.Colors.textSecondary)
+            statusLine(message, icon: "icloud.slash", color: DS.Colors.textSecondary)
         default:
             if store.unreadableCount > 0 {
-                Label("\(store.unreadableCount) записей не открылось этим ключом.", systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundColor(DS.Colors.warning)
+                statusLine("\(store.unreadableCount) записей не открылось этим ключом.", icon: "exclamationmark.triangle", color: DS.Colors.warning)
             }
         }
     }
-}
 
-private struct NoteRow: View {
-    let note: Note
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if note.pinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption)
-                        .foregroundColor(DS.Colors.accent)
-                        .accessibilityLabel("Закреплена")
-                }
-                Text(note.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(2)
-            }
-            if !note.preview.isEmpty {
-                Text(note.preview)
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-            }
-            HStack(spacing: DS.Metrics.spacing8) {
-                Text(NoteDates.short(note.updatedAt))
-                if let progress = note.checklistProgress {
-                    Label("\(progress.done) из \(progress.total)", systemImage: "checklist")
-                }
-            }
-            .font(.footnote.monospacedDigit())
-            .foregroundColor(DS.Colors.textSecondary)
+    private func statusLine(_ text: String, icon: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: icon).font(.system(size: 13, weight: .bold))
+            Text(text)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .font(DS.Fonts.text(13, .bold, relativeTo: .footnote))
+        .foregroundColor(color)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
 }
@@ -214,189 +193,21 @@ enum NoteDates {
         }
         return formatter.string(from: date)
     }
-}
 
-struct UndoBar: View {
-    let text: String
-    let onUndo: () -> Void
-    let onClose: () -> Void
-
-    var body: some View {
-        HStack(spacing: DS.Metrics.spacing12) {
-            Text(text)
-                .font(.subheadline)
-                .foregroundColor(DS.Colors.textPrimary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button("Отменить", action: onUndo)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(DS.Colors.accent)
-                .frame(minHeight: DS.Metrics.minHitTarget)
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .frame(width: 32, height: DS.Metrics.minHitTarget)
-            }
-            .accessibilityLabel("Скрыть")
+    /// The card line from the canvas: «Сегодня, 09:12», «Вчера», «12 ноября».
+    static func card(_ ms: Int64, now: Date = Date()) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+        let calendar = Calendar.current
+        if calendar.isDateInYesterday(date) { return "Вчера" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        if calendar.isDateInToday(date) {
+            formatter.dateFormat = "'Сегодня', HH:mm"
+        } else if calendar.isDate(date, equalTo: now, toGranularity: .year) {
+            formatter.dateFormat = "d MMMM"
+        } else {
+            formatter.dateFormat = "d MMMM yyyy"
         }
-        .padding(.horizontal, DS.Metrics.spacing16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(DS.Colors.hairline, lineWidth: 1))
-    }
-}
-
-/// One note. Notes with checklist lines open in reading mode, so boxes tick with one tap; «Изменить» opens the text.
-struct NoteEditorView: View {
-    @ObservedObject var store: NotesStore
-    let noteID: String
-    let onMakePlan: (String) -> Void
-    let onMakeExpense: (String) -> Void
-
-    @State private var text = ""
-    @State private var isEditing = false
-    @FocusState private var focused: Bool
-    @Environment(\.dismiss) private var dismiss
-
-    private var note: Note? { store.note(noteID) }
-
-    var body: some View {
-        ZStack {
-            DS.Colors.canvas.ignoresSafeArea()
-            if isEditing {
-                TextEditor(text: $text)
-                    .font(.body)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .scrollContentBackground(.hidden)
-                    .padding(.horizontal, DS.Metrics.screenGutter - 5)
-                    .focused($focused)
-                    .frame(maxWidth: 720)
-                    .accessibilityLabel("Текст заметки")
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                        readingLines
-                        if let note {
-                            Text("Изменено \(NoteDates.short(note.updatedAt))")
-                                .font(.footnote)
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .padding(.top, DS.Metrics.spacing16)
-                        }
-                    }
-                    .padding(DS.Metrics.screenGutter)
-                    .frame(maxWidth: 720, alignment: .leading)
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if isEditing {
-                    Button { insertChecklistLine() } label: { Image(systemName: "checklist") }
-                        .accessibilityLabel("Добавить пункт списка")
-                    Button("Готово") { finishEditing() }.fontWeight(.semibold)
-                } else {
-                    Button("Изменить") { startEditing() }
-                }
-                actionsMenu
-            }
-        }
-        .safeAreaInset(edge: .bottom) { suggestions }
-        .onAppear {
-            text = note?.text ?? ""
-            if note?.checklistProgress == nil { startEditing() }
-        }
-        .onChange(of: text) { _, value in
-            // Emptied text deletes the note only on «Готово» or when leaving, not mid-edit.
-            guard isEditing, note != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            store.update(noteID, text: value)
-        }
-        .onChange(of: note == nil) { _, gone in if gone { dismiss() } }
-        .onDisappear { if isEditing { store.update(noteID, text: text) } }
-    }
-
-    @ViewBuilder
-    private var readingLines: some View {
-        let lines = (note?.text ?? "").components(separatedBy: "\n")
-        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-            if let done = NoteText.checkbox(line) {
-                Button { store.toggleChecklist(noteID, line: index); text = store.note(noteID)?.text ?? text } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: DS.Metrics.spacing12) {
-                        Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(done ? DS.Colors.accent : DS.Colors.textSecondary)
-                        Text(NoteText.displayLine(line))
-                            .strikethrough(done)
-                            .foregroundColor(done ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .font(.body)
-                    .frame(minHeight: DS.Metrics.minHitTarget)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(done ? .isSelected : [])
-            } else {
-                Text(line.isEmpty ? " " : line)
-                    .font(index == 0 ? .title3.weight(.semibold) : .body)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    private var actionsMenu: some View {
-        Menu {
-            if let note {
-                Button { store.togglePin(noteID) } label: {
-                    Label(note.pinned ? "Открепить" : "Закрепить", systemImage: note.pinned ? "pin.slash" : "pin")
-                }
-                Button { onMakePlan(note.text) } label: { Label("Сделать планом", systemImage: "calendar.badge.plus") }
-                Button { onMakeExpense(note.text) } label: { Label("Записать трату", systemImage: "creditcard") }
-                ShareLink(item: note.text) { Label("Поделиться", systemImage: "square.and.arrow.up") }
-                Divider()
-                Button(role: .destructive) { isEditing = false; store.delete(noteID) } label: { Label("Удалить", systemImage: "trash") }
-            }
-        } label: {
-            Image(systemName: "ellipsis.circle")
-        }
-        .accessibilityLabel("Действия с заметкой")
-    }
-
-    @ViewBuilder
-    private var suggestions: some View {
-        if !isEditing, let note {
-            let hints = NoteText.hints(note.text)
-            if hints.looksLikePlan || hints.looksLikeExpense {
-                HStack(spacing: DS.Metrics.spacing8) {
-                    if hints.looksLikePlan {
-                        HeaderTextButton("Сделать планом", icon: "calendar.badge.plus") { onMakePlan(note.text) }
-                    }
-                    if hints.looksLikeExpense {
-                        HeaderTextButton("Записать трату", icon: "creditcard") { onMakeExpense(note.text) }
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, DS.Metrics.screenGutter)
-                .padding(.vertical, DS.Metrics.spacing8)
-            }
-        }
-    }
-
-    private func startEditing() {
-        text = note?.text ?? text
-        isEditing = true
-        focused = true
-    }
-
-    private func finishEditing() {
-        store.update(noteID, text: text)
-        focused = false
-        if store.note(noteID)?.checklistProgress != nil { isEditing = false }
-    }
-
-    private func insertChecklistLine() {
-        let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
-        text += separator + "- [ ] "
+        return formatter.string(from: date)
     }
 }

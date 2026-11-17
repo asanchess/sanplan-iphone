@@ -22,6 +22,11 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>MinimumOSVersion</key>
     <string>26.0</string>
+    <key>UIAppFonts</key>
+    <array>
+        <string>DelaGothicOne-Regular.ttf</string>
+        <string>GolosText-Variable.ttf</string>
+    </array>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

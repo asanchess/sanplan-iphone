@@ -2,25 +2,42 @@ import SwiftUI
 
 /// «Можно потратить сегодня» и одна строка, почему такая сумма. Правило — в FinanceSummaries.canSpendToday.
 /// Без лимитов вместо суммы подсказка задать их.
+/// Canvas: label 13/700, number Dela 44 in the accent with a 4,4 ink shadow, «Потрачено сегодня … из …» 16/500,
+/// a 10-pt bar on #33295A. A tap opens the month and the «Чистыми» breakdown.
 struct CanSpendTodayCard: View {
     let result: CanSpendToday?
     /// Траты месяца и сумма лимитов (тенге): показываются по нажатию.
     var month: (spent: Int64, limit: Int64)? = nil
+    /// «Чистыми X ₸» with its note; nil hides the breakdown link.
+    var clean: (amount: String, note: String, warns: Bool)? = nil
+    var onBreakdown: (() -> Void)? = nil
+    var onSetLimits: (() -> Void)? = nil
     @State private var showMonth = false
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            mainButton
+            if showMonth || result == nil {
+                details
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var mainButton: some View {
         Button {
             withAnimation(.easeOut(duration: 0.2)) { showMonth.toggle() }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("МОЖНО ПОТРАТИТЬ СЕГОДНЯ")
-                    .font(DS.Fonts.label)
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
                     .tracking(0.8)
                     .foregroundColor(DS.Colors.textSecondary)
                 if let result {
                     Text(FinanceText.money(result.amount * 100))
                         .font(DS.Fonts.display(44, relativeTo: .largeTitle))
-                        .foregroundColor(DS.Colors.money)
+                        .foregroundColor(accent)
                         .shadow(color: DS.Colors.ink, radius: 0, x: 4, y: 4)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -45,7 +62,6 @@ struct CanSpendTodayCard: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.top, 8)
-                        .transition(.opacity)
                     }
                 } else {
                     Text("Задайте лимиты по категориям во вкладке «План»: тогда здесь появится сумма на день")
@@ -64,15 +80,40 @@ struct CanSpendTodayCard: View {
         .accessibilityIdentifier("can-spend-today")
     }
 
-    private func bar(_ fraction: Double) -> some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(DS.Colors.hairline)
-                Capsule().fill(fraction > 1 ? DS.Colors.destructive : DS.Colors.money)
-                    .frame(width: proxy.size.width * min(max(fraction, 0), 1))
+    /// The breakdown link and, without limits, «Задать лимиты».
+    @ViewBuilder
+    private var details: some View {
+        if let clean, let onBreakdown {
+            Button(action: onBreakdown) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Чистыми \(clean.amount)")
+                            .font(DS.Fonts.text(16, .bold))
+                            .foregroundColor(DS.Colors.textPrimary)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(accent)
+                    }
+                    Text(clean.note)
+                        .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                        .foregroundColor(clean.warns ? DS.Colors.warning : DS.Colors.textSecondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Показать, из чего складывается сумма")
+            .accessibilityIdentifier("clean-header")
         }
-        .frame(height: 10)
-        .accessibilityHidden(true)
+        if result == nil, let onSetLimits {
+            MoneyTextButton("Задать лимиты", action: onSetLimits)
+        }
+    }
+
+    private func bar(_ fraction: Double) -> some View {
+        MoneyBar(fraction: fraction, height: 10, color: fraction > 1 ? DS.Colors.destructive : accent)
+            .accessibilityHidden(true)
     }
 }

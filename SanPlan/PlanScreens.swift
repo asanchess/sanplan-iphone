@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// The «Планы» tab (canvas `docs/design/canvas-r5/Plans.html`): plans, habits and goals behind one switcher,
+/// alarms behind the clock in the header, and one bottom field «Что запланировать?» for all three.
 public struct PlanScreen: View {
     @ObservedObject public var store: PlanStore
     @ObservedObject public var recorder: VoiceRecorder
@@ -23,7 +25,19 @@ public struct PlanScreen: View {
     @State private var isShowingAlarms: Bool = false
     @State private var isEditingSaved: Bool = false
     @State private var isConfirmingDraftReset: Bool = false
+    /// What the bottom field understood in «Привычки» / «Цели»; nothing is saved until «Сохранить».
+    @State private var habitPreview: Habit? = nil
+    @State private var goalPreview: PlansQuickParse.GoalReading? = nil
+    /// The words behind the preview, put back into the field on cancel.
+    @State private var previewSource: String = ""
+    @State private var parseNotice: String? = nil
+    @State private var habitDraftRequest: Habit? = nil
+    @State private var goalDraftRequest: Goal? = nil
+    /// Device preference: also send saved plans with a date and time to Google Calendar.
+    @AppStorage("arna.plans.toGoogle.v1") private var sendToGoogle: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let accent = DS.Colors.plans
 
     public enum ViewMode: String, CaseIterable, Identifiable {
         case day = "Сегодня"
@@ -61,16 +75,30 @@ public struct PlanScreen: View {
         self.habitsRequest = habitsRequest
     }
 
+    private var isDemo: Bool { ScreenshotRoute.demoData }
+    private var today: String { PlanDomain.today(timeZone: store.timeZone) }
+
     public var body: some View {
         planBody
+            .environment(\.sectionAccent, DS.Colors.plans)
+            .tint(DS.Colors.plans)
             .onChange(of: goalsRequest) { _, _ in section = .goals }
             .onChange(of: habitsRequest) { _, _ in section = .habits }
-            .onChange(of: section) { _, next in next.store() }
+            .onChange(of: section) { _, next in
+                next.store()
+                parseNotice = nil
+            }
+            .onReceive(DeepLinks.shared.$pending) { link in
+                if let link { open(link) }
+            }
     }
 
     private var planBody: some View {
         ZStack {
             DS.Colors.canvas.ignoresSafeArea()
+            PlansBackdrop()
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 topBar
@@ -100,47 +128,24 @@ public struct PlanScreen: View {
                 }
 
                 ScrollView {
-                    VStack(spacing: DS.Metrics.spacing16) {
+                    VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                         ArnaSegmented("Раздел планов", selection: $section, options: PlansSection.allCases.map { ($0, $0.rawValue) })
 
                         if recorder.isRecordingOrPaused {
                             recorderSection
                         }
 
-                        if store.isParsing {
-                            parsingCard
-                        }
-
-                        if !store.draftPlans.isEmpty {
-                            draftsSection
+                        if let parseNotice {
+                            noticeLine(parseNotice)
                         }
 
                         switch section {
                         case .plans:
-                            Picker("Вид", selection: $viewMode) {
-                                ForEach(ViewMode.allCases) { mode in
-                                    Text(mode.rawValue).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            switch viewMode {
-                            case .day:
-                                weekStrip
-                                    .petTip("День выбирается здесь. Нажмите на число — покажу его планы.")
-                                agendaDayList
-                            case .week:
-                                weekView
-                            case .upcoming:
-                                upcomingList
-                            case .done:
-                                completedList
-                            }
+                            plansTab
                         case .habits:
-                            HabitsSection(habits: habits, today: PlanDomain.today(timeZone: store.timeZone), streakSources: streakSources)
+                            habitsTab
                         case .goals:
-                            GoalsSection(goals: goals, habits: habits, today: PlanDomain.today(timeZone: store.timeZone),
-                                         savings: savingsOptions, weekRatings: weekRatings)
+                            goalsTab
                         }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
@@ -148,20 +153,23 @@ public struct PlanScreen: View {
                     .padding(.bottom, DS.Metrics.spacing16)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .refreshable { await store.reload() }
+                .refreshable {
+                    if !isDemo { await store.reload() }
+                }
                 .safeAreaInset(edge: .bottom) {
                     if !recorder.isRecordingOrPaused {
                         composer
-                            .petTip("Пишите словами: «завтра в 9 стоматолог» — разберу сам.")
                     }
                 }
             }
         }
-        .task {
-            await store.reload()
-        }
+        .task { await start() }
         .onChange(of: store.selectedDate) { _, _ in
-            Task { await store.ensureRangeLoaded() }
+            if !isDemo { Task { await store.ensureRangeLoaded() } }
+        }
+        .onChange(of: store.plans.isEmpty) { _, empty in
+            // A reload elsewhere must not wipe the screenshot data.
+            if empty && isDemo { seedDemo() }
         }
         .sheet(isPresented: $isEditingSaved) {
             NavigationStack {
@@ -170,6 +178,7 @@ public struct PlanScreen: View {
                         EmptyState(title: "Сохранено", message: "Изменения записаны.", icon: "checkmark.circle")
                     } else {
                         draftsSection
+                            .padding(.vertical, DS.Metrics.spacing16)
                     }
                 }
                 .padding(.horizontal, DS.Metrics.screenGutter)
@@ -182,6 +191,8 @@ public struct PlanScreen: View {
                     }
                 }
             }
+            .environment(\.sectionAccent, DS.Colors.plans)
+            .tint(DS.Colors.plans)
             .onChange(of: store.draftPlans.isEmpty) { _, empty in
                 if empty { isEditingSaved = false }
             }
@@ -191,71 +202,241 @@ public struct PlanScreen: View {
         }
     }
 
+    // MARK: - Start, deep links, screenshots
+
+    private func start() async {
+        switch ScreenshotRoute.screen ?? "" {
+        case "plans-plans":
+            section = .plans
+            viewMode = .day
+        case "plans-habits":
+            section = .habits
+        case "plans-goals":
+            section = .goals
+        case "plans-alarms":
+            isShowingAlarms = true
+        default:
+            break
+        }
+        if isDemo {
+            seedDemo()
+        } else {
+            await store.reload()
+        }
+    }
+
+    /// Screenshot plans go straight into memory: `plans` is not written to disk and no alarm sync runs for it.
+    private func seedDemo() {
+        guard isDemo, store.plans.isEmpty else { return }
+        store.plans = PlansDemo.plans(today: today, timeZone: store.timeZone)
+        store.selectedDate = today
+    }
+
+    private func open(_ link: DeepLink) {
+        switch link {
+        case .plansAll:
+            section = .plans
+            viewMode = .upcoming
+        case .habits:
+            section = .habits
+        case .goals:
+            section = .goals
+        case .alarms:
+            isEditingSaved = false
+            isShowingAlarms = true
+        default:
+            return
+        }
+        DeepLinks.shared.consume()
+    }
+
+    // MARK: - Header
+
     /// «5 ДЕЛ · 4 ПРИВЫЧКИ · 2 ЦЕЛИ» from the canvas: tasks for today, active habits and goals.
     private var plansKicker: String {
-        let tasks = store.daySummary(for: PlanDomain.today(timeZone: store.timeZone)).total
+        let tasks = store.daySummary(for: today).total
+        let habitCount = isDemo ? PlansDemo.habits.count : habits.activeHabits.count
+        let goalCount = isDemo ? PlansDemo.goals.count : goals.activeGoals.count
         // Zero counts say nothing and push the tag past the header buttons, so only non-zero parts are shown.
         let parts: [String] = [
             (tasks, ReviewFormat.plural(tasks, "дело", "дела", "дел")),
-            (habits.activeHabits.count, ReviewFormat.plural(habits.activeHabits.count, "привычка", "привычки", "привычек")),
-            (goals.activeGoals.count, ReviewFormat.plural(goals.activeGoals.count, "цель", "цели", "целей"))
+            (habitCount, ReviewFormat.plural(habitCount, "привычка", "привычки", "привычек")),
+            (goalCount, ReviewFormat.plural(goalCount, "цель", "цели", "целей"))
         ].filter { $0.0 > 0 }.map { $0.1 }
         return parts.isEmpty ? ReviewFormat.plural(0, "дело", "дела", "дел") : parts.joined(separator: " · ")
     }
 
     private var topBar: some View {
         ScreenHeader("Планы", kicker: plansKicker) {
-            // A round icon like the other header actions: a text pill wrapped onto two lines and squeezed the kicker.
             CircleIconButton(icon: "alarm", accessibilityLabel: "Будильники") {
                 isShowingAlarms = true
             }
         }
     }
 
-    private var weekStrip: some View {
-        let dates = currentWeekDays(for: store.selectedDate)
-        let today = PlanDomain.today(timeZone: store.timeZone)
-        return Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                HStack(spacing: DS.Metrics.spacing4) {
-                    Text(weekTitle(for: store.selectedDate))
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(DS.Colors.textSecondary)
-                    Spacer()
-                    if store.selectedDate != today {
-                        Button("Сегодня") { store.selectedDate = today }
-                            .font(.footnote.weight(.medium))
-                            .foregroundColor(DS.Colors.accent)
-                            .frame(minHeight: DS.Metrics.minHitTarget)
-                    }
-                    weekButton(icon: "chevron.left", label: "Предыдущая неделя", days: -7)
-                    weekButton(icon: "chevron.right", label: "Следующая неделя", days: 7)
-                }
+    // MARK: - Tabs
 
-                HStack(spacing: DS.Metrics.spacing4) {
-                    ForEach(dates, id: \.self) { dateStr in
-                        let isSelected = dateStr == store.selectedDate
-                        Button(action: {
-                            store.selectedDate = dateStr
-                        }) {
-                            VStack(spacing: 2) {
-                                Text(weekdayShort(dateStr))
-                                    .font(.caption2)
-                                    .foregroundColor(isSelected ? DS.Colors.onAccent : DS.Colors.textSecondary)
-                                Text(dayNumber(dateStr))
-                                    .font(.callout.monospacedDigit().weight(.semibold))
-                                    .foregroundColor(isSelected ? DS.Colors.onAccent : (dateStr == today ? DS.Colors.accent : DS.Colors.textPrimary))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(isSelected ? DS.Colors.accent : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                        }
-                        .accessibilityLabel(formatLongDate(dateStr))
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    }
-                }
+    @ViewBuilder
+    private var plansTab: some View {
+        if store.isParsing {
+            parsingCard
+        }
+        if !store.draftPlans.isEmpty {
+            draftsSection
+        }
+
+        PlansFilterChips(selection: $viewMode, options: ViewMode.allCases.map { ($0, $0.rawValue) })
+
+        switch viewMode {
+        case .day:
+            let days = currentWeekDays(for: store.selectedDate)
+            VStack(alignment: .leading, spacing: 10) {
+                weekHeader(title: weekTitle(for: store.selectedDate), showToday: store.selectedDate != today)
+                PlansDayStrip(
+                    days: days,
+                    selected: store.selectedDate,
+                    today: today,
+                    weekday: { weekdayShort($0) },
+                    number: { dayNumber($0) },
+                    spoken: { formatLongDate($0) },
+                    onPick: { store.selectedDate = $0 }
+                )
+                .petTip("День выбирается здесь. Нажмите на число — покажу его планы.")
             }
+            agendaTimeline(
+                store.dayAgenda,
+                showDate: false,
+                emptyTitle: "На этот день планов нет",
+                emptyMessage: "Напишите или продиктуйте внизу.",
+                icon: "calendar"
+            )
+        case .week:
+            weekView
+        case .upcoming:
+            agendaTimeline(
+                store.upcomingAgenda,
+                showDate: true,
+                emptyTitle: "Ближайших планов нет",
+                emptyMessage: "Здесь появятся будущие встречи и невыполненные задачи.",
+                icon: "clock"
+            )
+        case .done:
+            agendaTimeline(
+                Array(store.completedAgenda.prefix(200)),
+                showDate: true,
+                emptyTitle: "Пока пусто",
+                emptyMessage: "Здесь появятся выполненные задачи и прошедшие события.",
+                icon: "checkmark.circle"
+            )
+        }
+
+        alarmsLink
+    }
+
+    @ViewBuilder
+    private var habitsTab: some View {
+        if let habit = habitPreview {
+            habitPreviewCard(habit)
+        }
+        draftsLink
+        HabitsSection(
+            habits: habits,
+            today: today,
+            streakSources: streakSources,
+            demo: isDemo ? PlansDemo.habits : nil,
+            draftRequest: $habitDraftRequest
+        )
+    }
+
+    @ViewBuilder
+    private var goalsTab: some View {
+        if let reading = goalPreview {
+            goalPreviewCard(reading)
+        }
+        draftsLink
+        GoalsSection(
+            goals: goals,
+            habits: habits,
+            today: today,
+            savings: savingsOptions,
+            weekRatings: weekRatings,
+            demo: isDemo ? PlansDemo.goals : nil,
+            draftRequest: $goalDraftRequest
+        )
+    }
+
+    /// Plan drafts are edited in «Планы»; the other tabs only point there.
+    @ViewBuilder
+    private var draftsLink: some View {
+        if !store.draftPlans.isEmpty || store.isParsing {
+            Button {
+                section = .plans
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "doc.text")
+                    Text(store.isParsing ? "Разбираю план…" : "Черновики планов: \(store.draftPlans.count)")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .bold))
+                }
+                .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                .foregroundColor(accent)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 48)
+                .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(PressScaleStyle())
+        }
+    }
+
+    private var alarmsLink: some View {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let count = AlarmRows.build(plans: store.plans, nowMs: nowMs, showAll: false).filter { $0.nextSignal != nil }.count
+        let title = count == 0 ? "Будильники" : "Будильники · \(ReviewFormat.plural(count, "включён", "включены", "включено"))"
+        return PlansOutlineLink(title: title, icon: "alarm") {
+            isShowingAlarms = true
+        }
+    }
+
+    private func noticeLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "questionmark.circle")
+                .foregroundColor(DS.Colors.warning)
+            Text(text)
+                .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
+                .foregroundColor(DS.Colors.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                parseNotice = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Скрыть")
+        }
+        .padding(14)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    // MARK: - Timeline
+
+    private func weekHeader(title: String, showToday: Bool) -> some View {
+        HStack(spacing: DS.Metrics.spacing4) {
+            Text(title)
+                .font(DS.Fonts.text(16, .bold, relativeTo: .headline))
+                .foregroundColor(DS.Colors.textPrimary)
+            Spacer(minLength: 0)
+            if showToday {
+                Button("Сегодня") { store.selectedDate = today }
+                    .font(DS.Fonts.text(14, .bold, relativeTo: .footnote))
+                    .foregroundColor(accent)
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+            }
+            weekButton(icon: "chevron.left", label: "Предыдущая неделя", days: -7)
+            weekButton(icon: "chevron.right", label: "Следующая неделя", days: 7)
         }
     }
 
@@ -264,64 +445,21 @@ public struct PlanScreen: View {
             store.selectedDate = PlanDomain.addDays(dateStr: store.selectedDate, days: days)
         } label: {
             Image(systemName: icon)
-                .font(.footnote.weight(.semibold))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundColor(DS.Colors.textPrimary)
                 .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
         }
         .accessibilityLabel(label)
     }
 
-    private var agendaDayList: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            SectionHeader("Расписание дня")
-
-            let items = store.dayAgenda
-            if items.isEmpty {
-                EmptyState(
-                    title: "На этот день планов нет",
-                    message: "Продиктуй план или введи его текстом.",
-                    icon: "calendar"
-                )
-            } else {
+    @ViewBuilder
+    private func agendaTimeline(_ items: [AgendaItem], showDate: Bool, emptyTitle: String, emptyMessage: String, icon: String) -> some View {
+        if items.isEmpty {
+            EmptyState(title: emptyTitle, message: emptyMessage, icon: icon)
+        } else {
+            PlansTimeline {
                 ForEach(items) { it in
-                    agendaRow(it)
-                }
-            }
-        }
-    }
-
-    private var upcomingList: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            SectionHeader("Предстоящие")
-
-            let items = store.upcomingAgenda
-            if items.isEmpty {
-                EmptyState(
-                    title: "Ближайших планов нет",
-                    message: "Здесь появятся будущие встречи и невыполненные задачи.",
-                    icon: "clock"
-                )
-            } else {
-                ForEach(items) { it in
-                    agendaRow(it)
-                }
-            }
-        }
-    }
-
-    private var completedList: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            SectionHeader("Выполненные и прошедшие")
-            let items = store.completedAgenda
-            if items.isEmpty {
-                EmptyState(
-                    title: "Пока пусто",
-                    message: "Здесь появятся выполненные задачи и прошедшие события.",
-                    icon: "checkmark.circle"
-                )
-            } else {
-                ForEach(Array(items.prefix(200))) { it in
-                    agendaRow(it)
+                    timelineRow(it, showDate: showDate)
                 }
             }
         }
@@ -329,7 +467,15 @@ public struct PlanScreen: View {
 
     /// Saved ARNA plans open for editing on tap; Google calendar events and drafts don't.
     private func isEditable(_ it: AgendaItem) -> Bool {
-        it.item.savedAt != nil && it.item.source != "google"
+        it.item.savedAt != nil && it.item.source != "google" && !isDemo
+    }
+
+    private func canSendToGoogle(_ it: AgendaItem) -> Bool {
+        it.item.googleEventId == nil && it.badge == "ARNA" && it.item.date != nil && it.item.time != nil && !isDemo
+    }
+
+    private func isCheckable(_ it: AgendaItem) -> Bool {
+        it.item.kind == "task" && it.badge != "Черновик"
     }
 
     private func openEditor(_ it: AgendaItem) {
@@ -338,160 +484,150 @@ public struct PlanScreen: View {
         isEditingSaved = true
     }
 
-    private func agendaRow(_ it: AgendaItem) -> some View {
-        agendaCard(it)
-            .contentShape(Rectangle())
-            .onTapGesture { openEditor(it) }
-            .accessibilityAction(named: "Изменить") { openEditor(it) }
-    }
-
-    private func agendaCard(_ it: AgendaItem) -> some View {
-        Card {
-            HStack(alignment: .top, spacing: DS.Metrics.spacing12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(it.displayTime)
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !it.displayDate.isEmpty && (viewMode == .upcoming || viewMode == .done) {
-                        Text(formatShortDate(it.displayDate))
-                            .font(.caption2)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-
-                    Text(it.badge)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(DS.Colors.surfaceRaised)
-                        .clipShape(Capsule())
-                        .foregroundColor(DS.Colors.textSecondary)
+    private func timelineRow(_ it: AgendaItem, showDate: Bool) -> some View {
+        PlansTimelineRow(
+            time: timeLabel(it),
+            title: it.item.title,
+            note: note(for: it, showDate: showDate),
+            done: it.item.completed == true,
+            canCheck: isCheckable(it),
+            isPending: store.pendingTaskIds.contains(it.item.id),
+            onToggle: { toggle(it.item) },
+            onOpen: isEditable(it) ? { openEditor(it) } : nil
+        )
+        .contextMenu {
+            if isEditable(it) {
+                Button("Изменить", systemImage: "pencil") { openEditor(it) }
+            }
+            if canSendToGoogle(it) {
+                Button("В Google Календарь", systemImage: "calendar.badge.plus") {
+                    Task { await store.exportPlanToGoogle(it.item) }
                 }
-                .frame(width: 92, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                    Text(it.item.title)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(it.item.completed == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                        .strikethrough(it.item.completed == true)
-
-                    if let desc = it.item.description, !desc.isEmpty {
-                        Text(desc)
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .lineLimit(2)
-                    }
-
-                    if it.item.googleEventId == nil && it.badge == "ARNA" && it.item.date != nil && it.item.time != nil {
-                        Button(action: {
-                            Task {
-                                await store.exportPlanToGoogle(it.item)
-                            }
-                        }) {
-                            Text(store.googlePendingId == it.item.id ? "Отправка в Google…" : "В Google Календарь")
-                                .font(.caption.weight(.medium))
-                                .foregroundColor(DS.Colors.accent)
-                                .frame(minHeight: DS.Metrics.minHitTarget, alignment: .leading)
-                        }
-                        .disabled(store.googlePendingId == it.item.id)
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                if it.item.kind == "task" && it.badge != "Черновик" {
-                    let completed = it.item.completed == true
-                    Button(action: {
-                        let id = it.item.id
-                        let title = it.item.title
-                        Task {
-                            await store.toggleTaskCompletion(id: id, completed: !completed)
-                            UndoCenter.shared.show(completed ? "Снова открыто: \(title)" : "Сделано: \(title)") {
-                                Task { await store.toggleTaskCompletion(id: id, completed: completed) }
-                            }
-                        }
-                    }) {
-                        Image(systemName: completed ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 24))
-                            .foregroundColor(completed ? DS.Colors.positive : DS.Colors.textSecondary)
-                    }
-                    .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
-                    .disabled(store.pendingTaskIds.contains(it.item.id))
-                    .accessibilityLabel(completed ? "Вернуть задачу: \(it.item.title)" : "Выполнить задачу: \(it.item.title)")
+            }
+            if isCheckable(it) {
+                Button(it.item.completed == true ? "Вернуть" : "Выполнено",
+                       systemImage: it.item.completed == true ? "arrow.uturn.backward" : "checkmark") {
+                    toggle(it.item)
                 }
             }
         }
+        .accessibilityAction(named: "В Google Календарь") {
+            if canSendToGoogle(it) { Task { await store.exportPlanToGoogle(it.item) } }
+        }
     }
+
+    /// «09:00» for the time column; plans without a clock time get a dash and say why in the note.
+    private func timeLabel(_ it: AgendaItem) -> String {
+        let head = String(it.displayTime.prefix(5))
+        let isClock = head.count == 5 && head.dropFirst(2).first == ":" && head.filter(\.isNumber).count == 4
+        if isClock { return head }
+        return it.displayTime == "Весь день" ? "день" : "—"
+    }
+
+    private func note(for it: AgendaItem, showDate: Bool) -> String? {
+        var parts: [String] = []
+        if showDate && !it.displayDate.isEmpty { parts.append(formatShortDate(it.displayDate)) }
+        if it.displayTime.count > 5 && it.displayTime != "Весь день" { parts.append(it.displayTime) }
+        if store.googlePendingId == it.item.id {
+            parts.append("Отправка в Google…")
+        } else if it.badge != "ARNA" {
+            parts.append(it.badge)
+        }
+        if let desc = it.item.description, !desc.isEmpty { parts.append(desc) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func toggle(_ item: PlanItem) {
+        let id = item.id
+        let title = item.title
+        let completed = item.completed == true
+        if isDemo {
+            // Screenshot data stays in memory.
+            if let index = store.plans.firstIndex(where: { $0.id == id }) { store.plans[index].completed = !completed }
+            return
+        }
+        Task {
+            await store.toggleTaskCompletion(id: id, completed: !completed)
+            UndoCenter.shared.show(completed ? "Снова открыто: \(title)" : "Сделано: \(title)") {
+                Task { await store.toggleTaskCompletion(id: id, completed: completed) }
+            }
+        }
+    }
+
+    // MARK: - Parsing and recording
 
     private var parsingCard: some View {
-        Card {
-            HStack(spacing: DS.Metrics.spacing12) {
-                ProgressView()
-                    .tint(DS.Colors.accent)
-                Text("Разбираю план…")
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                Spacer(minLength: 0)
-            }
+        HStack(spacing: DS.Metrics.spacing12) {
+            ProgressView()
+                .tint(accent)
+            Text("Разбираю план…")
+                .font(DS.Fonts.text(16, .semibold, relativeTo: .body))
+                .foregroundColor(DS.Colors.textPrimary)
+            Spacer(minLength: 0)
         }
+        .padding(16)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var recorderSection: some View {
-        Card {
-            VStack(spacing: DS.Metrics.spacing12) {
-                HStack {
-                    Text(recorder.state == .paused ? "Запись на паузе" : "Идёт запись…")
-                        .font(.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Spacer()
-                    Text(formatElapsed(recorder.elapsedTime))
-                        .font(.headline.monospacedDigit())
-                        .foregroundColor(DS.Colors.accent)
+        VStack(spacing: DS.Metrics.spacing12) {
+            HStack {
+                Text(recorder.state == .paused ? "Запись на паузе" : "Идёт запись…")
+                    .font(DS.Fonts.text(17, .bold, relativeTo: .headline))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Spacer()
+                Text(formatElapsed(recorder.elapsedTime))
+                    .font(DS.Fonts.text(17, .heavy, relativeTo: .headline))
+                    .monospacedDigit()
+                    .foregroundColor(accent)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(DS.Colors.surfaceRaised)
+                        .frame(height: 8)
+
+                    let width = max(8, geo.size.width * CGFloat(reduceMotion ? 0.5 : recorder.normalizedLevel))
+                    Capsule()
+                        .fill(accent)
+                        .frame(width: width, height: 8)
+                        .animation(reduceMotion ? nil : .linear(duration: 0.1), value: recorder.normalizedLevel)
+                }
+            }
+            .frame(height: 8)
+
+            HStack(spacing: DS.Metrics.spacing12) {
+                PillButton(
+                    recorder.state == .paused ? "Продолжить" : "Пауза",
+                    icon: recorder.state == .paused ? "play.fill" : "pause.fill",
+                    style: .secondary
+                ) {
+                    if recorder.state == .paused {
+                        recorder.resume()
+                    } else {
+                        recorder.pause()
+                    }
                 }
 
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(DS.Colors.surfaceRaised)
-                            .frame(height: 8)
-
-                        let width = max(8, geo.size.width * CGFloat(reduceMotion ? 0.5 : recorder.normalizedLevel))
-                        Capsule()
-                            .fill(DS.Colors.accentGradient)
-                            .frame(width: width, height: 8)
-                            .animation(reduceMotion ? nil : .linear(duration: 0.1), value: recorder.normalizedLevel)
+                PillButton("Разобрать", icon: "sparkles", style: .primary) {
+                    guard let result = recorder.finish() else { return }
+                    Task {
+                        await store.transcribe(audio: result.data, mimeType: result.mimeType)
                     }
                 }
-                .frame(height: 8)
 
-                HStack(spacing: DS.Metrics.spacing12) {
-                    PillButton(
-                        recorder.state == .paused ? "Продолжить" : "Пауза",
-                        icon: recorder.state == .paused ? "play.fill" : "pause.fill",
-                        style: .secondary
-                    ) {
-                        if recorder.state == .paused {
-                            recorder.resume()
-                        } else {
-                            recorder.pause()
-                        }
-                    }
-
-                    PillButton("Разобрать", icon: "sparkles", style: .primary) {
-                        guard let result = recorder.finish() else { return }
-                        Task {
-                            await store.transcribe(audio: result.data, mimeType: result.mimeType)
-                        }
-                    }
-
-                    CircleIconButton(icon: "xmark", accessibilityLabel: "Отменить запись") {
-                        recorder.cancel()
-                    }
+                CircleIconButton(icon: "xmark", accessibilityLabel: "Отменить запись") {
+                    recorder.cancel()
                 }
             }
         }
+        .padding(16)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .inked(cornerRadius: 20, shadow: 4)
     }
+
+    // MARK: - «Понял так»: plan drafts
 
     /// Overlaps the local list can see, plus the ones only the server could (Google events).
     private var draftsHaveConflict: Bool {
@@ -504,12 +640,12 @@ public struct PlanScreen: View {
     private var draftsSection: some View {
         VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
             HStack {
-                SectionHeader("Черновики (\(store.draftPlans.count))")
+                SkewTag("Понял так · \(store.draftPlans.count)", color: accent)
                 Spacer()
                 Button("Сбросить все") {
                     isConfirmingDraftReset = true
                 }
-                .font(.footnote)
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
                 .foregroundColor(DS.Colors.destructive)
                 .frame(minHeight: DS.Metrics.minHitTarget)
                 .confirmationDialog(
@@ -525,27 +661,28 @@ public struct PlanScreen: View {
             }
 
             if draftsHaveConflict {
-                Card {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                        Text("Есть пересечение по времени")
-                            .font(.headline)
-                            .foregroundColor(DS.Colors.warning)
-                        Text("Измени время или сохрани, оставив пересечение.")
-                            .font(.footnote)
-                            .foregroundColor(DS.Colors.textSecondary)
+                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                    Text("Есть пересечение по времени")
+                        .font(DS.Fonts.text(17, .bold, relativeTo: .headline))
+                        .foregroundColor(DS.Colors.warning)
+                    Text("Измени время или сохрани, оставив пересечение.")
+                        .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                        .foregroundColor(DS.Colors.textSecondary)
 
-                        PillButton("Сохранить с пересечением", style: .secondary) {
-                            Task {
-                                await store.saveDrafts(keepConflicts: true)
-                            }
-                        }
+                    PillButton("Сохранить с пересечением", style: .secondary) {
+                        saveDrafts(keepConflicts: true)
                     }
                 }
+                .padding(16)
+                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(DS.Colors.warning.opacity(0.6), lineWidth: 1.5))
             }
 
             ForEach($store.draftPlans) { $draft in
                 draftEditor(draft: $draft)
             }
+
+            googleToggle
 
             PillButton(
                 "Сохранить планы",
@@ -553,8 +690,41 @@ public struct PlanScreen: View {
                 style: .primary,
                 isLoading: store.isLoading
             ) {
-                Task {
-                    await store.saveDrafts(keepConflicts: false)
+                saveDrafts(keepConflicts: false)
+            }
+        }
+    }
+
+    private var googleToggle: some View {
+        Toggle(isOn: $sendToGoogle) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("В Google Календарь")
+                    .font(DS.Fonts.text(16, .bold, relativeTo: .body))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text("Планы с датой и временем")
+                    .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+        }
+        .tint(accent)
+        .padding(.horizontal, 16)
+        .frame(minHeight: 60)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    /// Saves the drafts, then sends the newly saved ones with a date and time to Google when the toggle is on.
+    private func saveDrafts(keepConflicts: Bool) {
+        let candidates = store.draftPlans
+            .filter { $0.date != nil && $0.time != nil && $0.googleEventId == nil }
+            .map(\.id)
+        let toGoogle = sendToGoogle && !isDemo
+        Task {
+            let saved = await store.saveDrafts(keepConflicts: keepConflicts)
+            guard saved, toGoogle else { return }
+            let stillDrafts = Set(store.draftPlans.map(\.id))
+            for id in candidates where !stillDrafts.contains(id) {
+                if let plan = store.plans.first(where: { $0.id == id }), plan.googleEventId == nil {
+                    await store.exportPlanToGoogle(plan)
                 }
             }
         }
@@ -562,57 +732,63 @@ public struct PlanScreen: View {
 
     private func draftEditor(draft: Binding<PlanItem>) -> some View {
         let isConflicted = store.conflictedDraftIds.contains(draft.wrappedValue.id)
-        return Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                HStack {
-                    Text(draft.wrappedValue.kind == "task" ? "Задача" : "Событие")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(isConflicted ? DS.Colors.warning : DS.Colors.accent)
-                    Spacer()
-                    Button(action: {
-                        store.removeDraft(id: draft.wrappedValue.id)
-                    }) {
-                        Image(systemName: "trash")
-                            .font(.footnote)
-                            .foregroundColor(DS.Colors.destructive)
-                            .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
-                    }
-                    .accessibilityLabel("Удалить черновик: \(draft.wrappedValue.title)")
+        return VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            HStack {
+                Text((draft.wrappedValue.kind == "task" ? "Задача" : "Событие").uppercased())
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                    .tracking(0.8)
+                    .foregroundColor(isConflicted ? DS.Colors.warning : accent)
+                Spacer()
+                Button(action: {
+                    store.removeDraft(id: draft.wrappedValue.id)
+                }) {
+                    Image(systemName: "trash")
+                        .font(.footnote)
+                        .foregroundColor(DS.Colors.destructive)
+                        .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
                 }
+                .accessibilityLabel("Удалить черновик: \(draft.wrappedValue.title)")
+            }
 
-                TextField("Название", text: draft.title)
-                    .font(.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .padding(DS.Metrics.spacing8)
-                    .background(DS.Colors.surfaceRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+            TextField("Название", text: draft.title)
+                .font(DS.Fonts.text(17, .bold, relativeTo: .headline))
+                .foregroundColor(DS.Colors.textPrimary)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 48)
+                .background(DS.Colors.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                Picker("Тип", selection: draft.kind) {
-                    Text("Событие").tag("event")
-                    Text("Задача").tag("task")
-                }
-                .pickerStyle(.segmented)
+            Picker("Тип", selection: draft.kind) {
+                Text("Событие").tag("event")
+                Text("Задача").tag("task")
+            }
+            .pickerStyle(.segmented)
 
-                scheduleFields(draft: draft)
+            scheduleFields(draft: draft)
 
-                if draft.wrappedValue.kind == "event" {
-                    Stepper(
-                        "Длительность: \(draft.wrappedValue.durationMinutes ?? 60) мин",
-                        value: Binding(
-                            get: { draft.wrappedValue.durationMinutes ?? 60 },
-                            set: { draft.wrappedValue.durationMinutes = $0 }
-                        ),
-                        in: 5...1440,
-                        step: 5
-                    )
-                    .font(.footnote)
-                    .foregroundColor(DS.Colors.textPrimary)
-                }
+            if draft.wrappedValue.kind == "event" {
+                Stepper(
+                    "Длительность: \(draft.wrappedValue.durationMinutes ?? 60) мин",
+                    value: Binding(
+                        get: { draft.wrappedValue.durationMinutes ?? 60 },
+                        set: { draft.wrappedValue.durationMinutes = $0 }
+                    ),
+                    in: 5...1440,
+                    step: 5
+                )
+                .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
+                .foregroundColor(DS.Colors.textPrimary)
+            }
 
-                ReminderOffsetsPicker(offsets: Binding(
-                    get: { (try? PlanDomain.getReminderOffsets(plan: draft.wrappedValue)) ?? [] },
-                    set: { draft.wrappedValue = PlanDomain.withReminderOffsets(draft.wrappedValue, offsets: $0) }
-                ))
+            ReminderOffsetsPicker(offsets: Binding(
+                get: { (try? PlanDomain.getReminderOffsets(plan: draft.wrappedValue)) ?? [] },
+                set: { draft.wrappedValue = PlanDomain.withReminderOffsets(draft.wrappedValue, offsets: $0) }
+            ))
+        }
+        .padding(16)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            if isConflicted {
+                RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(DS.Colors.warning.opacity(0.6), lineWidth: 1.5)
             }
         }
     }
@@ -641,9 +817,9 @@ public struct PlanScreen: View {
                     }
                 )
             )
-            .font(.subheadline)
+            .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
             .foregroundColor(DS.Colors.textPrimary)
-            .tint(DS.Colors.controlTint)
+            .tint(accent)
             .environment(\.timeZone, TimeZone(identifier: plan.timeZone) ?? .current)
             .environment(\.locale, Locale(identifier: "ru_RU"))
 
@@ -653,15 +829,78 @@ public struct PlanScreen: View {
                     draft.wrappedValue.time = nil
                     draft.wrappedValue = PlanDomain.withReminderOffsets(draft.wrappedValue, offsets: [])
                 }
-                .font(.footnote)
-                .foregroundColor(DS.Colors.accent)
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                .foregroundColor(accent)
                 .frame(minHeight: DS.Metrics.minHitTarget)
             }
         }
     }
 
+    // MARK: - «Понял так»: habit and goal
+
+    private func habitPreviewCard(_ habit: Habit) -> some View {
+        let unit = habit.target.unit
+        let norm = habit.target.amount > 1
+            ? (unit.isEmpty ? HabitText.times(habit.target.amount) : "\(habit.target.amount) \(unit)")
+            : "Один раз"
+        return PlansUnderstoodCard(title: "Понял так: привычка", onCancel: cancelPreview) {
+            PlansFactLine(label: "Название", value: habit.title)
+            PlansFactLine(label: "Когда", value: HabitText.schedule(habit.schedule))
+            PlansFactLine(label: "Норма за день", value: norm)
+            previewButtons(canSave: habits.owner != .none && !isDemo) {
+                habits.add(habit)
+                clearPreview()
+            } onAdjust: {
+                habitDraftRequest = habit
+                clearPreview()
+            }
+        }
+    }
+
+    private func goalPreviewCard(_ reading: PlansQuickParse.GoalReading) -> some View {
+        PlansUnderstoodCard(title: "Понял так: цель", onCancel: cancelPreview) {
+            PlansFactLine(label: "Цель", value: reading.goal.title)
+            PlansFactLine(label: "Как измерять", value: reading.measure)
+            PlansFactLine(label: "Срок", value: reading.goal.dueDay.map { GoalText.dateLabel($0) } ?? "Без срока")
+            if let sphere = goals.sphereTitle(reading.goal.sphereId) {
+                PlansFactLine(label: "Сфера", value: sphere)
+            }
+            previewButtons(canSave: goals.owner != .none && !isDemo) {
+                goals.add(reading.goal)
+                clearPreview()
+            } onAdjust: {
+                goalDraftRequest = reading.goal
+                clearPreview()
+            }
+        }
+    }
+
+    private func previewButtons(canSave: Bool, onSave: @escaping () -> Void, onAdjust: @escaping () -> Void) -> some View {
+        HStack(spacing: DS.Metrics.spacing12) {
+            PillButton("Сохранить", icon: "checkmark", style: .primary, isEnabled: canSave, action: onSave)
+            PillButton("Настроить", icon: "slider.horizontal.3", style: .secondary, isEnabled: !isDemo, action: onAdjust)
+        }
+        .padding(.top, 4)
+    }
+
+    private func clearPreview() {
+        habitPreview = nil
+        goalPreview = nil
+        previewSource = ""
+    }
+
+    /// «×» on the card: nothing is saved and the words go back into the field.
+    private func cancelPreview() {
+        if !previewSource.isEmpty && inputs.plans.isEmpty {
+            inputs.edit(previewSource, for: .plans)
+        }
+        clearPreview()
+    }
+
+    // MARK: - Bottom field
+
     private var composer: some View {
-        ComposerField(
+        PlansComposerBar(
             placeholder: "Что запланировать?",
             text: Binding(get: { inputs.plans }, set: { inputs.edit($0, for: .plans) }),
             isListening: dictation.isListening(to: .plans),
@@ -674,9 +913,6 @@ public struct PlanScreen: View {
                 inputs.clear(.plans)
             }
         )
-        .padding(.horizontal, DS.Metrics.screenGutter)
-        .padding(.top, DS.Metrics.spacing8)
-        .padding(.bottom, DS.Metrics.spacing12)
         .background(DS.Colors.canvas.opacity(0.97))
     }
 
@@ -687,19 +923,44 @@ public struct PlanScreen: View {
         }
         Task {
             if await dictation.start(into: .plans) { return }
-            // Without Apple Speech the recording goes to the server as before.
+            // Without Apple Speech the recording goes to the server as before (plans only parse it).
             if !dictation.isSupported {
                 dictation.errorMessage = nil
+                section = .plans
                 await recorder.start()
             }
         }
     }
 
+    /// «Разобрать»: a plan goes to the AI parse; a habit or a goal is read on the phone and shown before saving.
     private func parseComposer() {
         dictation.stop()
+        parseNotice = nil
         let text = inputs.take(.plans)
         guard !text.isEmpty else { return }
-        Task { await store.parseText(text) }
+        switch section {
+        case .plans:
+            Task { await store.parseText(text) }
+        case .habits:
+            if let habit = PlansQuickParse.habit(from: text, today: today) {
+                goalPreview = nil
+                habitPreview = habit
+                previewSource = text
+            } else {
+                inputs.edit(text, for: .plans)
+                parseNotice = "Не понял привычку. Например: «вода 8 стаканов в день»."
+            }
+        case .goals:
+            let sphereIds = Set(goals.spheres.map(\.id))
+            if let reading = PlansQuickParse.goal(from: text, today: today, sphereIds: sphereIds) {
+                habitPreview = nil
+                goalPreview = reading
+                previewSource = text
+            } else {
+                inputs.edit(text, for: .plans)
+                parseNotice = "Не понял цель. Например: «накопить 500 000 ₸ к июню»."
+            }
+        }
     }
 
     // MARK: - Week
@@ -710,88 +971,83 @@ public struct PlanScreen: View {
             PlanWeek.trainingRows(program: workouts.program, days: days, timeZone: store.timeZone).map { ($0.date, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        let today = PlanDomain.today(timeZone: store.timeZone)
+        let todayDate = today
         return VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            HStack(spacing: DS.Metrics.spacing4) {
-                Text(PlanWeek.title(of: days, timeZone: store.timeZone))
-                    .font(.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                Spacer()
-                if !days.contains(today) {
-                    Button("Сегодня") { store.selectedDate = today }
-                        .font(.footnote.weight(.medium))
-                        .foregroundColor(DS.Colors.accent)
-                        .frame(minHeight: DS.Metrics.minHitTarget)
-                }
-                weekButton(icon: "chevron.left", label: "Предыдущая неделя", days: -7)
-                weekButton(icon: "chevron.right", label: "Следующая неделя", days: 7)
-            }
+            weekHeader(title: PlanWeek.title(of: days, timeZone: store.timeZone), showToday: !days.contains(todayDate))
             ForEach(days, id: \.self) { date in
-                weekDayBlock(date: date, training: training[date], isToday: date == today)
+                weekDayBlock(date: date, training: training[date], isToday: date == todayDate)
             }
         }
     }
 
     private func weekDayBlock(date: String, training: PlanWeek.TrainingRow?, isToday: Bool) -> some View {
         let items = store.agenda(for: date)
-        return Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                HStack {
-                    Text(formatLongDate(date).prefix(1).uppercased() + formatLongDate(date).dropFirst())
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(isToday ? DS.Colors.accent : DS.Colors.textPrimary)
-                    Spacer()
-                    if items.isEmpty && training == nil {
-                        Text("Свободно")
-                            .font(.caption)
+        let longDate = formatLongDate(date)
+        return VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            HStack {
+                Text(longDate.prefix(1).uppercased() + longDate.dropFirst())
+                    .font(DS.Fonts.text(16, .bold, relativeTo: .subheadline))
+                    .foregroundColor(isToday ? accent : DS.Colors.textPrimary)
+                Spacer()
+                if items.isEmpty && training == nil {
+                    Text("Свободно")
+                        .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                        .foregroundColor(DS.Colors.textMuted)
+                }
+            }
+            if let training {
+                Button(action: onOpenWorkout) {
+                    HStack(spacing: DS.Metrics.spacing8) {
+                        Image(systemName: "figure.strengthtraining.traditional")
+                        Text("\(training.title) · \(PlanWeek.exercisesLabel(training.exerciseCount))")
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .padding(.horizontal, DS.Metrics.spacing8)
+                    .frame(minHeight: 36)
+                    .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Тренировка: \(training.title). Открыть раздел Тренировка")
+            }
+            ForEach(items) { it in
+                Button {
+                    store.selectedDate = date
+                    viewMode = .day
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: DS.Metrics.spacing8) {
+                        Text(timeLabel(it))
+                            .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                            .monospacedDigit()
                             .foregroundColor(DS.Colors.textSecondary)
+                            .frame(width: 44, alignment: .leading)
+                        Text(it.item.title)
+                            .font(DS.Fonts.text(15, .semibold, relativeTo: .subheadline))
+                            .foregroundColor(it.item.completed == true ? DS.Colors.textMuted : DS.Colors.textPrimary)
+                            .strikethrough(it.item.completed == true)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
                     }
+                    .frame(minHeight: 32)
+                    .contentShape(Rectangle())
                 }
-                if let training {
-                    Button(action: onOpenWorkout) {
-                        HStack(spacing: DS.Metrics.spacing8) {
-                            Image(systemName: "figure.strengthtraining.traditional")
-                            Text("\(training.title) · \(PlanWeek.exercisesLabel(training.exerciseCount))")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .padding(.horizontal, DS.Metrics.spacing8)
-                        .frame(minHeight: 36)
-                        .background(DS.Colors.accent.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Тренировка: \(training.title). Открыть раздел Тренировка")
-                }
-                ForEach(items) { it in
-                    Button {
-                        store.selectedDate = date
-                        viewMode = .day
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: DS.Metrics.spacing8) {
-                            Text(it.displayTime)
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .frame(width: 76, alignment: .leading)
-                            Text(it.item.title)
-                                .font(.subheadline)
-                                .foregroundColor(it.item.completed == true ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                                .strikethrough(it.item.completed == true)
-                                .lineLimit(2)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(minHeight: 32)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            if isToday {
+                RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(accent.opacity(0.5), lineWidth: 1.5)
             }
         }
     }
+
+    // MARK: - Dates
 
     private func formatElapsed(_ t: TimeInterval) -> String {
         let secs = Int(t)

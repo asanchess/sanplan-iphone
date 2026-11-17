@@ -360,3 +360,15 @@ public enum FinanceAPI {
         return response.drafts ?? []
     }
 }
+
+#if DEBUG
+extension FinanceStore {
+    /// Debug screenshots only (`--screenshot-demo-data`): made-up money in memory. The owner becomes .none,
+    /// so every save path refuses and nothing reaches the disk, the vault or the cloud.
+    func showScreenshotDemo(_ demo: FinanceState, today: String) {
+        owner = .none
+        state = demo
+        refreshSummary(today: today)
+    }
+}
+#endif

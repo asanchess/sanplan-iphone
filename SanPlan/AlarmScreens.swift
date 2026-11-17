@@ -126,6 +126,7 @@ struct ReminderOffsetsPicker: View {
     @State private var hours = ""
     @State private var minutes = ""
     @State private var notice: String? = nil
+    @Environment(\.sectionAccent) private var accent
 
     private static let presets = [0, 10, 60, 1440]
 
@@ -152,7 +153,7 @@ struct ReminderOffsetsPicker: View {
                     numberField("Мин", text: $minutes)
                     Button("Добавить", action: addCustom)
                         .font(.footnote.weight(.medium))
-                        .foregroundColor(DS.Colors.accent)
+                        .foregroundColor(accent)
                         .frame(minHeight: DS.Metrics.minHitTarget)
                 }
                 .padding(.top, DS.Metrics.spacing4)
@@ -166,7 +167,7 @@ struct ReminderOffsetsPicker: View {
                 notice = nil
             }
             .font(.footnote)
-            .foregroundColor(offsets.isEmpty ? DS.Colors.textSecondary : DS.Colors.accent)
+            .foregroundColor(offsets.isEmpty ? DS.Colors.textSecondary : accent)
             .disabled(offsets.isEmpty)
             .frame(minHeight: DS.Metrics.minHitTarget)
 
@@ -184,13 +185,13 @@ struct ReminderOffsetsPicker: View {
             toggle(offset)
         } label: {
             Text(PlanDomain.formatReminderOffset(offset))
-                .font(.footnote)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                .foregroundColor(selected ? DS.Colors.onAccent : DS.Colors.textPrimary)
-                .background(selected ? DS.Colors.accent : DS.Colors.surfaceRaised)
-                .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                .font(DS.Fonts.text(14, selected ? .bold : .medium, relativeTo: .footnote))
+                .foregroundColor(selected ? DS.Colors.canvas : DS.Colors.textPrimary)
+                .background(selected ? accent : DS.Colors.surfaceRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
@@ -246,15 +247,22 @@ struct ReminderOffsetsPicker: View {
 public struct AlarmsScreen: View {
     @ObservedObject var store: PlanStore
     @EnvironmentObject private var coordinator: AlarmCoordinator
+    @ObservedObject private var sounds = AlertSoundSettings.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showAll = false
     @State private var editor: AlarmEditorTarget? = nil
     @State private var confirmDeleteOwn = false
 
+    /// Alarms belong to «Планы» wherever they open from (Today too), so the colour is fixed.
+    private let accent = DS.Colors.plans
+
     public var body: some View {
         NavigationStack {
             ZStack {
                 DS.Colors.canvas.ignoresSafeArea()
+                PlansBackdrop()
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     let rows = AlarmRows.build(
                         plans: store.plans,
@@ -268,11 +276,7 @@ public struct AlarmsScreen: View {
                             PillButton("Создать будильник", icon: "plus", style: .primary) {
                                 editor = .new
                             }
-                            Picker("Список будильников", selection: $showAll) {
-                                Text("С сигналами").tag(false)
-                                Text("Все планы").tag(true)
-                            }
-                            .pickerStyle(.segmented)
+                            ArnaSegmented("Список будильников", selection: $showAll, options: [(false, "С сигналами"), (true, "Все планы")])
 
                             if rows.isEmpty {
                                 EmptyState(
@@ -285,12 +289,15 @@ public struct AlarmsScreen: View {
                                     alarmRow(row)
                                 }
                             }
+                            soundCard
                             deviceCard
                         }
                         .padding(.horizontal, DS.Metrics.screenGutter)
                         .padding(.vertical, DS.Metrics.spacing16)
                     }
-                    .refreshable { await store.reload() }
+                    .refreshable {
+                        if !ScreenshotRoute.demoData { await store.reload() }
+                    }
                 }
             }
             .navigationTitle("Будильники")
@@ -298,11 +305,14 @@ public struct AlarmsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Готово") { dismiss() }
-                        .tint(DS.Colors.controlTint)
+                        .tint(accent)
                 }
             }
             .sheet(item: $editor) { target in
-                AlarmEditor(store: store, target: target).keyboardDismissBar()
+                AlarmEditor(store: store, target: target)
+                    .keyboardDismissBar()
+                    .environment(\.sectionAccent, DS.Colors.plans)
+                    .tint(DS.Colors.plans)
             }
             .confirmationDialog("Удалить будильники с iPhone?", isPresented: $confirmDeleteOwn, titleVisibility: .visible) {
                 Button("Удалить с iPhone", role: .destructive) {
@@ -313,28 +323,35 @@ public struct AlarmsScreen: View {
                 Text("Сигналы ARNA исчезнут с этого телефона. Расписание останется и вернётся при следующей синхронизации.")
             }
         }
-        .task { await coordinator.reconcileWithSystem() }
+        .environment(\.sectionAccent, DS.Colors.plans)
+        .tint(DS.Colors.plans)
+        .task {
+            // Screenshot data lives only in memory: never push it to the system alarm list.
+            if !ScreenshotRoute.demoData { await coordinator.reconcileWithSystem() }
+        }
     }
 
     @ViewBuilder
     private var accessCard: some View {
-        if !coordinator.isAuthorized {
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                    Text("Нет доступа к будильникам")
-                        .font(.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Text("Без доступа сигналы не прозвучат на заблокированном экране.")
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    PillButton("Разрешить доступ", style: .secondary) {
-                        Task {
-                            await coordinator.requestAuthorization()
-                            await coordinator.syncAlarms(plans: store.plans.map { $0.toNativePlan() })
-                        }
+        if !coordinator.isAuthorized && !ScreenshotRoute.demoData {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                Text("Нет доступа к будильникам")
+                    .font(DS.Fonts.text(17, .bold, relativeTo: .headline))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text("Без доступа сигналы не прозвучат на заблокированном экране.")
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.textSecondary)
+                PillButton("Разрешить доступ", style: .secondary) {
+                    Task {
+                        await coordinator.requestAuthorization()
+                        await coordinator.syncAlarms(plans: store.plans.map { $0.toNativePlan() })
                     }
                 }
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(DS.Colors.warning.opacity(0.6), lineWidth: 1.5))
         }
     }
 
@@ -344,56 +361,59 @@ public struct AlarmsScreen: View {
             .compactMap { row in row.nextSignal.map { (row, $0) } }
             .min { $0.1.fireMs < $1.1.fireMs }
         if let (row, signal) = nearest {
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                    Text("Ближайший сигнал")
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    Text(PlanDateTime.clock(signal.fireMs, timeZone: row.timeZone))
-                        .font(.system(size: 44, weight: .light).monospacedDigit())
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Text(row.plan.title)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Text(PlanDateTime.long(signal.fireMs, timeZone: row.timeZone))
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+                SkewTag("Ближайший сигнал", color: accent)
+                Text(PlanDateTime.clock(signal.fireMs, timeZone: row.timeZone))
+                    .font(DS.Fonts.display(46, relativeTo: .largeTitle))
+                    .monospacedDigit()
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(row.plan.title)
+                    .font(DS.Fonts.text(18, .bold, relativeTo: .headline))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(PlanDateTime.long(signal.fireMs, timeZone: row.timeZone))
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.textSecondary)
             }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .inked(cornerRadius: 22, shadow: 4)
+            .accessibilityElement(children: .combine)
         }
     }
 
     private func alarmRow(_ row: AlarmRow) -> some View {
-        Card {
-            HStack(alignment: .top, spacing: DS.Metrics.spacing12) {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                    if let ms = row.nextSignal?.fireMs ?? row.eventMs {
-                        Text(PlanDateTime.clock(ms, timeZone: row.timeZone))
-                            .font(.title2.weight(.light).monospacedDigit())
-                            .foregroundColor(DS.Colors.textPrimary)
-                    }
-                    Text(row.plan.title)
-                        .font(.body.weight(.medium))
-                        .foregroundColor(DS.Colors.textPrimary)
-                    Text(subtitle(row))
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    ForEach(row.signals) { signal in
-                        Text("\(PlanDomain.formatReminderOffset(signal.offset)) · \(PlanDateTime.long(signal.fireMs, timeZone: row.timeZone))")
-                            .font(.caption)
-                            .strikethrough(signal.isPast)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
+        HStack(alignment: .top, spacing: DS.Metrics.spacing12) {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
+                if let ms = row.nextSignal?.fireMs ?? row.eventMs {
+                    Text(PlanDateTime.clock(ms, timeZone: row.timeZone))
+                        .font(DS.Fonts.display(26, relativeTo: .title2))
+                        .monospacedDigit()
+                        .foregroundColor(row.nextSignal == nil ? DS.Colors.textMuted : DS.Colors.textPrimary)
                 }
-                Spacer(minLength: 0)
-                Button("Изменить") { editor = .existing(row.plan) }
-                    .font(.footnote.weight(.medium))
-                    .foregroundColor(DS.Colors.accent)
-                    .frame(minHeight: DS.Metrics.minHitTarget)
-                    .accessibilityLabel("Изменить будильник: \(row.plan.title)")
+                Text(row.plan.title)
+                    .font(DS.Fonts.text(17, .bold, relativeTo: .body))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(subtitle(row))
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.textSecondary)
+                ForEach(row.signals) { signal in
+                    Text("\(PlanDomain.formatReminderOffset(signal.offset)) · \(PlanDateTime.long(signal.fireMs, timeZone: row.timeZone))")
+                        .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                        .strikethrough(signal.isPast)
+                        .foregroundColor(DS.Colors.textMuted)
+                }
             }
+            Spacer(minLength: 0)
+            Button("Изменить") { editor = .existing(row.plan) }
+                .font(DS.Fonts.text(14, .bold, relativeTo: .footnote))
+                .foregroundColor(accent)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .accessibilityLabel("Изменить будильник: \(row.plan.title)")
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func subtitle(_ row: AlarmRow) -> String {
@@ -407,36 +427,54 @@ public struct AlarmsScreen: View {
         return "\(state) · \(row.plan.alarmOnly == true ? "Отдельный будильник" : "К плану")"
     }
 
+    /// The reminder sound and its volume: the same setting as in Профиль → Настройки.
+    private var soundCard: some View {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            Text("ЗВУК")
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .tracking(0.8)
+                .foregroundColor(accent)
+            AlertSoundRow(title: "Звук напоминаний", choice: sounds.plan, onSelect: sounds.setPlan, volume: sounds.planVolume, onVolume: sounds.setPlanVolume)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     private var deviceCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                Text("На этом iPhone")
-                    .font(.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
-                Text(coordinator.statusMessage)
-                    .font(.footnote)
-                    .foregroundColor(DS.Colors.textSecondary)
-                ForEach(coordinator.syncErrors + coordinator.syncWarnings, id: \.self) { line in
-                    Text(line)
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.warning)
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            Text("НА ЭТОМ IPHONE")
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .tracking(0.8)
+                .foregroundColor(accent)
+            Text(coordinator.statusMessage)
+                .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                .foregroundColor(DS.Colors.textSecondary)
+            ForEach(coordinator.syncErrors + coordinator.syncWarnings, id: \.self) { line in
+                Text(line)
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.warning)
+            }
+            Text("Активно сигналов: \(coordinator.activeRecords.count)")
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                .monospacedDigit()
+                .foregroundColor(DS.Colors.textPrimary)
+            PillButton("Проверить: сигнал через минуту", icon: "alarm", style: .secondary) {
+                Task { await coordinator.scheduleTestAlarmInOneMinute() }
+            }
+            .disabled(ScreenshotRoute.demoData)
+            if !coordinator.activeRecords.isEmpty {
+                Button("Удалить сигналы с iPhone", role: .destructive) {
+                    confirmDeleteOwn = true
                 }
-                Text("Активно сигналов: \(coordinator.activeRecords.count)")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundColor(DS.Colors.textPrimary)
-                PillButton("Проверить: сигнал через минуту", icon: "alarm", style: .secondary) {
-                    Task { await coordinator.scheduleTestAlarmInOneMinute() }
-                }
-                if !coordinator.activeRecords.isEmpty {
-                    Button("Удалить сигналы с iPhone", role: .destructive) {
-                        confirmDeleteOwn = true
-                    }
-                    .font(.footnote)
-                    .foregroundColor(DS.Colors.destructive)
-                    .frame(minHeight: DS.Metrics.minHitTarget)
-                }
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                .foregroundColor(DS.Colors.destructive)
+                .frame(minHeight: DS.Metrics.minHitTarget)
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -502,7 +540,7 @@ struct AlarmEditor: View {
                                 DatePicker("Время сигнала", selection: $moment)
                                     .font(.subheadline)
                                     .foregroundColor(DS.Colors.textPrimary)
-                                    .tint(DS.Colors.controlTint)
+                                    .tint(DS.Colors.plans)
                                     .environment(\.timeZone, TimeZone(identifier: timeZone) ?? .current)
                                     .environment(\.locale, Locale(identifier: "ru_RU"))
                                 ReminderOffsetsPicker(offsets: $offsets)
@@ -526,7 +564,7 @@ struct AlarmEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Отмена") { dismiss() }
-                        .foregroundColor(DS.Colors.accent)
+                        .foregroundColor(DS.Colors.plans)
                         .disabled(pending)
                 }
             }

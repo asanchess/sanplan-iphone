@@ -126,17 +126,20 @@ public struct AlertSoundRow: View {
 
     public var body: some View {
         Button { showing = true } label: {
-            HStack {
-                Text(title).foregroundColor(DS.Colors.textPrimary)
-                Spacer()
-                Text(AlertSoundSheet.name(of: AlertSoundLibrary.choiceIsPlayable(choice), requested: choice))
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-                Image(systemName: "chevron.right").font(.footnote).foregroundColor(DS.Colors.textSecondary)
+            ProfileRow(title) {
+                HStack(spacing: 8) {
+                    ProfileValue(AlertSoundSheet.name(of: AlertSoundLibrary.choiceIsPlayable(choice), requested: choice))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(DS.Colors.textMuted)
+                        .accessibilityHidden(true)
+                }
             }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ProfileRowButtonStyle())
         .accessibilityLabel(title)
+        .accessibilityValue(AlertSoundSheet.name(of: AlertSoundLibrary.choiceIsPlayable(choice), requested: choice))
         .sheet(isPresented: $showing) {
             AlertSoundSheet(title: title, choice: choice, onSelect: onSelect, volume: volume, onVolume: onVolume)
         }
@@ -149,6 +152,7 @@ struct AlertSoundSheet: View {
     let onSelect: (AlertSoundChoice) -> Void
     let onVolume: ((Int) -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.sectionAccent) private var accent
     @StateObject private var preview = AlertSoundPreview()
     @State private var selected: AlertSoundChoice
     @State private var percent: Int
@@ -220,7 +224,7 @@ struct AlertSoundSheet: View {
                     Text(detail).font(.caption).foregroundColor(DS.Colors.textSecondary)
                 }
                 Spacer()
-                if selected == value { Image(systemName: "checkmark").foregroundColor(DS.Colors.accent) }
+                if selected == value { Image(systemName: "checkmark").foregroundColor(accent) }
             }
         }
         .buttonStyle(.plain)

@@ -1,4 +1,3 @@
-import Charts
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -57,40 +56,43 @@ struct StatementsSection: View {
     @State private var suggestions: [StatementImport.MergeSuggestion] = []
     @State private var importToDelete: FinanceImport?
 
+    @Environment(\.sectionAccent) private var accent
+
+    /// Canvas: an outline link «Выписки из банка» (52 high, radius 18, hairline 1.5) under the feed.
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                SectionHeader("Выписки")
-                Text("Kaspi Gold и Halyk в PDF. Файл читается на телефоне и никуда не отправляется.")
-                    .font(.caption)
-                    .foregroundColor(DS.Colors.textSecondary)
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            MoneyOutlineButton("Выписки из банка", icon: "doc.text.magnifyingglass", isLoading: isReading) {
+                onPick()
+            }
+            .accessibilityIdentifier("statement-import")
+            .accessibilityHint("Импорт PDF-выписки")
+            Text("Kaspi Gold и Halyk в PDF. Файл читается на телефоне и никуда не отправляется.")
+                .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                .foregroundColor(DS.Colors.textSecondary)
 
-                PillButton("Импорт выписки", icon: "doc.text.magnifyingglass", style: .secondary, isLoading: isReading) {
-                    onPick()
-                }
-                .accessibilityIdentifier("statement-import")
+            ForEach(suggestions) { suggestion in
+                mergeRow(suggestion)
+            }
 
-                ForEach(suggestions) { suggestion in
-                    mergeRow(suggestion)
-                }
-
-                ForEach(store.state.imports ?? []) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(item.bank) · \(MoneyFormat.operations(item.count))")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(DS.Colors.textPrimary)
-                            Text(periodText(item))
-                                .font(.caption2)
-                                .foregroundColor(DS.Colors.textSecondary)
-                        }
-                        Spacer()
-                        Button("Удалить") { importToDelete = item }
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.destructive)
-                            .frame(minHeight: DS.Metrics.minHitTarget)
+            ForEach(store.state.imports ?? []) { item in
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(item.bank) · \(MoneyFormat.operations(item.count))")
+                            .font(DS.Fonts.text(16, .semibold))
+                            .foregroundColor(DS.Colors.textPrimary)
+                        Text(periodText(item))
+                            .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                            .foregroundColor(DS.Colors.textSecondary)
                     }
+                    Spacer()
+                    Button("Удалить") { importToDelete = item }
+                        .font(DS.Fonts.text(14, .semibold, relativeTo: .caption))
+                        .foregroundColor(DS.Colors.destructive)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
                 }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 60)
+                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
         .onChange(of: pickedFile) { _, url in
@@ -136,8 +138,8 @@ struct StatementsSection: View {
             }
         }
         .padding(DS.Metrics.spacing12)
-        .background(DS.Colors.accent.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+        .background(accent.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func read(_ url: URL) {
@@ -346,145 +348,47 @@ struct RecordEditSheet: View {
     }
 }
 
-// MARK: - Charts
+// MARK: - Month insights (was MoneyChartsSection on «Обзор»)
 
-struct MoneyChartsSection: View {
+/// Comparison with last month, the forecast and the top merchants. «Обзор» now shows the canvas blocks
+/// («Траты по дням», «Куда уходит»), so these numbers live in «Итоги месяца».
+struct MonthInsightsCard: View {
     let insights: FinanceInsights
-    /// Opens the operations feed filtered by the tapped category; nil keeps the legend static.
-    var onCategory: ((String) -> Void)? = nil
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private let palette: [Color] = [
-        DS.Colors.accent, Color(red: 0.42, green: 0.31, blue: 0.85), Color(red: 0.95, green: 0.62, blue: 0.40),
-        Color(red: 0.36, green: 0.72, blue: 0.62), Color(red: 0.90, green: 0.45, blue: 0.62), Color(red: 0.55, green: 0.60, blue: 0.70),
-    ]
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
         Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                 SectionHeader("Расходы за месяц")
-                if insights.categories.isEmpty {
-                    Text("В этом месяце расходов нет.")
-                        .font(.subheadline)
+                comparisonRow("Этот месяц", insights.expenseMinor, color: accent)
+                comparisonRow("Прошлый месяц", insights.previousExpenseMinor, color: DS.Colors.textMuted)
+                if insights.previousExpenseMinor > 0 {
+                    let delta = Double(insights.expenseMinor - insights.previousExpenseMinor) / Double(insights.previousExpenseMinor) * 100
+                    Text(delta >= 0 ? "На \(Int(delta.rounded())) % больше, чем в прошлом месяце" : "На \(Int((-delta).rounded())) % меньше, чем в прошлом месяце")
+                        .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
                         .foregroundColor(DS.Colors.textSecondary)
-                } else {
-                    HStack(alignment: .center, spacing: DS.Metrics.spacing16) {
-                        ring.frame(width: 140, height: 140)
-                        legend
-                    }
                 }
-                comparison
                 if let forecast = insights.forecastExpenseMinor, insights.expenseMinor > 0 {
-                    HStack {
-                        Text("Прогноз к концу месяца")
-                            .font(.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
-                        Spacer()
-                        Text(MoneyFormat.kzt(forecast))
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundColor(DS.Colors.textPrimary)
-                            .contentTransition(.numericText())
-                    }
+                    MoneyRow(label: "Прогноз к концу месяца", value: MoneyFormat.kzt(forecast), emphasized: true)
                 }
                 if !insights.topMerchants.isEmpty {
-                    VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                        Text("Где больше всего")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundColor(DS.Colors.textSecondary)
-                        ForEach(insights.topMerchants) { merchant in
-                            HStack {
-                                Text(merchant.name).font(.subheadline).lineLimit(1)
-                                Spacer()
-                                Text(MoneyFormat.kzt(merchant.amountMinor))
-                                    .font(.subheadline.monospacedDigit())
-                            }
-                            .foregroundColor(DS.Colors.textPrimary)
-                        }
+                    Text("Где больше всего")
+                        .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .padding(.top, DS.Metrics.spacing4)
+                    ForEach(insights.topMerchants) { merchant in
+                        MoneyRow(label: merchant.name, value: MoneyFormat.kzt(merchant.amountMinor))
                     }
                 }
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.85), value: insights)
     }
 
-    private var ring: some View {
-        Chart(insights.categories) { slice in
-            SectorMark(
-                angle: .value("Сумма", slice.amountMinor),
-                innerRadius: .ratio(0.62),
-                angularInset: 1.5
-            )
-            .cornerRadius(3)
-            .foregroundStyle(color(for: slice))
+    private func comparisonRow(_ title: String, _ minor: Int64, color: Color) -> some View {
+        let top = max(insights.expenseMinor, insights.previousExpenseMinor, 1)
+        return VStack(alignment: .leading, spacing: 6) {
+            MoneyRow(label: title, value: MoneyFormat.kzt(minor))
+            MoneyBar(fraction: Double(minor) / Double(top), height: 8, color: color)
         }
-        .chartLegend(.hidden)
-        .chartBackground { _ in
-            VStack(spacing: 0) {
-                Text(MoneyFormat.kzt(insights.expenseMinor))
-                    .font(.footnote.weight(.semibold).monospacedDigit())
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                Text("всего").font(.caption2).foregroundColor(DS.Colors.textSecondary)
-            }
-            .padding(24)
-        }
-        .accessibilityLabel("Расходы по категориям")
-    }
-
-    private var legend: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(insights.categories) { slice in
-                if let onCategory {
-                    Button { onCategory(slice.name) } label: { legendRow(slice) }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Показать операции категории")
-                } else {
-                    legendRow(slice)
-                }
-            }
-        }
-    }
-
-    private func legendRow(_ slice: FinanceInsights.Slice) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(color(for: slice)).frame(width: 8, height: 8)
-            Text(slice.name).font(.caption).lineLimit(1)
-            Spacer(minLength: 4)
-            Text(MoneyFormat.legendShare(amountMinor: slice.amountMinor, totalMinor: insights.expenseMinor)).font(.caption.monospacedDigit()).lineLimit(1).fixedSize()
-        }
-        .foregroundColor(DS.Colors.textPrimary)
-        .frame(minHeight: onCategory == nil ? nil : 32)
-        .contentShape(Rectangle())
-    }
-
-    private var comparison: some View {
-        let rows = [
-            FinanceInsights.Slice(name: "Этот месяц", amountMinor: insights.expenseMinor),
-            FinanceInsights.Slice(name: "Прошлый месяц", amountMinor: insights.previousExpenseMinor),
-        ]
-        return VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-            Chart(rows) { row in
-                BarMark(x: .value("Сумма", row.amountMinor), y: .value("Месяц", row.name))
-                    .foregroundStyle(row.name == "Этот месяц" ? DS.Colors.accent : DS.Colors.textSecondary.opacity(0.35))
-                    .cornerRadius(4)
-                    .annotation(position: .trailing) {
-                        Text(MoneyFormat.kzt(row.amountMinor)).font(.caption2.monospacedDigit()).foregroundColor(DS.Colors.textSecondary)
-                    }
-            }
-            .chartXAxis(.hidden)
-            .frame(height: 70)
-            if insights.previousExpenseMinor > 0 {
-                let delta = Double(insights.expenseMinor - insights.previousExpenseMinor) / Double(insights.previousExpenseMinor) * 100
-                Text(delta >= 0 ? "На \(Int(delta.rounded())) % больше, чем в прошлом месяце" : "На \(Int((-delta).rounded())) % меньше, чем в прошлом месяце")
-                    .font(.caption)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-        }
-    }
-
-    private func color(for slice: FinanceInsights.Slice) -> Color {
-        let index = insights.categories.firstIndex(of: slice) ?? 0
-        return palette[index % palette.count]
     }
 }

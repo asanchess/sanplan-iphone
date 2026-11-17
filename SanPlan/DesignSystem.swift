@@ -84,6 +84,8 @@ public struct PillButton: View {
     private let isLoading: Bool
     private let isEnabled: Bool
     private let action: () -> Void
+    /// Round 6: the primary pill takes the colour of the section it sits in (owner: «всё в цвет раздела»).
+    @Environment(\.sectionAccent) private var accent
 
     public init(
         _ title: String,
@@ -142,7 +144,7 @@ public struct PillButton: View {
     private var foregroundColor: Color {
         switch style {
         case .primary:
-            return DS.Colors.onAccent
+            return DS.Colors.ink
         case .secondary:
             return DS.Colors.textPrimary
         case .destructive:
@@ -153,7 +155,7 @@ public struct PillButton: View {
     private var backgroundColor: Color {
         switch style {
         case .primary:
-            return DS.Colors.accentDeep
+            return accent
         case .secondary:
             return DS.Colors.surfaceRaised
         case .destructive:
@@ -317,7 +319,7 @@ public struct ProfileAvatarButton: View {
 
     public var body: some View {
         Button(action: action) {
-            Image("PetThink")
+            Image(MascotWardrobe.shared.heroImage(.think))
                 .resizable()
                 .scaledToFit()
                 .frame(height: 76)

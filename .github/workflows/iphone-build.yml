@@ -72,6 +72,20 @@ jobs:
               xcrun simctl io "$simulator" screenshot "artifacts/workout-$phase-$scheme.png"
             done
           done
+          # Round 6: every screen with made-up data, dark only, for side-by-side with the canvas.
+          xcrun simctl ui "$simulator" appearance dark
+          mkdir -p artifacts/screens
+          for route in today:0 summary:0 progress:0 profile:0 profile-mascot:0 profile-settings:0 money-overview:1 money-plan:1 money-ops:1 plans-plans:2 plans-habits:2 plans-goals:2 plans-alarms:2 workout-plan:3 workout-history:3 notes-list:4 notes-editor:4; do
+            id="${route%%:*}"; tab="${route##*:}"
+            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-demo-data --screenshot-tab "$tab" --screenshot-screen "$id"
+            sleep 4
+            xcrun simctl io "$simulator" screenshot "artifacts/screens/$id.png"
+          done
+          for phase in preparing working alerting; do
+            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-demo-data --screenshot-tab 3 --screenshot-active-workout "$phase"
+            sleep 4
+            xcrun simctl io "$simulator" screenshot "artifacts/screens/workout-$phase.png"
+          done
       - name: Upload IPA and diagnostic logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

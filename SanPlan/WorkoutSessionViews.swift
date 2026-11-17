@@ -14,23 +14,28 @@ struct WorkoutIndexRef: Identifiable, Equatable {
 
 // MARK: - Running workout
 
-/// The workout in progress: the timer, the set at hand with its weight and reps, and every exercise with its sets,
-/// each of which can be ticked, corrected, removed or jumped to.
+/// The workout in progress. Only the exercise at hand is large: the timer, its name, the main button and its sets.
+/// Every other exercise, and editing them, lives in the «Все упражнения» panel. «Завершить» stays at the top;
+/// before the first set is ticked it is «Закрыть без сохранения».
 struct ActiveWorkoutView: View {
     @ObservedObject var store: WorkoutStore
     let session: WorkoutSessionState
 
     @State private var isConfirmingFinish = false
+    @State private var showsAllExercises = false
     @State private var editingSet: WorkoutSetRef?
     @State private var editingExercise: WorkoutIndexRef?
     @State private var replacingExercise: WorkoutIndexRef?
     @State private var isAddingExercise = false
 
-    private var current: SessionExercise { session.exercises[session.exerciseIndex] }
+    private var doneSets: Int { session.exercises.reduce(0) { $0 + $1.doneCount } }
+    private var plannedSets: Int { session.exercises.reduce(0) { $0 + $1.rests.count } }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
+            VStack(alignment: .leading, spacing: 18) {
+                topBar
+
                 if let warning = store.restAlarm.warningMessage {
                     ErrorBanner(message: warning)
                 }
@@ -40,8 +45,7 @@ struct ActiveWorkoutView: View {
 
                 WorkoutTimerCard(store: store, session: session)
 
-                // During a rest its controls (+30 s, pause, skip) come right under the timer, above the
-                // set's numbers; under the shared bottom bar they had dropped below the fold.
+                // During a rest its controls (+30 s, pause, skip) come right under the timer, above the set's numbers.
                 if session.phase == .resting || session.phase == .paused || session.phase == .alerting {
                     WorkoutActionButtons(store: store, session: session)
                     CurrentSetCard(store: store, session: session)
@@ -50,47 +54,36 @@ struct ActiveWorkoutView: View {
                     WorkoutActionButtons(store: store, session: session)
                 }
 
-                SectionHeader("Упражнения")
-                ForEach(session.exercises.indices, id: \.self) { index in
-                    ExerciseSetsCard(
-                        store: store,
-                        session: session,
-                        index: index,
-                        onEditSet: { editingSet = WorkoutSetRef(exercise: index, set: $0) },
-                        onEditTarget: { editingExercise = WorkoutIndexRef(index: index) },
-                        onReplace: { replacingExercise = WorkoutIndexRef(index: index) }
-                    )
-                }
+                ExerciseSetsCard(
+                    store: store,
+                    session: session,
+                    index: session.exerciseIndex,
+                    onEditSet: { editingSet = WorkoutSetRef(exercise: session.exerciseIndex, set: $0) },
+                    onEditTarget: { editingExercise = WorkoutIndexRef(index: session.exerciseIndex) },
+                    onReplace: { replacingExercise = WorkoutIndexRef(index: session.exerciseIndex) },
+                    showsName: false
+                )
 
-                PillButton("Добавить упражнение", icon: "plus", style: .secondary) {
-                    isAddingExercise = true
-                }
-
-                Button("Завершить досрочно") {
-                    isConfirmingFinish = true
-                }
-                .font(.footnote)
-                .foregroundColor(DS.Colors.textSecondary)
-                .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                .confirmationDialog(
-                    "Завершить тренировку досрочно?",
-                    isPresented: $isConfirmingFinish,
-                    titleVisibility: .visible
-                ) {
-                    Button("Завершить", role: .destructive) {
-                        store.dispatch(command: .finish())
-                    }
-                    Button("Продолжить тренировку", role: .cancel) {}
-                } message: {
-                    Text("Отмеченные подходы сохранятся в истории, остальные — нет.")
-                }
+                allExercisesPanel
             }
             .padding(.horizontal, DS.Metrics.screenGutter)
             .padding(.top, DS.Metrics.spacing8)
-            .padding(.bottom, 96)
+            .padding(.bottom, 108)
         }
         .sensoryFeedback(trigger: session.phase) { old, new in
             WorkoutHaptics.feedback(from: old, to: new)
+        }
+        .confirmationDialog(
+            "Завершить тренировку?",
+            isPresented: $isConfirmingFinish,
+            titleVisibility: .visible
+        ) {
+            Button("Завершить и сохранить") {
+                store.dispatch(command: .finish())
+            }
+            Button("Продолжить тренировку", role: .cancel) {}
+        } message: {
+            Text("Отмеченные подходы сохранятся в истории, остальные — нет.")
         }
         .sheet(item: $editingSet) { ref in
             SetEditorSheet(store: store, ref: ref)
@@ -114,6 +107,98 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    /// «Вся тренировка: 12:40» and the finish button, always on top.
+    private var topBar: some View {
+        HStack(spacing: DS.Metrics.spacing12) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let now = max(session.lastNow, Int64(context.date.timeIntervalSince1970 * 1000))
+                let total = WorkoutDomain.totalElapsedSeconds(state: session, now: now)
+                Text("Вся тренировка: \(total.map(WorkoutFormat.clock) ?? "—")")
+                    .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                    .monospacedDigit()
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .accessibilityLabel("Идёт тренировка: \(total.map(WorkoutFormat.duration) ?? "—")")
+            }
+            Spacer(minLength: 0)
+            finishButton
+        }
+    }
+
+    /// Nothing ticked yet: closing keeps nothing, and «Отменить» at the bottom brings it back.
+    /// Something ticked: finishing asks first and saves the ticked sets.
+    private var finishButton: some View {
+        let title = doneSets == 0 ? "Закрыть без сохранения" : "Завершить"
+        return Button {
+            if doneSets == 0 {
+                store.discardWorkout()
+            } else {
+                isConfirmingFinish = true
+            }
+        } label: {
+            Text(title)
+                .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 14)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(DS.Colors.hairline, lineWidth: 1.5))
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressScaleStyle())
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("workout-finish")
+    }
+
+    /// The other exercises, folded by default: each opens to its sets and its menu (target, replace, move, delete, go to it).
+    private var allExercisesPanel: some View {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            Button {
+                withAnimation(.snappy) { showsAllExercises.toggle() }
+            } label: {
+                HStack {
+                    TrainingKicker(text: "Все упражнения")
+                    Text("\(doneSets)/\(plannedSets)")
+                        .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                        .monospacedDigit()
+                        .foregroundColor(DS.Colors.textSecondary)
+                    Spacer()
+                    Image(systemName: showsAllExercises ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .padding(.horizontal, 16)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(DS.Colors.surface))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Все упражнения: \(session.exercises.count), подходов сделано \(doneSets) из \(plannedSets)")
+            .accessibilityHint(showsAllExercises ? "Свернуть" : "Развернуть")
+
+            if showsAllExercises {
+                ForEach(session.exercises.indices, id: \.self) { index in
+                    if index != session.exerciseIndex {
+                        ExerciseSetsCard(
+                            store: store,
+                            session: session,
+                            index: index,
+                            onEditSet: { editingSet = WorkoutSetRef(exercise: index, set: $0) },
+                            onEditTarget: { editingExercise = WorkoutIndexRef(index: index) },
+                            onReplace: { replacingExercise = WorkoutIndexRef(index: index) },
+                            startsExpanded: false
+                        )
+                    }
+                }
+                PillButton("Добавить упражнение", icon: "plus", style: .secondary) {
+                    isAddingExercise = true
+                }
+            }
+        }
+    }
+
     /// A new exercise with the builder's defaults and last time's results from the history.
     private func newSessionExercise(_ name: String) -> SessionExercise? {
         let defaults = WorkoutProgram.defaults(of: store.program)
@@ -128,109 +213,8 @@ struct ActiveWorkoutView: View {
     }
 }
 
-/// The phase, the set in progress and both clocks: the whole workout and the set or rest.
-struct WorkoutTimerCard: View {
-    @ObservedObject var store: WorkoutStore
-    let session: WorkoutSessionState
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { context in
-            let now = max(session.lastNow, Int64(context.date.timeIntervalSince1970 * 1000))
-            let remaining = (try? WorkoutDomain.remainingSeconds(state: session, now: now)) ?? 0
-            let elapsed = WorkoutDomain.elapsedWorkSeconds(state: session, now: now)
-            let total = WorkoutDomain.totalElapsedSeconds(state: session, now: now)
-            let exercise = session.exercises[session.exerciseIndex]
-
-            Card {
-                VStack(spacing: DS.Metrics.spacing8) {
-                    HStack {
-                        Label(total.map(WorkoutFormat.clock) ?? "—", systemImage: "stopwatch")
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundColor(DS.Colors.textSecondary)
-                            .accessibilityLabel("Идёт тренировка: \(total.map(WorkoutFormat.duration) ?? "—")")
-                        Spacer()
-                        Text(setHeader(exercise))
-                            .font(.subheadline.weight(.semibold).monospacedDigit())
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    Text(phaseTitle(session.phase))
-                        .font(.title3.weight(.semibold))
-                        .foregroundColor(phaseColor(session.phase))
-                    Text(exercise.name)
-                        .font(.headline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                        .multilineTextAlignment(.center)
-                    ZStack(alignment: .bottom) {
-                        ARNAProgressMark(
-                            progress: WorkoutProgress.fraction(session, remainingSeconds: remaining),
-                            tint: session.phase == .alerting ? DS.Colors.positive : DS.Colors.accent,
-                            track: DS.Colors.textSecondary.opacity(0.18)
-                        )
-                        .frame(width: 220, height: 166)
-                        Text(timerText(seconds: elapsed ?? remaining, hasStopwatch: elapsed != nil))
-                            .font(.system(size: 48, weight: .light, design: .rounded).monospacedDigit())
-                            .foregroundColor(DS.Colors.textPrimary)
-                            .contentTransition(.numericText(countsDown: elapsed == nil))
-                            .animation(.snappy, value: elapsed ?? remaining)
-                            .padding(.bottom, DS.Metrics.spacing4)
-                    }
-                    .frame(maxWidth: .infinity)
-                    if elapsed != nil {
-                        Text(session.phase == .alerting ? "Следующий подход уже идёт" : "Время подхода")
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .onChange(of: context.date) { _, _ in
-                if session.phase == .preparing || session.phase == .resting,
-                   let deadline = session.deadline, now >= deadline {
-                    store.dispatch(command: .tick(), now: now)
-                }
-            }
-        }
-    }
-
-    /// «Подход 2 из 4». Once the rest has run out the clock already counts the next set, so the header names that one.
-    private func setHeader(_ exercise: SessionExercise) -> String {
-        guard session.phase == .alerting, let next = WorkoutDomain.nextSet(session) else {
-            return "Подход \(session.setIndex + 1) из \(exercise.rests.count)"
-        }
-        guard next.exercise == session.exerciseIndex else {
-            return "Далее: \(session.exercises[next.exercise].baseName)"
-        }
-        return "Подход \(next.set + 1) из \(exercise.rests.count)"
-    }
-
-    private func timerText(seconds: Int, hasStopwatch: Bool) -> String {
-        if session.phase == .working && !hasStopwatch { return "—:—" }
-        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
-    }
-
-    private func phaseTitle(_ phase: WorkoutPhase) -> String {
-        switch phase {
-        case .preparing: return "Подготовка"
-        case .working: return "Рабочий подход"
-        case .resting: return "Отдых"
-        case .paused: return "Отдых на паузе"
-        case .alerting: return "Отдых окончен"
-        case .complete: return "Завершено"
-        }
-    }
-
-    private func phaseColor(_ phase: WorkoutPhase) -> Color {
-        switch phase {
-        case .alerting: return DS.Colors.positive
-        case .paused: return DS.Colors.warning
-        case .resting: return DS.Colors.accent
-        default: return DS.Colors.textPrimary
-        }
-    }
-}
-
-/// Weight and reps of the set at hand: today's target before it, what was done during the rest after it.
-/// Prefilled from last time or the plan; the steppers correct it.
+/// The exercise at hand, large: its name, last time, the progression hint and the weight and reps of the current set.
+/// Today's target before the set, what was done during the rest after it. The steppers correct it.
 struct CurrentSetCard: View {
     @ObservedObject var store: WorkoutStore
     let session: WorkoutSessionState
@@ -240,24 +224,29 @@ struct CurrentSetCard: View {
         let set = session.setIndex
         let exercise = session.exercises[index]
         let after = session.phase == .resting || session.phase == .paused || session.phase == .alerting
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
-                Text(after ? "Подход \(set + 1): сколько сделали" : "Подход \(set + 1): цель")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(DS.Colors.textPrimary)
-                SetValueSteppers(store: store, exercise: index, set: set)
-                if let last = lastTimeText(exercise) {
-                    Text("В прошлый раз: \(last)")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundColor(DS.Colors.textSecondary)
-                }
-                if exercise.progressed == true {
-                    Label(progressionText(exercise), systemImage: "arrow.up.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundColor(DS.Colors.positive)
-                }
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            Text(exercise.name)
+                .font(DS.Fonts.text(22, .heavy, relativeTo: .title2))
+                .foregroundColor(DS.Colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let last = lastTimeText(exercise) {
+                Text("В прошлый раз: \(last)")
+                    .font(DS.Fonts.text(16, .medium, relativeTo: .subheadline))
+                    .monospacedDigit()
+                    .foregroundColor(DS.Colors.textSecondary)
             }
+            if exercise.progressed == true {
+                Label(progressionText(exercise), systemImage: "arrow.up.right")
+                    .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.positive)
+            }
+            TrainingKicker(text: after ? "Подход \(set + 1): сколько сделали" : "Подход \(set + 1): цель")
+                .padding(.top, DS.Metrics.spacing4)
+            SetValueSteppers(store: store, exercise: index, set: set)
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: DS.Metrics.cardRadius, style: .continuous).fill(DS.Colors.surface))
     }
 
     private func lastTimeText(_ exercise: SessionExercise) -> String? {
@@ -341,26 +330,26 @@ struct WorkoutActionButtons: View {
     var body: some View {
         VStack(spacing: DS.Metrics.spacing12) {
             primary
-            HStack(spacing: DS.Metrics.spacing16) {
+            HStack(spacing: DS.Metrics.spacing12) {
                 if session.phase == .resting {
-                    CircleIconButton(icon: "pause.fill", accessibilityLabel: "Пауза") {
+                    TrainingOutlineButton(title: "Пауза", icon: "pause.fill") {
                         store.dispatch(command: .pause())
                     }
-                    CircleIconButton(icon: "goforward.30", accessibilityLabel: "Добавить 30 секунд") {
+                    TrainingOutlineButton(title: "+30 сек", accessibilityTitle: "Добавить 30 секунд") {
                         store.dispatch(command: .adjust(seconds: 30))
                     }
-                    CircleIconButton(icon: "goforward.60", accessibilityLabel: "Добавить 60 секунд") {
+                    TrainingOutlineButton(title: "+60 сек", accessibilityTitle: "Добавить 60 секунд") {
                         store.dispatch(command: .adjust(seconds: 60))
                     }
                 } else if session.phase == .paused {
-                    CircleIconButton(icon: "goforward.30", accessibilityLabel: "Добавить 30 секунд") {
+                    TrainingOutlineButton(title: "+30 сек", accessibilityTitle: "Добавить 30 секунд") {
                         store.dispatch(command: .adjust(seconds: 30))
                     }
-                    CircleIconButton(icon: "forward.end.fill", accessibilityLabel: "Пропустить отдых") {
+                    TrainingOutlineButton(title: "Пропустить", icon: "forward.end.fill", accessibilityTitle: "Пропустить отдых") {
                         store.dispatch(command: .skipRest())
                     }
                 } else if session.phase == .alerting {
-                    CircleIconButton(icon: "arrow.counterclockwise", accessibilityLabel: "Повторить отдых") {
+                    TrainingOutlineButton(title: "Ещё отдых", icon: "arrow.counterclockwise", accessibilityTitle: "Повторить отдых") {
                         store.dispatch(command: .repeatRest())
                     }
                 }
@@ -374,7 +363,7 @@ struct WorkoutActionButtons: View {
         switch session.phase {
         case .preparing:
             VStack(spacing: DS.Metrics.spacing12) {
-                PillButton("Начать сейчас", icon: "play.fill") {
+                TrainingMainButton(title: "Начать сейчас", icon: "play.fill") {
                     store.dispatch(command: .startNow())
                 }
                 if !last {
@@ -387,7 +376,7 @@ struct WorkoutActionButtons: View {
             if last {
                 finishButton
             } else {
-                PillButton("Подход сделан, отдых", icon: "bed.double.fill") {
+                TrainingMainButton(title: "Подход сделан, отдых", icon: "bed.double.fill") {
                     store.dispatch(command: .startRest())
                 }
             }
@@ -396,7 +385,7 @@ struct WorkoutActionButtons: View {
                 store.dispatch(command: .skipRest())
             }
         case .paused:
-            PillButton("Продолжить", icon: "play.fill") {
+            TrainingMainButton(title: "Продолжить", icon: "play.fill") {
                 store.dispatch(command: .resume())
             }
         case .alerting:
@@ -404,7 +393,7 @@ struct WorkoutActionButtons: View {
                 finishButton
             } else {
                 VStack(spacing: DS.Metrics.spacing12) {
-                    PillButton("Начать подход", icon: "play.fill") {
+                    TrainingMainButton(title: "Начать подход", icon: "play.fill") {
                         store.dispatch(command: .acknowledge())
                     }
                     // For a set already done while the alert was showing.
@@ -420,13 +409,14 @@ struct WorkoutActionButtons: View {
 
     /// The last set: nothing follows it, so the button says the workout ends and counts the set as done.
     private var finishButton: some View {
-        PillButton("Подход сделан, завершить", icon: "checkmark") {
+        TrainingMainButton(title: "Подход сделан, завершить", icon: "checkmark") {
             store.dispatch(command: .finishSet())
         }
     }
 }
 
 /// One exercise and its sets. A tap on the circle ticks a set or takes the tick back; a tap on the row opens it.
+/// Folded (in «Все упражнения») it shows the name, the target and the count; a tap on the head opens the sets.
 struct ExerciseSetsCard: View {
     @ObservedObject var store: WorkoutStore
     let session: WorkoutSessionState
@@ -434,34 +424,63 @@ struct ExerciseSetsCard: View {
     let onEditSet: (Int) -> Void
     let onEditTarget: () -> Void
     let onReplace: () -> Void
+    /// False for the exercise at hand, whose name is already large above.
+    var showsName: Bool = true
+    var startsExpanded: Bool = true
+
+    @State private var expandedOverride: Bool? = nil
+    @Environment(\.sectionAccent) private var accent
 
     private var exercise: SessionExercise { session.exercises[index] }
     private var isRunning: Bool { session.phase != .complete }
+    private var isExpanded: Bool { expandedOverride ?? startsExpanded }
 
     var body: some View {
         let isCurrent = isRunning && index == session.exerciseIndex
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
-                HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing4) {
+            HStack(alignment: .center, spacing: DS.Metrics.spacing12) {
+                Text("\(index + 1)")
+                    .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
+                    .foregroundColor(accent)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(TrainingPalette.badge))
+                    .accessibilityHidden(true)
+                Button {
+                    withAnimation(.snappy) { expandedOverride = !isExpanded }
+                } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(exercise.baseName)
-                            .font(.headline)
-                            .foregroundColor(isCurrent ? DS.Colors.accent : DS.Colors.textPrimary)
+                        if showsName {
+                            Text(exercise.baseName)
+                                .font(DS.Fonts.text(17, .semibold, relativeTo: .headline))
+                                .foregroundColor(isCurrent ? accent : DS.Colors.textPrimary)
+                                .multilineTextAlignment(.leading)
+                        } else {
+                            TrainingKicker(text: "Подходы")
+                        }
                         Text(targetText)
-                            .font(.caption.monospacedDigit())
+                            .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                            .monospacedDigit()
                             .foregroundColor(DS.Colors.textSecondary)
+                            .multilineTextAlignment(.leading)
                         if let best = store.bestWeight(exercise: exercise.baseName) {
                             Text("Рекорд: \(WorkoutFormat.kilograms(best))")
-                                .font(.caption.monospacedDigit())
+                                .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                                .monospacedDigit()
                                 .foregroundColor(DS.Colors.textSecondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("\(exercise.doneCount)/\(exercise.rests.count)")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundColor(DS.Colors.textSecondary)
-                    menu
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityHint(isExpanded ? "Свернуть подходы" : "Показать подходы")
+                Text("\(exercise.doneCount)/\(exercise.rests.count)")
+                    .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                    .monospacedDigit()
+                    .foregroundColor(DS.Colors.textSecondary)
+                menu
+            }
+            if isExpanded {
                 ForEach(exercise.rests.indices, id: \.self) { set in
                     setRow(set, isCurrent: isCurrent && set == session.setIndex)
                 }
@@ -469,14 +488,18 @@ struct ExerciseSetsCard: View {
                     store.editSession("Подход добавлен") { try WorkoutSessionEdit.addSet($0, exercise: index) }
                 } label: {
                     Label("Подход", systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
+                        .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
                         .frame(minHeight: DS.Metrics.minHitTarget)
                 }
                 .accessibilityLabel("Добавить подход: \(exercise.baseName)")
-                .foregroundColor(DS.Colors.accent)
+                .foregroundColor(accent)
                 .disabled(exercise.rests.count >= 100)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(DS.Colors.surface))
     }
 
     private var targetText: String {
@@ -563,7 +586,7 @@ struct ExerciseSetsCard: View {
                 HStack {
                     Text("Подход \(set + 1)")
                         .font(.subheadline.weight(isCurrent ? .semibold : .regular))
-                        .foregroundColor(isCurrent ? DS.Colors.accent : DS.Colors.textPrimary)
+                        .foregroundColor(isCurrent ? accent : DS.Colors.textPrimary)
                     Spacer()
                     Text(text)
                         .font(.subheadline.monospacedDigit())
@@ -606,7 +629,7 @@ struct SetEditorSheet: View {
                                     }
                                 }
                             ))
-                            .tint(DS.Colors.controlTint)
+                            .tint(DS.Colors.workout)
                             if session.phase != .complete {
                                 PillButton("Перейти к этому подходу", icon: "arrow.right.circle", style: .secondary) {
                                     store.editSession("Переход к подходу") {
@@ -703,7 +726,7 @@ struct ExerciseTargetSheet: View {
                                     store.editSession(nil) { try WorkoutSessionEdit.updateExercise($0, index: index, bodyweight: value) }
                                 }
                             ))
-                            .tint(DS.Colors.controlTint)
+                            .tint(DS.Colors.workout)
                             Text("Меняется только эта тренировка. В конце можно сохранить изменения в план.")
                                 .font(.caption)
                                 .foregroundColor(DS.Colors.textSecondary)
@@ -759,10 +782,12 @@ struct WorkoutSummaryView: View {
                 VStack(spacing: DS.Metrics.spacing8) {
                     Image(systemName: done == planned ? "checkmark.circle.fill" : "flag.checkered")
                         .font(.system(size: 48))
-                        .foregroundColor(done == 0 ? DS.Colors.textSecondary : DS.Colors.positive)
+                        .foregroundColor(done == 0 ? DS.Colors.textSecondary : DS.Colors.workout)
                     Text("Тренировка завершена")
-                        .font(.title.weight(.light))
+                        .font(DS.Fonts.display(26, relativeTo: .title))
                         .foregroundColor(DS.Colors.textPrimary)
+                        .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                        .multilineTextAlignment(.center)
                     Text(done == planned ? "Все подходы сделаны." : "\(done) из \(planned) подходов.")
                         .font(.subheadline)
                         .foregroundColor(DS.Colors.textSecondary)
@@ -855,28 +880,35 @@ struct WorkoutStatTile: View {
     let value: String
     var detail: String? = nil
     var detailColor: Color = DS.Colors.textSecondary
+    @Environment(\.sectionAccent) private var accent
 
+    /// The canvas stat tile: accent kicker, Dela value, a short note.
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(DS.Colors.textSecondary)
-            Text(value)
-                .font(.headline.monospacedDigit())
-                .foregroundColor(DS.Colors.textPrimary)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .tracking(0.8)
+                .foregroundColor(accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+            Text(value)
+                .font(DS.Fonts.display(24, relativeTo: .title2))
+                .monospacedDigit()
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
             if let detail {
                 Text(detail)
-                    .font(.caption2.monospacedDigit())
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .monospacedDigit()
                     .foregroundColor(detailColor)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .minimumScaleFactor(0.7)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DS.Metrics.spacing12)
-        .background(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius).fill(DS.Colors.surface))
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: DS.Metrics.cardRadius, style: .continuous).fill(DS.Colors.surface))
         .accessibilityElement(children: .combine)
     }
 }
@@ -884,6 +916,7 @@ struct WorkoutStatTile: View {
 /// «Отменить» for the last change, at the bottom of the workout section for five seconds.
 struct WorkoutUndoToast: View {
     @ObservedObject var store: WorkoutStore
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
         ZStack {
@@ -898,7 +931,7 @@ struct WorkoutUndoToast: View {
                         store.undoLast()
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundColor(accent)
                     .frame(minHeight: DS.Metrics.minHitTarget)
                 }
                 .padding(.horizontal, DS.Metrics.spacing16)

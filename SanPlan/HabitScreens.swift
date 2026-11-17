@@ -45,12 +45,33 @@ enum HabitText {
     }
 }
 
+/// «Привычки» tab of «Планы» (canvas: two-column tiles «5 / 8» with a bar). Tap a tile — one more mark;
+/// long press — «Изменить». New habits come from the bottom field «Что запланировать?» or «Новая привычка».
 struct HabitsSection: View {
     @ObservedObject var habits: HabitStore
     let today: String
-    /// Источники активности всех разделов для общей серии; без них серия не показывается.
-    var streakSources: [StreakEngine.ActivitySource] = []
+    /// Activity of every section for the shared streak; without it the streak line is hidden.
+    var streakSources: [StreakEngine.ActivitySource]
+    /// Made-up tiles for screenshots: shown as is, never saved.
+    var demo: [PlansHabitTileModel]?
+    /// A habit read from the bottom field; «Настроить» opens it here in the editor.
+    @Binding var draftRequest: Habit?
     @State private var editorTarget: HabitEditorTarget?
+    @Environment(\.sectionAccent) private var accent
+
+    init(
+        habits: HabitStore,
+        today: String,
+        streakSources: [StreakEngine.ActivitySource] = [],
+        demo: [PlansHabitTileModel]? = nil,
+        draftRequest: Binding<Habit?> = .constant(nil)
+    ) {
+        self.habits = habits
+        self.today = today
+        self.streakSources = streakSources
+        self.demo = demo
+        self._draftRequest = draftRequest
+    }
 
     private var due: [Habit] { habits.dueHabits(on: today) }
     private var others: [Habit] {
@@ -58,86 +79,175 @@ struct HabitsSection: View {
         return habits.activeHabits.filter { !dueIds.contains($0.id) }
     }
 
+    private var tiles: [PlansHabitTileModel] { demo ?? due.map(tile(for:)) }
+
+    private func tile(for habit: Habit) -> PlansHabitTileModel {
+        let amount = habits.amount(habit, on: today)
+        let goal = max(1, habit.target.amount)
+        let done = habits.isDone(habit, on: today)
+        let auto = habit.rule != nil && habits.isAutoDone(habit, on: today) && amount == 0
+        let count = done ? max(amount, goal) : min(amount, goal)
+        var parts: [String] = []
+        if let rule = habit.rule { parts.append(auto ? "авто: \(HabitText.rule(rule))" : HabitText.rule(rule)) }
+        if habit.schedule.kind == .timesPerWeek || habit.schedule.weekdays.count != 7 {
+            parts.append(HabitText.schedule(habit.schedule))
+        }
+        if parts.isEmpty {
+            let unit = habit.target.unit.isEmpty ? "" : " \(habit.target.unit)"
+            parts.append(goal > 1 ? "Ещё \(goal - count)\(unit)" : "Не отмечено")
+        }
+        return PlansHabitTileModel(
+            id: habit.id,
+            title: habit.title,
+            count: count,
+            goal: goal,
+            note: parts.joined(separator: " · "),
+            streak: HabitText.streak(habits.streak(for: habit, today: today)),
+            isAuto: auto
+        )
+    }
+
+    private func tick(_ id: String) {
+        guard demo == nil, let habit = due.first(where: { $0.id == id }) else { return }
+        habits.tapUndoable(habit, on: today)
+    }
+
+    private func complete(_ id: String) {
+        guard demo == nil, let habit = due.first(where: { $0.id == id }) else { return }
+        habits.complete(habit, on: today)
+    }
+
+    private func edit(_ id: String) {
+        guard demo == nil, let habit = habits.activeHabits.first(where: { $0.id == id }) else { return }
+        editorTarget = .edit(habit)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            HStack(alignment: .firstTextBaseline) {
-                SectionHeader("Привычки сегодня")
-                let s = habits.daySummary(for: today)
-                if s.total > 0 {
-                    Text("\(s.done) из \(s.total)")
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                        .foregroundColor(DS.Colors.textSecondary)
-                        .accessibilityLabel("Выполнено \(s.done) из \(s.total)")
-                }
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            summary
 
-            if !streakSources.isEmpty {
-                let streak = habits.appStreak(today: today, sources: streakSources)
-                Text("Серия \(streak.days) дн. · дней отдыха в месяце: \(streak.restDaysLeft)")
-                    .font(.subheadline)
-                    .foregroundColor(DS.Colors.textSecondary)
-            }
-
-            if habits.activeHabits.isEmpty {
+            if demo == nil && habits.activeHabits.isEmpty {
                 EmptyState(
                     title: "Привычек пока нет",
-                    message: "Добавь привычку: расписание, норму и при желании правило автоотметки.",
+                    message: "Напишите внизу, например: «вода 8 стаканов в день».",
                     icon: "checkmark.circle"
                 )
-            } else if due.isEmpty {
+            } else if tiles.isEmpty {
                 Text("На сегодня привычек нет.")
-                    .font(.subheadline)
+                    .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
                     .foregroundColor(DS.Colors.textSecondary)
-            }
-
-            ForEach(due) { habit in
-                HabitRowView(habit: habit, habits: habits, today: today) { editorTarget = .edit(habit) }
-            }
-
-            if !others.isEmpty {
-                SectionHeader("Не на сегодня")
-                    .padding(.top, DS.Metrics.spacing8)
-                ForEach(others) { habit in
-                    Button { editorTarget = .edit(habit) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(habit.title).font(.body).foregroundColor(DS.Colors.textPrimary)
-                                Text(HabitText.schedule(habit.schedule))
-                                    .font(.footnote).foregroundColor(DS.Colors.textSecondary)
-                            }
-                            Spacer()
-                        }
-                        .frame(minHeight: DS.Metrics.minHitTarget)
-                        .contentShape(Rectangle())
+            } else {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(tiles) { model in
+                        PlansHabitTile(
+                            model: model,
+                            onTick: { tick(model.id) },
+                            onEdit: { edit(model.id) },
+                            onComplete: { complete(model.id) }
+                        )
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
-            PillButton("Добавить привычку", icon: "plus", style: .secondary) {
-                editorTarget = .new
+            if demo == nil && !others.isEmpty {
+                Text("НЕ НА СЕГОДНЯ")
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                    .tracking(0.8)
+                    .foregroundColor(DS.Colors.textMuted)
+                    .padding(.top, 6)
+                ForEach(others) { habit in
+                    Button { editorTarget = .edit(habit) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(habit.title)
+                                .font(DS.Fonts.text(16, .bold, relativeTo: .body))
+                                .foregroundColor(DS.Colors.textPrimary)
+                            Text(HabitText.schedule(habit.schedule))
+                                .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                                .foregroundColor(DS.Colors.textSecondary)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScaleStyle())
+                    .accessibilityHint("Открывает настройки привычки")
+                }
             }
-            .padding(.top, DS.Metrics.spacing8)
+
+            PlansOutlineLink(title: "Новая привычка", icon: "plus") { editorTarget = .new }
+                .disabled(demo != nil)
         }
         .sheet(item: $editorTarget) { target in
-            HabitEditorSheet(habits: habits, existing: target.habit, today: today)
+            HabitEditorSheet(habits: habits, existing: target.habit, today: today, draft: target.draft)
+                .environment(\.sectionAccent, DS.Colors.plans)
+                .tint(DS.Colors.plans)
         }
+        .onChange(of: draftRequest?.id) { _, _ in openDraftIfAsked() }
+        .onAppear(perform: openDraftIfAsked)
+    }
+
+    private func openDraftIfAsked() {
+        guard let draft = draftRequest else { return }
+        draftRequest = nil
+        editorTarget = .draft(draft)
+    }
+
+    @ViewBuilder
+    private var summary: some View {
+        let s = habits.daySummary(for: today)
+        let done = demo.map { $0.filter(\.isFull).count } ?? s.done
+        let total = demo?.count ?? s.total
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Сегодня")
+                .font(DS.Fonts.display(20, relativeTo: .title3))
+                .foregroundColor(DS.Colors.textPrimary)
+            Spacer(minLength: 0)
+            if total > 0 {
+                Text("\(done) из \(total)")
+                    .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
+                    .monospacedDigit()
+                    .foregroundColor(accent)
+                    .accessibilityLabel("Выполнено \(done) из \(total)")
+            }
+        }
+        if demo != nil {
+            streakLine(days: 12, rest: 2)
+        } else if !streakSources.isEmpty {
+            let streak = habits.appStreak(today: today, sources: streakSources)
+            streakLine(days: streak.days, rest: streak.restDaysLeft)
+        }
+    }
+
+    private func streakLine(days: Int, rest: Int) -> some View {
+        Text("Серия \(days) дн. · дней отдыха в месяце: \(rest)")
+            .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+            .foregroundColor(DS.Colors.textSecondary)
     }
 }
 
 enum HabitEditorTarget: Identifiable {
     case new
     case edit(Habit)
+    /// A new habit prefilled from the bottom field.
+    case draft(Habit)
 
     var id: String {
         switch self {
         case .new: return "new"
         case .edit(let h): return h.id
+        case .draft(let h): return "draft-\(h.id)"
         }
     }
 
     var habit: Habit? {
         if case .edit(let h) = self { return h }
+        return nil
+    }
+
+    var draft: Habit? {
+        if case .draft(let h) = self { return h }
         return nil
     }
 }
@@ -254,7 +364,17 @@ struct HabitEditorSheet: View {
     @ObservedObject var habits: HabitStore
     let existing: Habit?
     let today: String
+    /// A new habit prefilled from the bottom field; saved as new, like «Новая привычка».
+    let draft: Habit?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.sectionAccent) private var accent
+
+    init(habits: HabitStore, existing: Habit?, today: String, draft: Habit? = nil) {
+        self.habits = habits
+        self.existing = existing
+        self.today = today
+        self.draft = draft
+    }
 
     private enum ScheduleChoice: String, CaseIterable, Identifiable {
         case everyDay = "Каждый день"
@@ -315,8 +435,8 @@ struct HabitEditorSheet: View {
                                     Text(HabitText.weekdayShort[day - 1])
                                         .font(.subheadline.weight(.medium))
                                         .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
-                                        .foregroundColor(on ? DS.Colors.onAccent : DS.Colors.textPrimary)
-                                        .background(on ? DS.Colors.accent : DS.Colors.surfaceRaised)
+                                        .foregroundColor(on ? DS.Colors.canvas : DS.Colors.textPrimary)
+                                        .background(on ? accent : DS.Colors.surfaceRaised)
                                         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
                                 }
                                 .buttonStyle(.plain)
@@ -397,7 +517,7 @@ struct HabitEditorSheet: View {
     private func load() {
         guard !loaded else { return }
         loaded = true
-        guard let h = existing else { return }
+        guard let h = existing ?? draft else { return }
         title = h.title
         switch h.schedule.kind {
         case .timesPerWeek:

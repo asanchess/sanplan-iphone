@@ -105,6 +105,7 @@ enum FinanceEnvelopes {
 
 /// A small rounded chip for filters.
 struct FilterChip: View {
+    @Environment(\.sectionAccent) private var accent
     let title: String
     var isActive = false
     var showsChevron = true
@@ -117,10 +118,10 @@ struct FilterChip: View {
             }
         }
         .font(.subheadline.weight(.medium))
-        .foregroundColor(isActive ? DS.Colors.onAccent : DS.Colors.textPrimary)
+        .foregroundColor(isActive ? MoneyStyle.onAccent : DS.Colors.textPrimary)
         .padding(.horizontal, 12)
         .frame(minHeight: DS.Metrics.minHitTarget)
-        .background(isActive ? DS.Colors.accent : DS.Colors.surfaceRaised)
+        .background(isActive ? accent : DS.Colors.surfaceRaised)
         .clipShape(Capsule())
         .contentShape(Capsule())
     }
@@ -152,6 +153,7 @@ struct FinanceSheet<Content: View>: View {
     let title: String
     let onClose: () -> Void
     @ViewBuilder let content: () -> Content
+    @Environment(\.sectionAccent) private var accent
 
     var body: some View {
         NavigationStack {
@@ -171,6 +173,7 @@ struct FinanceSheet<Content: View>: View {
                 }
             }
         }
+        .tint(accent)
     }
 }
 
@@ -349,139 +352,45 @@ struct FinanceOverviewTab: View {
     @ObservedObject var store: FinanceStore
     let today: String
     let apply: FinanceApply
+    /// «Траты по дням» period; a deep link (.moneyOverview(.month)) sets it.
+    @Binding var period: DeepLink.Period
     let onCategory: (String) -> Void
     let onOpenPlan: () -> Void
 
-    @State private var reviewMonth: MonthRef? = nil
     @State private var creatingEnvelope = false
 
-    private var month: String { String(today.prefix(7)) }
-
+    /// Canvas order: (the day limit above the switcher), «Траты по дням», «Куда уходит».
+    /// One extra card, «Отложить с дохода», only while an income waits for an answer.
     var body: some View {
-        let hints = FinanceBudgeting.hints(store.state, today: today)
-        VStack(spacing: DS.Metrics.spacing24) {
-            if !hints.isEmpty {
-                hintsCard(Array(hints.prefix(3)))
-            }
-            if let pending = FinanceBudgeting.pendingReviewMonth(store.state, today: today) {
-                pendingReviewCard(pending)
-            }
+        VStack(spacing: MoneyStyle.blockGap) {
             setAsideCard
-            MoneyChartsSection(
-                insights: FinanceInsights.compute(store.state, month: month, today: today),
-                onCategory: onCategory
-            )
-            envelopesSummary
-            PillButton("Обзор месяца", icon: "doc.text.magnifyingglass", style: .secondary) {
-                reviewMonth = MonthRef(id: month)
-            }
-        }
-        .sheet(item: $reviewMonth) { ref in
-            MonthReviewSheet(store: store, today: today, month: ref.id, apply: apply) { reviewMonth = nil }
+            MoneyDailySpendCard(state: store.state, today: today, period: $period)
+            MoneyCategoryList(state: store.state, today: today, onCategory: onCategory)
         }
         .sheet(isPresented: $creatingEnvelope) {
             NewEnvelopeSheet(today: today, apply: apply) { creatingEnvelope = false }
         }
     }
 
-    private func hintsCard(_ hints: [FinanceHint]) -> some View {
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                SectionHeader("Стоит посмотреть")
-                ForEach(hints) { hint in
-                    HintRow(hint: hint)
-                }
-            }
-        }
-    }
-
-    private func pendingReviewCard(_ pending: String) -> some View {
-        let review = FinanceBudgeting.review(store.state, month: pending, today: today)
-        let goal = FinanceEnvelopes.savingsGoal(store.state)
-        let offer = goal == nil ? 0 : review.savedOnLimitsMinor
-        return Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                SectionHeader("Итоги \(FinanceText.monthGenitive(pending))")
-                MoneyRow(label: "Доходы", value: FinanceText.money(review.incomeMinor))
-                MoneyRow(label: "Расходы", value: FinanceText.money(review.expenseMinor))
-                if review.previousExpenseMinor > 0 {
-                    MoneyRow(label: "Расходы месяцем раньше", value: FinanceText.money(review.previousExpenseMinor))
-                }
-                if !review.limits.isEmpty {
-                    let kept = review.limits.filter { $0.overMinor == 0 }.count
-                    MoneyRow(label: "Уложился в лимиты", value: "\(kept) из \(review.limits.count)")
-                    if review.overspentMinor > 0 {
-                        MoneyRow(label: "Перерасход", value: FinanceText.money(review.overspentMinor), valueColor: DS.Colors.destructive)
-                    }
-                    if review.savedOnLimitsMinor > 0 {
-                        MoneyRow(label: "Осталось от лимитов", value: FinanceText.money(review.savedOnLimitsMinor), valueColor: DS.Colors.positive)
-                    }
-                }
-                if let goal, offer > 0 {
-                    if FinanceEnvelopes.room(goal) < offer {
-                        Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + offer)).")
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    PillButton("Отложить \(FinanceText.money(offer)) в «\(goal.title)»", style: .primary) {
-                        apply("Отложено \(FinanceText.money(offer)).") { state in
-                            let saved = try FinanceBudgeting.setAside(state, amountMinor: offer, goalId: goal.id, raiseTarget: true)
-                            return try FinanceBudgeting.markReviewed(saved, month: pending)
-                        }
-                    }
-                }
-                HStack(spacing: DS.Metrics.spacing12) {
-                    PillButton("Подробнее", style: .secondary) { reviewMonth = MonthRef(id: pending) }
-                    PillButton("Закрыть", style: .secondary) {
-                        apply(nil) { try FinanceBudgeting.markReviewed($0, month: pending) }
-                    }
-                }
-            }
-        }
-    }
-
+    /// Only incomes that arrived; the «свободно» offer and the percent live in «План».
     @ViewBuilder
     private var setAsideCard: some View {
         let offers = FinanceBudgeting.setAsideOffers(store.state, today: today)
-        let freeOffer = FinanceBudgeting.freeBalanceOffer(store.state, today: today)
-        if !offers.isEmpty || freeOffer != nil {
+        if !offers.isEmpty {
             let goal = FinanceEnvelopes.savingsGoal(store.state)
             Card {
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                     SectionHeader("Отложить с дохода")
                     if goal == nil {
                         Text("Конверта для накоплений пока нет.")
-                            .font(.subheadline)
+                            .font(DS.Fonts.text(15, .medium))
                             .foregroundColor(DS.Colors.textSecondary)
-                        PillButton("Создать конверт", icon: "plus", style: .primary) { creatingEnvelope = true }
+                        MoneyPrimaryButton("Создать конверт", icon: "plus") { creatingEnvelope = true }
                     }
                     let goals = FinanceEnvelopes.goals(store.state)
                     ForEach(offers.prefix(3)) { offer in
                         SetAsideOfferRow(offer: offer, goal: goal, goals: goals, apply: apply)
                     }
-                    if let freeOffer {
-                        FreeOfferRow(offer: freeOffer, goal: goal, goals: goals, apply: apply)
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var envelopesSummary: some View {
-        let goals = FinanceEnvelopes.goals(store.state)
-        if !goals.isEmpty {
-            let total = goals.reduce(Int64(0)) { $0 + ($1.savedMinor ?? 0) }
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                    MoneyRow(label: "Отложено в конвертах", value: FinanceText.money(total), emphasized: true)
-                    ForEach(goals) { g in
-                        MoneyRow(label: g.title, value: "\(FinanceText.money(g.savedMinor ?? 0)) из \(FinanceText.money(g.amountMinor ?? 0))")
-                    }
-                    Button("Конверты в «Плане»", action: onOpenPlan)
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.accent)
-                        .frame(minHeight: DS.Metrics.minHitTarget)
                 }
             }
         }
@@ -641,6 +550,7 @@ struct MonthReviewSheet: View {
                     }
                 }
             }
+            MonthInsightsCard(insights: FinanceInsights.compute(store.state, month: month, today: today))
             if !review.limits.isEmpty {
                 Card {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
@@ -721,31 +631,199 @@ struct FinancePlanTab: View {
 
     @State private var editingLimits = false
     @State private var payingObligation: FinanceRecord? = nil
-    @State private var movingEnvelope: EnvelopeMove? = nil
     @State private var creatingEnvelope = false
+    @State private var openedEnvelope: MonthRef? = nil
+    @State private var reviewMonth: MonthRef? = nil
+    @State private var choosingSetAside = false
+    @Environment(\.sectionAccent) private var accent
 
     private var month: String { String(today.prefix(7)) }
 
+    /// Canvas order: «Конверты», «Обязательные платежи», «Отложить с дохода»; then limits, hints and the month review.
     var body: some View {
-        VStack(spacing: DS.Metrics.spacing24) {
+        VStack(alignment: .leading, spacing: MoneyStyle.blockGap) {
+            if let pending = FinanceBudgeting.pendingReviewMonth(store.state, today: today) {
+                pendingReviewCard(pending)
+            }
+            envelopesStrip
             matchesCard
             paymentsCard
+            setAsideButton
             limitsCard
-            envelopesCard
+            let hints = FinanceBudgeting.hints(store.state, today: today)
+            if !hints.isEmpty {
+                hintsCard(Array(hints.prefix(3)))
+            }
+            MoneyOutlineButton("Итоги месяца", icon: "doc.text.magnifyingglass") {
+                reviewMonth = MonthRef(id: month)
+            }
         }
         .sheet(isPresented: $editingLimits) {
             LimitsEditSheet(store: store, today: today, apply: apply) { editingLimits = false }
+                .environment(\.sectionAccent, accent)
         }
         .sheet(item: $payingObligation) { ob in
             PaymentLinkSheet(store: store, today: today, obligation: ob, apply: apply) { payingObligation = nil }
-        }
-        .sheet(item: $movingEnvelope) { move in
-            EnvelopeMoveSheet(move: move, apply: apply) { movingEnvelope = nil }
+                .environment(\.sectionAccent, accent)
         }
         .sheet(isPresented: $creatingEnvelope) {
             NewEnvelopeSheet(today: today, apply: apply) { creatingEnvelope = false }
+                .environment(\.sectionAccent, accent)
+        }
+        .sheet(item: $openedEnvelope) { ref in
+            EnvelopeSheet(store: store, goalId: ref.id, apply: apply) { openedEnvelope = nil }
+                .environment(\.sectionAccent, accent)
+        }
+        .sheet(item: $reviewMonth) { ref in
+            MonthReviewSheet(store: store, today: today, month: ref.id, apply: apply) { reviewMonth = nil }
+                .environment(\.sectionAccent, accent)
+        }
+        .sheet(isPresented: $choosingSetAside) {
+            let offer = FinanceBudgeting.setAsideOffers(store.state, today: today).first
+            SetAsideChoiceSheet(
+                goals: FinanceEnvelopes.goals(store.state),
+                initialGoalId: FinanceEnvelopes.savingsGoal(store.state)?.id,
+                suggestedMinor: offer?.suggestedMinor ?? 0,
+                commit: { goalId, amount in setAside(goalId, amount, incomeId: offer?.incomeId) },
+                onClose: { choosingSetAside = false }
+            )
+            .environment(\.sectionAccent, accent)
         }
     }
+
+    // MARK: Envelopes
+
+    private var envelopesStrip: some View {
+        let goals = FinanceEnvelopes.goals(store.state)
+        let savingsId = FinanceEnvelopes.savingsGoal(store.state)?.id
+        let total = goals.reduce(Int64(0)) { $0 + ($1.savedMinor ?? 0) }
+        let percent = store.state.budget?.savePercent ?? FinanceBudgeting.defaultSavePercent
+        let freeOffer = FinanceBudgeting.freeBalanceOffer(store.state, today: today)
+        return VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader("Конверты")
+                Spacer(minLength: 8)
+                if !goals.isEmpty {
+                    Text(FinanceText.money(total))
+                        .font(DS.Fonts.text(15, .bold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .accessibilityLabel("Отложено в конвертах \(FinanceText.money(total))")
+                }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Metrics.spacing12) {
+                    ForEach(goals) { g in
+                        MoneyEnvelopeCard(
+                            goal: g,
+                            lastMove: FinanceBudgeting.envelopeHistory(store.state, goalId: g.id).first,
+                            receivesIncome: g.id == savingsId && goals.count > 1,
+                            onTap: { openedEnvelope = MonthRef(id: g.id) }
+                        )
+                    }
+                    MoneyNewEnvelopeCard { creatingEnvelope = true }
+                }
+            }
+            .scrollClipDisabled()
+            .accessibilityIdentifier("money-envelopes")
+            if goals.isEmpty {
+                Text("Деньги в конвертах остаются на картах, но не входят в «Чистыми».")
+                    .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            if let freeOffer, !goals.isEmpty {
+                FreeOfferRow(offer: freeOffer, goal: FinanceEnvelopes.savingsGoal(store.state), goals: goals, apply: apply)
+            }
+            Stepper(value: Binding(
+                get: { percent },
+                set: { value in apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savePercent = value } } }
+            ), in: 0...50, step: 5) {
+                Text(percent == 0 ? "С дохода не предлагать" : "Предлагать отложить \(percent)% дохода")
+                    .font(DS.Fonts.text(15, .medium))
+                    .foregroundColor(DS.Colors.textPrimary)
+            }
+            .tint(accent)
+        }
+    }
+
+    /// The canvas button under the payments: picks the envelope and amount; the newest unanswered income is linked.
+    private var setAsideButton: some View {
+        MoneyPrimaryButton("Отложить с дохода", icon: "arrow.down.to.line") {
+            if FinanceEnvelopes.goals(store.state).isEmpty {
+                creatingEnvelope = true
+            } else {
+                choosingSetAside = true
+            }
+        }
+        .accessibilityIdentifier("money-set-aside")
+    }
+
+    @discardableResult
+    private func setAside(_ goalId: String, _ amount: Int64, incomeId: String?) -> String? {
+        let title = FinanceEnvelopes.goals(store.state).first { $0.id == goalId }?.title ?? ""
+        return apply("Отложено \(FinanceText.money(amount)) в «\(title)».") {
+            try FinanceBudgeting.setAside($0, amountMinor: amount, goalId: goalId, incomeId: incomeId, raiseTarget: true)
+        }
+    }
+
+    // MARK: Month review and hints (moved here from «Обзор», which keeps only the canvas blocks)
+
+    private func hintsCard(_ hints: [FinanceHint]) -> some View {
+        Card {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                SectionHeader("Стоит посмотреть")
+                ForEach(hints) { hint in
+                    HintRow(hint: hint)
+                }
+            }
+        }
+    }
+
+    private func pendingReviewCard(_ pending: String) -> some View {
+        let review = FinanceBudgeting.review(store.state, month: pending, today: today)
+        let goal = FinanceEnvelopes.savingsGoal(store.state)
+        let offer = goal == nil ? 0 : review.savedOnLimitsMinor
+        return Card {
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                SectionHeader("Итоги \(FinanceText.monthGenitive(pending))")
+                MoneyRow(label: "Доходы", value: FinanceText.money(review.incomeMinor))
+                MoneyRow(label: "Расходы", value: FinanceText.money(review.expenseMinor))
+                if review.previousExpenseMinor > 0 {
+                    MoneyRow(label: "Расходы месяцем раньше", value: FinanceText.money(review.previousExpenseMinor))
+                }
+                if !review.limits.isEmpty {
+                    let kept = review.limits.filter { $0.overMinor == 0 }.count
+                    MoneyRow(label: "Уложился в лимиты", value: "\(kept) из \(review.limits.count)")
+                    if review.overspentMinor > 0 {
+                        MoneyRow(label: "Перерасход", value: FinanceText.money(review.overspentMinor), valueColor: DS.Colors.destructive)
+                    }
+                    if review.savedOnLimitsMinor > 0 {
+                        MoneyRow(label: "Осталось от лимитов", value: FinanceText.money(review.savedOnLimitsMinor), valueColor: DS.Colors.positive)
+                    }
+                }
+                if let goal, offer > 0 {
+                    if FinanceEnvelopes.room(goal) < offer {
+                        Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + offer)).")
+                            .font(.caption)
+                            .foregroundColor(DS.Colors.textSecondary)
+                    }
+                    MoneyPrimaryButton("Отложить \(FinanceText.money(offer)) в «\(goal.title)»") {
+                        apply("Отложено \(FinanceText.money(offer)).") { state in
+                            let saved = try FinanceBudgeting.setAside(state, amountMinor: offer, goalId: goal.id, raiseTarget: true)
+                            return try FinanceBudgeting.markReviewed(saved, month: pending)
+                        }
+                    }
+                }
+                HStack(spacing: DS.Metrics.spacing12) {
+                    PillButton("Подробнее", style: .secondary) { reviewMonth = MonthRef(id: pending) }
+                    PillButton("Закрыть", style: .secondary) {
+                        apply(nil) { try FinanceBudgeting.markReviewed($0, month: pending) }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Payments and limits
 
     @ViewBuilder
     private var matchesCard: some View {
@@ -757,10 +835,10 @@ struct FinancePlanTab: View {
                     ForEach(matches) { m in
                         VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
                             Text("Это «\(m.obligationTitle)» за \(FinanceText.monthName(month))?")
-                                .font(.subheadline.weight(.semibold))
+                                .font(DS.Fonts.text(16, .semibold))
                                 .foregroundColor(DS.Colors.textPrimary)
                             Text("\(m.recordTitle) · \(FinanceText.money(m.amountMinor)) · \(FinanceText.dayMonth(m.date))")
-                                .font(.caption)
+                                .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
                                 .foregroundColor(DS.Colors.textSecondary)
                             HStack(spacing: DS.Metrics.spacing12) {
                                 PillButton("Да", style: .primary) {
@@ -775,7 +853,7 @@ struct FinancePlanTab: View {
                         }
                         .padding(12)
                         .background(DS.Colors.surfaceRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                 }
             }
@@ -788,8 +866,8 @@ struct FinancePlanTab: View {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                 SectionHeader("Обязательные платежи")
                 if obligations.isEmpty {
-                    Text("Платежей пока нет. Добавь через «+», например «аренда 120000 каждый месяц».")
-                        .font(.subheadline)
+                    Text("Платежей пока нет. Напишите внизу, например «аренда 120000 каждый месяц».")
+                        .font(DS.Fonts.text(15, .medium))
                         .foregroundColor(DS.Colors.textSecondary)
                 }
                 ForEach(obligations) { ob in
@@ -815,58 +893,67 @@ struct FinancePlanTab: View {
                 SectionHeader("Лимиты на \(FinanceText.monthName(month))")
                 if limits.isEmpty {
                     Text("Лимитов пока нет. Приложение предложит их по средним тратам с \(FinanceText.dayMonth(FinanceBudgeting.analysisStart(store.state))) — останется поправить.")
-                        .font(.subheadline)
+                        .font(DS.Fonts.text(15, .medium))
                         .foregroundColor(DS.Colors.textSecondary)
                 }
                 ForEach(limits) { LimitBar(status: $0) }
-                PillButton(limits.isEmpty ? "Задать лимиты" : "Изменить лимиты", style: .secondary) {
+                MoneyTextButton(limits.isEmpty ? "Задать лимиты" : "Изменить лимиты") {
                     editingLimits = true
                 }
             }
         }
+        .accessibilityIdentifier("money-limits")
     }
+}
 
-    private var envelopesCard: some View {
+/// One envelope opened from the «Конверты» row: progress, «Отложить / Забрать», income choice and the full history.
+struct EnvelopeSheet: View {
+    @ObservedObject var store: FinanceStore
+    let goalId: String
+    let apply: FinanceApply
+    let onClose: () -> Void
+
+    @State private var movingEnvelope: EnvelopeMove? = nil
+    @Environment(\.sectionAccent) private var accent
+
+    var body: some View {
         let goals = FinanceEnvelopes.goals(store.state)
         let savingsId = FinanceEnvelopes.savingsGoal(store.state)?.id
-        let percent = store.state.budget?.savePercent ?? FinanceBudgeting.defaultSavePercent
-        return Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                SectionHeader("Конверты")
-                Text("Деньги остаются на картах, но не входят в «Чистыми».")
-                    .font(.caption)
-                    .foregroundColor(DS.Colors.textSecondary)
-                ForEach(goals) { g in
-                    EnvelopeRow(
-                        goal: g,
-                        receivesIncome: g.id == savingsId,
-                        canChoose: goals.count > 1,
-                        onAdd: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: false) },
-                        onWithdraw: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: true) },
-                        onChoose: { apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savingsGoalId = g.id } } },
-                        history: FinanceBudgeting.envelopeHistory(store.state, goalId: g.id),
-                        onUndoLine: { line in
-                            apply("\(line.amountMinor > 0 ? "Отложенные" : "Забранные") \(FinanceText.money(abs(line.amountMinor))) возвращены.") {
-                                try FinanceBudgeting.undoEnvelopeLine($0, lineId: line.id)
-                            }
+        FinanceSheet(title: goals.first { $0.id == goalId }?.title ?? "Конверт", onClose: onClose) {
+            if let g = goals.first(where: { $0.id == goalId }) {
+                EnvelopeRow(
+                    goal: g,
+                    receivesIncome: g.id == savingsId,
+                    canChoose: goals.count > 1,
+                    onAdd: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: false) },
+                    onWithdraw: { movingEnvelope = EnvelopeMove(goal: g, isWithdraw: true) },
+                    onChoose: { apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savingsGoalId = g.id } } },
+                    history: FinanceBudgeting.envelopeHistory(store.state, goalId: g.id),
+                    onUndoLine: { line in
+                        apply("\(line.amountMinor > 0 ? "Отложенные" : "Забранные") \(FinanceText.money(abs(line.amountMinor))) возвращены.") {
+                            try FinanceBudgeting.undoEnvelopeLine($0, lineId: line.id)
                         }
-                    )
-                }
-                PillButton("Новый конверт", icon: "plus", style: .secondary) { creatingEnvelope = true }
-                Stepper(value: Binding(
-                    get: { percent },
-                    set: { value in apply(nil) { try FinanceBudgeting.updateBudget($0) { $0.savePercent = value } } }
-                ), in: 0...50, step: 5) {
-                    Text(percent == 0 ? "С дохода не предлагать" : "Предлагать отложить \(percent)% дохода")
-                        .font(.subheadline)
-                        .foregroundColor(DS.Colors.textPrimary)
-                }
+                    }
+                )
+                Text("Деньги остаются на картах, но не входят в «Чистыми».")
+                    .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.textSecondary)
+            } else {
+                Text("Конверта больше нет.")
+                    .font(DS.Fonts.text(15, .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
             }
+        }
+        .presentationDetents([.medium, .large])
+        .sheet(item: $movingEnvelope) { move in
+            EnvelopeMoveSheet(move: move, apply: apply) { movingEnvelope = nil }
+                .environment(\.sectionAccent, accent)
         }
     }
 }
 
 struct PaymentRow: View {
+    @Environment(\.sectionAccent) private var accent
     let obligation: FinanceRecord
     let status: PaymentStatus
     let onMark: () -> Void
@@ -896,13 +983,13 @@ struct PaymentRow: View {
             if status.isDue && !status.isPaid {
                 Button("Оплачен", action: onMark)
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundColor(accent)
                     .frame(minWidth: DS.Metrics.minHitTarget, minHeight: DS.Metrics.minHitTarget)
                     .accessibilityLabel("Отметить оплату «\(obligation.title)»")
             } else if status.markedByHand {
                 Button("Снять", action: onUnmark)
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(DS.Colors.accent)
+                    .foregroundColor(accent)
                     .frame(minWidth: DS.Metrics.minHitTarget, minHeight: DS.Metrics.minHitTarget)
                     .accessibilityLabel("Снять отметку об оплате «\(obligation.title)»")
             }
@@ -922,12 +1009,13 @@ struct PaymentRow: View {
 }
 
 struct LimitBar: View {
+    @Environment(\.sectionAccent) private var accent
     let status: LimitStatus
 
     private var tint: Color {
         if status.overMinor > 0 { return DS.Colors.destructive }
         if status.runsOutDay != nil { return DS.Colors.warning }
-        return DS.Colors.accent
+        return accent
     }
 
     private var note: String {
@@ -964,6 +1052,7 @@ struct EnvelopeMove: Identifiable {
 }
 
 struct EnvelopeRow: View {
+    @Environment(\.sectionAccent) private var accent
     let goal: FinanceRecord
     let receivesIncome: Bool
     let canChoose: Bool
@@ -994,7 +1083,7 @@ struct EnvelopeRow: View {
                     .foregroundColor(DS.Colors.textSecondary)
             }
             ProgressView(value: Double(min(saved, target)), total: Double(target))
-                .tint(DS.Colors.accent)
+                .tint(accent)
             if let outside = goal.outsideMinor, outside > 0 {
                 Text("из них вне счетов \(FinanceText.money(outside))")
                     .font(.caption)
@@ -1010,7 +1099,7 @@ struct EnvelopeRow: View {
                 }
             }
             .font(.subheadline)
-            .foregroundColor(DS.Colors.accent)
+            .foregroundColor(accent)
             .frame(minHeight: DS.Metrics.minHitTarget)
             if !history.isEmpty {
                 Divider().overlay(DS.Colors.hairline)
@@ -1020,7 +1109,7 @@ struct EnvelopeRow: View {
                 if history.count > 3 {
                     Button(showsAllHistory ? "Свернуть историю" : "Вся история (\(history.count))") { showsAllHistory.toggle() }
                         .font(.caption)
-                        .foregroundColor(DS.Colors.accent)
+                        .foregroundColor(accent)
                         .frame(minHeight: DS.Metrics.minHitTarget)
                 }
             }
@@ -1033,6 +1122,7 @@ struct EnvelopeRow: View {
 
 /// «12 ноября · отложил 82 000 ₸ · Отменить»
 struct EnvelopeHistoryLine: View {
+    @Environment(\.sectionAccent) private var accent
     let line: EnvelopeLogEntry
     let onUndo: () -> Void
 
@@ -1049,7 +1139,7 @@ struct EnvelopeHistoryLine: View {
             Spacer()
             Button("Отменить", action: onUndo)
                 .font(.caption)
-                .foregroundColor(DS.Colors.accent)
+                .foregroundColor(accent)
                 .frame(minHeight: DS.Metrics.minHitTarget)
                 .accessibilityLabel("Отменить: \(line.amountMinor > 0 ? "отложил" : "забрал") \(FinanceText.money(abs(line.amountMinor)))")
         }
@@ -1058,6 +1148,7 @@ struct EnvelopeHistoryLine: View {
 
 /// Picks the envelope and the amount for a set-aside offer; the offer's own button keeps the suggested ones.
 struct SetAsideChoiceSheet: View {
+    @Environment(\.sectionAccent) private var accent
     let goals: [FinanceRecord]
     let suggestedMinor: Int64
     /// Runs the set-aside; returns the reason when it failed.
@@ -1091,7 +1182,7 @@ struct SetAsideChoiceSheet: View {
                 Button { goalId = g.id; error = nil } label: {
                     HStack {
                         Image(systemName: g.id == goalId ? "largecircle.fill.circle" : "circle")
-                            .foregroundColor(g.id == goalId ? DS.Colors.accent : DS.Colors.textSecondary)
+                            .foregroundColor(g.id == goalId ? accent : DS.Colors.textSecondary)
                             .accessibilityHidden(true)
                         Text(g.title).foregroundColor(DS.Colors.textPrimary)
                         Spacer()
@@ -1107,7 +1198,7 @@ struct SetAsideChoiceSheet: View {
             }
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
                 .onChange(of: amount) { _, _ in error = nil }
             if let goal, let tenge = FinanceText.tenge(amount), tenge * 100 > FinanceEnvelopes.room(goal) {
                 Text("Цель «\(goal.title)» вырастет до \(FinanceText.money((goal.savedMinor ?? 0) + tenge * 100)).")
@@ -1134,6 +1225,7 @@ struct SetAsideChoiceSheet: View {
 // MARK: - Plan sheets
 
 struct LimitsEditSheet: View {
+    @Environment(\.sectionAccent) private var accent
     @ObservedObject var store: FinanceStore
     let today: String
     let apply: FinanceApply
@@ -1166,7 +1258,7 @@ struct LimitsEditSheet: View {
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 110)
-                                .textFieldStyle(.roundedBorder)
+                                .moneyField()
                                 .accessibilityLabel("Лимит «\(category)», тенге")
                             Text("₸").foregroundColor(DS.Colors.textSecondary)
                         }
@@ -1179,7 +1271,7 @@ struct LimitsEditSheet: View {
                         } label: {
                             Label("Добавить категорию", systemImage: "plus")
                                 .font(.subheadline)
-                                .foregroundColor(DS.Colors.accent)
+                                .foregroundColor(accent)
                                 .frame(minHeight: DS.Metrics.minHitTarget)
                         }
                     }
@@ -1370,7 +1462,7 @@ struct EnvelopeMoveSheet: View {
                 .foregroundColor(DS.Colors.textSecondary)
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
                 .onChange(of: amount) { _, _ in
                     growTarget = false
                     error = nil
@@ -1432,13 +1524,13 @@ struct NewEnvelopeSheet: View {
     var body: some View {
         FinanceSheet(title: "Новый конверт", onClose: onClose) {
             TextField("Название", text: $title)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
             TextField("Сколько хочешь собрать, ₸", text: $target)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
             TextField("Уже отложено, ₸ — необязательно", text: $saved)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
             if !saved.filter(\.isNumber).isEmpty {
                 Picker("Где лежат деньги", selection: $savedOutside) {
                     Text("На счетах").tag(false)
@@ -1491,9 +1583,9 @@ struct NewEnvelopeSheet: View {
 // MARK: - Операции
 
 struct OperationsFeed: View {
+    @Environment(\.sectionAccent) private var accent
     @ObservedObject var store: FinanceStore
     @Binding var filter: LedgerFilter
-    @Binding var expanded: Bool
     let onEdit: (FinanceRecord) -> Void
     let onDelete: (FinanceRecord) -> Void
     let onCategory: (FinanceRecord) -> Void
@@ -1502,57 +1594,38 @@ struct OperationsFeed: View {
 
     private static let page = 60
 
+    /// Canvas «Операции»: filters and search on top, then days («СЕГОДНЯ») with 60-pt rows on #211A3A, 10 apart.
+    /// Always open now: the feed is the tab, not a fold inside it.
     var body: some View {
         let days = FinanceBudgeting.ledger(store.state, filter: filter)
         let totals = FinanceBudgeting.ledgerTotals(days)
-        Card {
-            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
-                } label: {
-                    HStack {
-                        Text("Операции · \(periodTitle) · \(totals.count)")
-                            .font(.headline)
-                            .foregroundColor(DS.Colors.textPrimary)
-                        Spacer()
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    .frame(minHeight: DS.Metrics.minHitTarget)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("operations-feed-toggle")
-                .accessibilityHint(expanded ? "Свернуть ленту" : "Раскрыть ленту")
-
-                if expanded {
-                    filters
-                    searchField
-                    if isFiltered {
-                        Text("Найдено: \(MoneyFormat.operations(totals.count)) · расходы \(FinanceText.money(totals.expenseMinor)) · доходы \(FinanceText.money(totals.incomeMinor))")
-                            .font(.caption)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    if days.isEmpty {
-                        Text("Ничего не найдено.")
-                            .font(.subheadline)
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    ForEach(paged(days)) { day in
-                        dayHeader(day)
-                        ForEach(day.entries) { entry in
-                            FinanceSwipeRow(actions: swipeActions(for: entry)) {
-                                LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
-                            }
-                        }
-                    }
-                    if totals.count > pageSize {
-                        Button("Показать ещё") { pageSize += Self.page }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(DS.Colors.accent)
-                            .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
+        VStack(alignment: .leading, spacing: 10) {
+            filters
+            searchField
+            if isFiltered {
+                Text("Найдено: \(MoneyFormat.operations(totals.count)) · расходы \(FinanceText.money(totals.expenseMinor)) · доходы \(FinanceText.money(totals.incomeMinor))")
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            if days.isEmpty {
+                Text(isFiltered ? "Ничего не найдено." : "Операций за \(periodTitle) нет.")
+                    .font(DS.Fonts.text(15, .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                    .padding(.vertical, DS.Metrics.spacing8)
+            }
+            ForEach(paged(days)) { day in
+                dayHeader(day)
+                ForEach(day.entries) { entry in
+                    FinanceSwipeRow(actions: swipeActions(for: entry)) {
+                        LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
                     }
                 }
+            }
+            if totals.count > pageSize {
+                Button("Показать ещё") { pageSize += Self.page }
+                    .font(DS.Fonts.text(16, .bold))
+                    .foregroundColor(accent)
+                    .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
             }
         }
         .onChange(of: filter) { _, _ in pageSize = Self.page }
@@ -1621,10 +1694,10 @@ struct OperationsFeed: View {
                             Image(systemName: "xmark").font(.caption2.weight(.bold))
                         }
                         .font(.subheadline.weight(.medium))
-                        .foregroundColor(DS.Colors.onAccent)
+                        .foregroundColor(MoneyStyle.onAccent)
                         .padding(.horizontal, 12)
                         .frame(minHeight: DS.Metrics.minHitTarget)
-                        .background(DS.Colors.accent)
+                        .background(accent)
                         .clipShape(Capsule())
                     }
                     .accessibilityLabel("Убрать фильтр «\(category)»")
@@ -1655,12 +1728,21 @@ struct OperationsFeed: View {
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
     }
 
+    /// «СЕГОДНЯ» as on the canvas, with the day's net on the right.
     private func dayHeader(_ day: LedgerDay) -> some View {
-        Text("\(FinanceText.dayTitle(day.date)) · \(FinanceText.signed(day.netMinor))")
-            .font(.caption.weight(.semibold))
-            .foregroundColor(DS.Colors.textSecondary)
-            .padding(.top, DS.Metrics.spacing8)
-            .accessibilityAddTraits(.isHeader)
+        HStack(alignment: .firstTextBaseline) {
+            Text(MoneyDays.title(day.date, today: FinanceText.today()).uppercased())
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .tracking(0.8)
+                .foregroundColor(DS.Colors.textSecondary)
+            Spacer(minLength: 8)
+            Text(FinanceText.signed(day.netMinor))
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption).monospacedDigit())
+                .foregroundColor(DS.Colors.textMuted)
+        }
+        .padding(.top, DS.Metrics.spacing12)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func monthLabel(_ month: String) -> String {
@@ -1700,6 +1782,7 @@ struct OperationsFeed: View {
 }
 
 struct LedgerRow: View {
+    @Environment(\.sectionAccent) private var accent
     let entry: LedgerEntry
     let pairSource: String?
     let onTap: () -> Void
@@ -1726,27 +1809,31 @@ struct LedgerRow: View {
         return record.kind == "income" ? "+" + FinanceText.money(value) : "−" + FinanceText.money(value)
     }
 
+    /// Canvas row: 60 high, 16 side padding, radius 18 on #211A3A; name 17/600, note 14/500, sum 17/800, income in the accent.
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .center, spacing: DS.Metrics.spacing12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(record.title)
-                        .font(.subheadline.weight(.medium))
+                        .font(DS.Fonts.text(17, .semibold))
                         .foregroundColor(muted ? DS.Colors.textSecondary : DS.Colors.textPrimary)
                         .lineLimit(2)
                     Text(subtitle)
-                        .font(.caption2)
+                        .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
                         .foregroundColor(DS.Colors.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Text(amount)
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundColor(muted ? DS.Colors.textSecondary : (record.kind == "income" ? DS.Colors.positive : DS.Colors.textPrimary))
+                    .font(DS.Fonts.text(17, .heavy).monospacedDigit())
+                    .foregroundColor(muted ? DS.Colors.textSecondary : (record.kind == "income" ? accent : DS.Colors.textPrimary))
                     .strikethrough(!entry.counts && !entry.isOwnTransfer)
             }
-            .frame(minHeight: DS.Metrics.minHitTarget)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 60)
+            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Открыть запись для изменения")
@@ -1797,7 +1884,7 @@ struct ReconcileSheet: View {
                 .foregroundColor(DS.Colors.textSecondary)
             TextField("Сумма, ₸", text: $amount)
                 .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
+                .moneyField()
                 .accessibilityLabel("Остаток на всех счетах, тенге")
             if let error {
                 Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
@@ -1846,6 +1933,7 @@ enum ManualKind {
 
 /// What the owner added by «+», voice or text, the last added first; a tap opens it for a fix or removal.
 struct ManualEntriesCard: View {
+    @Environment(\.sectionAccent) private var accent
     let state: FinanceState
     let onEdit: (FinanceRecord) -> Void
 
@@ -1870,7 +1958,7 @@ struct ManualEntriesCard: View {
                             withAnimation(.easeInOut(duration: 0.2)) { showsAll.toggle() }
                         }
                         .font(.subheadline.weight(.medium))
-                        .foregroundColor(DS.Colors.accent)
+                        .foregroundColor(accent)
                         .frame(minHeight: DS.Metrics.minHitTarget)
                         .accessibilityIdentifier("manual-entries-toggle")
                     }

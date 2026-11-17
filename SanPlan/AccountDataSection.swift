@@ -28,56 +28,77 @@ enum AccountDataAPI {
 }
 
 /// Settings block «Данные и аккаунт».
+/// «Профиль → Аккаунт»: email, export, delete and sign-out, in canvas rows.
 struct AccountDataSection: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
+    let email: String
     var onDeleted: () -> Void
+    var onSignedOut: () -> Void
 
     @State private var exportURL: URL?
     @State private var busy = false
     @State private var error: String?
     @State private var askDelete = false
+    @State private var askSignOut = false
     @State private var word = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            SectionHeader("Данные и аккаунт")
-            Card {
-                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                    Text("Файл JSON: планы в открытом виде, остальные разделы — зашифрованными ключом данных вашего аккаунта.")
-                        .font(.footnote)
-                        .foregroundColor(DS.Colors.textSecondary)
-                    if let exportURL {
-                        ShareLink(item: exportURL) {
-                            Label("Сохранить или отправить файл", systemImage: "square.and.arrow.up")
-                                .frame(minHeight: DS.Metrics.minHitTarget)
+        VStack(alignment: .leading, spacing: 8) {
+            ProfileGroup("Аккаунт") {
+                ProfileRow("Электронная почта") { ProfileValue(email) }
+                if let exportURL {
+                    ShareLink(item: exportURL) {
+                        ProfileRow("Сохранить или отправить файл", note: "Файл готов") {
+                            Image(systemName: "square.and.arrow.up").foregroundColor(DS.Colors.today).accessibilityHidden(true)
                         }
-                    } else {
-                        Button {
-                            Task { await export() }
-                        } label: {
-                            Label(busy ? "Готовим файл…" : "Скачать мои данные", systemImage: "arrow.down.doc")
-                                .frame(minHeight: DS.Metrics.minHitTarget)
-                        }
-                        .disabled(busy)
+                        .contentShape(Rectangle())
                     }
-                    Divider()
-                    Button(role: .destructive) {
-                        word = ""
-                        askDelete = true
+                    .buttonStyle(ProfileRowButtonStyle())
+                } else {
+                    Button {
+                        Task { await export() }
                     } label: {
-                        Label("Удалить аккаунт и данные", systemImage: "trash")
-                            .frame(minHeight: DS.Metrics.minHitTarget)
+                        ProfileRow(busy ? "Готовим файл…" : "Скачать мои данные",
+                                   note: "JSON: планы в открытом виде, остальное — зашифрованным ключом данных аккаунта") {
+                            Image(systemName: "arrow.down.doc").foregroundColor(DS.Colors.today).accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(ProfileRowButtonStyle())
                     .disabled(busy)
-                    if let error {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundColor(DS.Colors.destructive)
-                            .accessibilityLabel("Ошибка: \(error)")
-                    }
                 }
+                Button {
+                    askSignOut = true
+                } label: {
+                    ProfileRow("Выйти из аккаунта", nameColor: DS.Colors.destructive) {
+                        if authService.isAuthenticating { ProgressView().tint(DS.Colors.destructive) }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(ProfileRowButtonStyle())
+                .disabled(busy || authService.isAuthenticating)
+                Button {
+                    word = ""
+                    askDelete = true
+                } label: {
+                    ProfileRow("Удалить аккаунт и данные", note: "Необратимо", nameColor: DS.Colors.destructive).contentShape(Rectangle())
+                }
+                .buttonStyle(ProfileRowButtonStyle())
+                .disabled(busy)
             }
+            if let error {
+                Text(error)
+                    .font(DS.Fonts.text(14, .medium, relativeTo: .footnote))
+                    .foregroundColor(DS.Colors.destructive)
+                    .accessibilityLabel("Ошибка: \(error)")
+            }
+        }
+        .confirmationDialog("Вы уверены, что хотите выйти?", isPresented: $askSignOut, titleVisibility: .visible) {
+            Button("Выйти", role: .destructive) {
+                Task { await signOut() }
+            }
+            Button("Отмена", role: .cancel) {}
         }
         .alert("Удалить аккаунт?", isPresented: $askDelete) {
             TextField("Введите \(AccountDataAPI.confirmWord)", text: $word)
@@ -91,6 +112,16 @@ struct AccountDataSection: View {
         } message: {
             Text("Сервер сотрёт планы, ключ и все записи аккаунта, отзовёт доступ Google и завершит вход. Это необратимо.")
         }
+    }
+
+    private func signOut() async {
+        await authService.signOut()
+        // Plan titles must not keep ringing after the owner signed out on purpose.
+        // A session that merely expired keeps its alarms: a missed alarm is the worse failure.
+        if authService.phase == .signedOut {
+            await alarmCoordinator.deleteAllOwnAlarms()
+        }
+        onSignedOut()
     }
 
     private func export() async {

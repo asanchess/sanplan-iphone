@@ -1,0 +1,582 @@
+import SwiftUI
+import UIKit
+
+// MARK: - How sections register mascot targets
+//
+//     someView.mascotTarget(id: "money.day-limit", tip: "Столько можно потратить сегодня.")
+//
+// - `id`: stable and unique within the screen (the mascot never picks the same id twice in a row).
+// - `tip`: one or two short sentences the mascot says while it points at the element.
+// - Put it on the element itself (a card, a field, a chart), inside the scroll content. The element's bounds
+//   travel as an anchor, so the outline follows the element while it scrolls.
+// - When the mascot points, the element gets a softly pulsing outline in its section colour
+//   (`@Environment(\.sectionAccent)`), drawn around the element and never over it.
+// - The mascot only picks elements that are fully visible: above the tab bar, below the status bar, inside the screen.
+// - Order on screen is the order of targets; a tap goes to the next fully visible one.
+// - `.petTip("…")` from round 5 still works: it is `.mascotTarget(id: text, tip: text)`.
+
+/// Shared mascot state: what is highlighted now and where the tab bar starts.
+@MainActor
+final class MascotCenter: ObservableObject {
+    static let shared = MascotCenter()
+    /// Id of the target the mascot points at now; its `.mascotTarget` draws the outline.
+    @Published var highlightedID: String?
+    /// Top edge of the tab bar in global coordinates; the lane is right above it.
+    @Published var barTop: CGFloat?
+}
+
+/// One registered target as it travels up the preference tree.
+struct PetTip {
+    static let separator: Character = "\u{1F}"
+    /// "<id>\u{1F}<tip>": RootView maps `text` straight into `PetResolvedTip(text:rect:)`, which splits it again.
+    let text: String
+    let anchor: Anchor<CGRect>
+
+    init(id: String, tip: String, anchor: Anchor<CGRect>) {
+        text = id + String(Self.separator) + tip
+        self.anchor = anchor
+    }
+}
+
+struct PetTipKey: PreferenceKey {
+    static var defaultValue: [PetTip] { [] }
+    static func reduce(value: inout [PetTip], nextValue: () -> [PetTip]) { value.append(contentsOf: nextValue()) }
+}
+
+/// A target resolved into the mascot layer's coordinates.
+struct PetResolvedTip: Equatable {
+    let id: String
+    let text: String
+    let rect: CGRect
+
+    init(id: String, text: String, rect: CGRect) {
+        self.id = id
+        self.text = text
+        self.rect = rect
+    }
+
+    /// Takes `PetTip.text` as RootView passes it.
+    init(text packed: String, rect: CGRect) {
+        if let cut = packed.firstIndex(of: PetTip.separator) {
+            id = String(packed[..<cut])
+            text = String(packed[packed.index(after: cut)...])
+        } else {
+            id = packed
+            text = packed
+        }
+        self.rect = rect
+    }
+}
+
+@MainActor
+private struct MascotTargetModifier: ViewModifier {
+    let id: String
+    let tip: String
+    @ObservedObject private var center: MascotCenter
+    @Environment(\.sectionAccent) private var accent
+
+    init(id: String, tip: String) {
+        self.id = id
+        self.tip = tip
+        self._center = ObservedObject(wrappedValue: MascotCenter.shared)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .anchorPreference(key: PetTipKey.self, value: .bounds) { [PetTip(id: id, tip: tip, anchor: $0)] }
+            .overlay {
+                if center.highlightedID == id {
+                    MascotHighlight(color: accent)
+                        .transition(.opacity)
+                }
+            }
+    }
+}
+
+extension View {
+    /// Registers this element as something the mascot can walk to, point at and explain. See the top of MascotLayer.swift.
+    func mascotTarget(id: String, tip: String) -> some View {
+        modifier(MascotTargetModifier(id: id, tip: tip))
+    }
+
+    /// Round-5 spelling; the text doubles as the id.
+    func petTip(_ text: String) -> some View {
+        mascotTarget(id: text, tip: text)
+    }
+}
+
+/// The outline around a target: ink ring, section-colour ring and glow, all outside the element's bounds, softly pulsing.
+struct MascotHighlight: View {
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        ZStack {
+            shape.stroke(DS.Colors.ink, lineWidth: 7)
+            shape.stroke(color, lineWidth: 3).blur(radius: 5)
+            shape.stroke(color, lineWidth: 3)
+        }
+        .padding(-8)
+        .phaseAnimator(reduceMotion ? [1.0] : [1.0, 0.45]) { content, phase in
+            content.opacity(phase)
+        } animation: { _ in
+            .easeInOut(duration: 0.5)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Walking mascot
+
+private struct PetMove {
+    var from: CGPoint
+    var to: CGPoint
+    var start: Date
+    var duration: Double
+    var walking: Bool
+}
+
+/// The canvas hero: walks along the lane right above the tab bar, follows the finger exactly when dragged,
+/// hides behind an edge when thrown there, and on a tap walks to a fully visible target, outlines it and says what it is.
+/// Position is computed per frame from the current move (no implicit animation), so a grab mid-walk starts exactly
+/// where the hero is drawn.
+struct PetLayer: View {
+    let tips: [PetResolvedTip]
+    let area: CGSize
+    let idleLine: String
+
+    @AppStorage("pet.visible") private var visible = true
+    @ObservedObject private var center: MascotCenter
+    @ObservedObject private var wardrobe: MascotWardrobe
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let size = CGSize(width: 64, height: 84)
+    private static let space = "mascot-layer"
+    /// UI tests tap buttons near the bottom: the walking hero would be in the way there.
+    private static let offForTests = ProcessInfo.processInfo.arguments.contains("--no-pet")
+
+    @State private var spot = CGPoint(x: 14, y: 0)
+    @State private var onLane = true
+    @State private var move: PetMove?
+    @State private var pose: MascotPoseKey = .think
+    @State private var facingLeft = false
+    @State private var hiddenSide = 0
+    @State private var bubble: String?
+    @State private var bubbleSize: CGSize = .zero
+    @State private var grab: CGSize?
+    @State private var generation = 0
+    @State private var busy = false
+    @State private var lastTargetID: String?
+    @State private var keyboardUp = false
+    @State private var layerFrame: CGRect = .zero
+    @State private var safeTop: CGFloat = 0
+    @State private var idleStep = 0
+    /// Copies of the inputs for delayed callbacks, which would otherwise see the values of the moment they were made.
+    @State private var liveTips: [PetResolvedTip] = []
+    @State private var liveArea: CGSize = .zero
+
+    init(tips: [PetResolvedTip], area: CGSize, idleLine: String) {
+        self.tips = tips
+        self.area = area
+        self.idleLine = idleLine
+        _center = ObservedObject(wrappedValue: MascotCenter.shared)
+        _wardrobe = ObservedObject(wrappedValue: MascotWardrobe.shared)
+    }
+
+    // MARK: Geometry
+
+    private var width: CGFloat { liveArea.width > 0 ? liveArea.width : area.width }
+    private var height: CGFloat { liveArea.height > 0 ? liveArea.height : area.height }
+    private var topY: CGFloat { max(safeTop, 0) }
+
+    /// Bottom of the usable area: the tab bar's top edge in this layer's coordinates.
+    private var floorY: CGFloat {
+        guard let bar = center.barTop, layerFrame.height > 0 else { return height }
+        let local = bar - layerFrame.minY
+        return local > 200 ? min(local, height) : height
+    }
+
+    private var laneY: CGFloat { max(floorY - size.height - 8, topY) }
+
+    private var visibleRect: CGRect { CGRect(x: 0, y: topY, width: width, height: max(floorY - topY, 0)) }
+
+    private func isFullyVisible(_ rect: CGRect) -> Bool {
+        guard rect.width > 1, rect.height > 1 else { return false }
+        return visibleRect.insetBy(dx: -0.5, dy: -0.5).contains(rect)
+    }
+
+    private func laneX(_ x: CGFloat) -> CGFloat { min(max(x, 8), max(width - size.width - 8, 8)) }
+
+    private var heroShown: Bool { visible && !Self.offForTests && !keyboardUp && area.height > 200 }
+
+    private func position(at date: Date) -> CGPoint {
+        if let move {
+            let t = move.duration > 0 ? min(max(date.timeIntervalSince(move.start) / move.duration, 0), 1) : 1
+            let e = move.walking ? t : 1 - pow(1 - t, 3)
+            return CGPoint(x: move.from.x + (move.to.x - move.from.x) * e, y: move.from.y + (move.to.y - move.from.y) * e)
+        }
+        return CGPoint(x: spot.x, y: onLane ? laneY : spot.y)
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if heroShown {
+                TimelineView(.animation(minimumInterval: nil, paused: move == nil)) { context in
+                    let p = position(at: context.date)
+                    ZStack(alignment: .topLeading) {
+                        hero(walking: move?.walking == true, date: context.date)
+                            .offset(x: p.x, y: p.y)
+                        if let bubble {
+                            bubbleView(bubble, hero: p)
+                        }
+                    }
+                }
+                if hiddenSide != 0 { edgeTab }
+            }
+        }
+        .frame(width: area.width, height: area.height, alignment: .topLeading)
+        .coordinateSpace(NamedCoordinateSpace.named(Self.space))
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { layerFrame = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { safeTop = $0 }
+        .onChange(of: area, initial: true) { _, new in liveArea = new }
+        .onChange(of: tips, initial: true) { _, new in
+            liveTips = new
+            checkPointing()
+        }
+        .onChange(of: idleLine) { _, _ in reset() }
+        .onChange(of: visible) { _, _ in reset() }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardUp = true
+            reset()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(6.5))
+                wander()
+            }
+        }
+    }
+
+    private func hero(walking: Bool, date: Date) -> some View {
+        let phase = walking && !reduceMotion ? sin(date.timeIntervalSinceReferenceDate * 2 * .pi / 0.62) : 0
+        return Image(wardrobe.heroImage(pose))
+            .resizable()
+            .scaledToFit()
+            .frame(width: size.width, height: size.height, alignment: .bottom)
+            .rotationEffect(.degrees(phase * 4), anchor: .bottom)
+            .offset(y: -abs(phase) * 3)
+            .scaleEffect(x: facingLeft ? -1 : 1, y: 1)
+            .shadow(color: .black.opacity(0.45), radius: 4, y: 4)
+            .contentShape(Rectangle())
+            .gesture(drag)
+            .onTapGesture { tapped() }
+            .accessibilityElement()
+            .accessibilityLabel("Маскот")
+            .accessibilityHint("Нажмите — покажет важное на экране. Перетащите к краю, чтобы спрятать")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { tapped() }
+            .accessibilityIdentifier("pet")
+    }
+
+    /// The canvas speech bubble, kept fully inside the visible area and off the outlined element when possible.
+    private func bubbleView(_ text: String, hero p: CGPoint) -> some View {
+        let bubbleWidth = min(210, max(width - 16, 120))
+        let origin = bubbleOrigin(hero: p, width: bubbleWidth)
+        return Text(text)
+            .font(DS.Fonts.text(14, .semibold, relativeTo: .subheadline))
+            .lineSpacing(2)
+            .foregroundColor(DS.Colors.hex(0x1B1430))
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(width: bubbleWidth, alignment: .leading)
+            .background(DS.Colors.textPrimary, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.Colors.ink, lineWidth: 2))
+            .shadow(color: .black.opacity(0.4), radius: 10, y: 8)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
+            .offset(x: origin.x, y: origin.y)
+            .opacity(bubbleSize.height > 0 ? 1 : 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .transition(.opacity)
+    }
+
+    private func bubbleOrigin(hero p: CGPoint, width bubbleWidth: CGFloat) -> CGPoint {
+        let h = max(bubbleSize.height, 44)
+        let minY = topY + 8
+        let maxY = max(floorY - 8 - h, minY)
+        let x = min(max(p.x + size.width / 2 - bubbleWidth / 2, 8), max(width - bubbleWidth - 8, 8))
+        let target = tips.first { $0.id == center.highlightedID }?.rect.insetBy(dx: -10, dy: -10)
+        let candidates = [p.y - 8 - h, p.y + size.height + 8]
+        func fits(_ y: CGFloat) -> Bool { y >= minY && y <= maxY }
+        func clear(_ y: CGFloat) -> Bool {
+            guard let target else { return true }
+            return !CGRect(x: x, y: y, width: bubbleWidth, height: h).intersects(target)
+        }
+        let y = candidates.first { fits($0) && clear($0) }
+            ?? candidates.first(where: fits)
+            ?? min(max(candidates[0], minY), maxY)
+        return CGPoint(x: x, y: y)
+    }
+
+    /// The canvas tab that calls the hero back from behind an edge.
+    private var edgeTab: some View {
+        let left = hiddenSide < 0
+        let y = min(max(spot.y + 20, topY + 8), max(floorY - 56, topY + 8))
+        return Button { recall() } label: {
+            ZStack(alignment: left ? .leading : .trailing) {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 8, height: 8)
+                    .frame(width: 28, height: 48)
+                    .background(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: left ? 0 : 20,
+                            bottomLeadingRadius: left ? 0 : 20,
+                            bottomTrailingRadius: left ? 20 : 0,
+                            topTrailingRadius: left ? 20 : 0
+                        )
+                        .fill(DS.Colors.accentDeep)
+                    )
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 6)
+            }
+            .frame(width: 44, height: 48, alignment: left ? .leading : .trailing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScaleStyle())
+        .offset(x: left ? 0 : width - 44, y: y)
+        .accessibilityLabel("Позвать маскота")
+        .accessibilityIdentifier("pet-call")
+    }
+
+    // MARK: Drag
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: NamedCoordinateSpace.named(Self.space))
+            .onChanged { value in
+                let offset: CGSize
+                if let current = grab {
+                    offset = current
+                } else {
+                    // Grab where the hero is drawn right now, cancel whatever it was doing, keep the pose.
+                    let now = position(at: Date())
+                    generation += 1
+                    move = nil
+                    busy = false
+                    stopPointing(animated: false)
+                    hiddenSide = 0
+                    onLane = false
+                    offset = CGSize(width: value.startLocation.x - now.x, height: value.startLocation.y - now.y)
+                    grab = offset
+                }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    spot = CGPoint(
+                        x: min(max(value.location.x - offset.width, -size.width), width),
+                        y: min(max(value.location.y - offset.height, -size.height / 2), floorY - size.height / 2)
+                    )
+                }
+            }
+            .onEnded { value in
+                guard let offset = grab else { return }
+                grab = nil
+                let flungX = value.predictedEndLocation.x - offset.width
+                if spot.x < -size.width * 0.35 || flungX < -size.width * 0.8 {
+                    hide(-1)
+                } else if spot.x > width - size.width * 0.65 || flungX > width - size.width * 0.2 {
+                    hide(1)
+                } else {
+                    later(0.6, generation) { returnToLane() }
+                }
+            }
+    }
+
+    private func hide(_ side: Int) {
+        spot.y = min(max(spot.y, topY), laneY)
+        onLane = false
+        hiddenSide = side
+        busy = false
+        go(to: CGPoint(x: side < 0 ? -size.width - 16 : width + 16, y: spot.y), duration: 0.22, walking: false, lane: false) {
+            pose = .rest
+        }
+    }
+
+    private func recall() {
+        let side = hiddenSide
+        hiddenSide = 0
+        pose = .shrug
+        let x = side < 0 ? 12 : width - size.width - 12
+        go(to: CGPoint(x: laneX(x), y: laneY), duration: 0.45, walking: false, lane: true) { pose = .think }
+    }
+
+    // MARK: Tap → point
+
+    private func tapped() {
+        if hiddenSide != 0 { recall(); return }
+        guard grab == nil else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        stopPointing(animated: true)
+        guard let tip = nextTip() else {
+            // Nothing new fully on screen: a shrug, and no words without something to show.
+            generation += 1
+            move = nil
+            busy = false
+            pose = .shrug
+            UIAccessibility.post(notification: .announcement, argument: "Сейчас показать нечего")
+            later(1.6, generation) { returnToLane() }
+            return
+        }
+        show(tip)
+    }
+
+    /// The next fully visible target in screen order after the last one shown; never the last one again.
+    private func nextTip() -> PetResolvedTip? {
+        let fresh = liveTips.enumerated().filter { $0.element.id != lastTargetID && isFullyVisible($0.element.rect) }
+        guard !fresh.isEmpty else { return nil }
+        if let last = lastTargetID, let lastIndex = liveTips.firstIndex(where: { $0.id == last }) {
+            return (fresh.first { $0.offset > lastIndex } ?? fresh[0]).element
+        }
+        return fresh[0].element
+    }
+
+    /// Where to stand: right under the element, else right above it, else on the lane. Never on top of it.
+    private func standSpot(for rect: CGRect) -> CGPoint {
+        let x = laneX(rect.maxX - size.width + 6)
+        let below = rect.maxY + 10
+        if below <= laneY { return CGPoint(x: x, y: below) }
+        let above = rect.minY - 10 - size.height
+        if above >= topY + 4 { return CGPoint(x: x, y: above) }
+        return CGPoint(x: x, y: laneY)
+    }
+
+    private func show(_ tip: PetResolvedTip) {
+        busy = true
+        lastTargetID = tip.id
+        let target = standSpot(for: tip.rect)
+        let from = position(at: Date())
+        let duration = min(max(Double(abs(target.x - from.x) + abs(target.y - from.y)) * 0.004, 0.5), 1.5)
+        pose = .think
+        go(to: target, duration: duration, walking: true, lane: target.y >= laneY - 0.5) {
+            // The element may have scrolled away during the walk.
+            guard let live = liveTips.first(where: { $0.id == tip.id }), visibleRect.intersects(live.rect) else {
+                returnToLane()
+                return
+            }
+            pose = .point
+            facingLeft = live.rect.midX < target.x + size.width / 2 - 4
+            bubbleSize = .zero
+            withAnimation(.easeOut(duration: 0.2)) {
+                center.highlightedID = tip.id
+                bubble = live.text
+            }
+            UIAccessibility.post(notification: .announcement, argument: live.text)
+            let hold = min(max(3.8, Double(live.text.count) * 0.06), 7)
+            later(hold, generation) {
+                stopPointing(animated: true)
+                returnToLane()
+            }
+        }
+    }
+
+    /// The outlined element left the screen (or vanished): stop talking about it.
+    private func checkPointing() {
+        guard let id = center.highlightedID, bubble != nil else { return }
+        if let live = liveTips.first(where: { $0.id == id }), visibleRect.intersects(live.rect) { return }
+        stopPointing(animated: true)
+        returnToLane()
+    }
+
+    private func stopPointing(animated: Bool) {
+        guard center.highlightedID != nil || bubble != nil else { return }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                center.highlightedID = nil
+                bubble = nil
+            }
+        } else {
+            center.highlightedID = nil
+            bubble = nil
+        }
+    }
+
+    private func returnToLane() {
+        let from = position(at: Date())
+        go(to: CGPoint(x: laneX(from.x), y: laneY), duration: 0.8, walking: false, lane: true) {
+            busy = false
+            pose = .think
+        }
+    }
+
+    // MARK: Idle
+
+    private func wander() {
+        guard heroShown, !busy, move == nil, grab == nil, hiddenSide == 0, center.highlightedID == nil else { return }
+        if !onLane { returnToLane(); return }
+        idleStep += 1
+        if idleStep % 2 == 1 {
+            // The right end of the lane stays free for the «+».
+            let maxX = max(8, width - size.width - 8 - 72)
+            let x = CGFloat.random(in: 8...maxX)
+            let from = position(at: Date())
+            pose = .think
+            go(to: CGPoint(x: x, y: laneY), duration: max(0.9, Double(abs(x - from.x)) * 0.016), walking: true, lane: true)
+        } else {
+            pose = [MascotPoseKey.think, .yawn, .shrug][idleStep % 3]
+        }
+    }
+
+    private func reset() {
+        let now = position(at: Date())
+        generation += 1
+        move = nil
+        busy = false
+        grab = nil
+        lastTargetID = nil
+        stopPointing(animated: false)
+        if hiddenSide == 0 {
+            spot = CGPoint(x: laneX(now.x), y: laneY)
+            onLane = true
+            pose = .think
+        }
+    }
+
+    // MARK: Motion
+
+    /// Moves the hero; a later move, drag or reset cancels the pending `done`.
+    private func go(to target: CGPoint, duration: Double, walking: Bool, lane: Bool, then done: @escaping () -> Void = {}) {
+        generation += 1
+        let gen = generation
+        let from = position(at: Date())
+        if abs(target.x - from.x) > 1 { facingLeft = target.x < from.x }
+        let time = reduceMotion ? 0 : duration
+        guard time > 0.01, hypot(target.x - from.x, target.y - from.y) > 1 else {
+            move = nil
+            spot = target
+            onLane = lane
+            done()
+            return
+        }
+        move = PetMove(from: from, to: target, start: Date(), duration: time, walking: walking)
+        later(time, gen) {
+            move = nil
+            spot = target
+            onLane = lane
+            done()
+        }
+    }
+
+    private func later(_ seconds: Double, _ gen: Int, _ action: @escaping () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard gen == generation else { return }
+            action()
+        }
+    }
+}

@@ -14,6 +14,7 @@ struct FinanceSwipeAction: Identifiable {
 /// `.swipeActions` is unavailable). Vertical drags scroll as usual; a horizontal one opens the actions
 /// with a light tap. VoiceOver gets the same actions as custom actions.
 struct FinanceSwipeRow<Content: View>: View {
+    @Environment(\.sectionAccent) private var accent
     let actions: [FinanceSwipeAction]
     @ViewBuilder let content: () -> Content
 
@@ -42,7 +43,7 @@ struct FinanceSwipeRow<Content: View>: View {
                         .foregroundColor(.white)
                         .frame(width: buttonWidth)
                         .frame(maxHeight: .infinity)
-                        .background(action.isDestructive ? DS.Colors.destructive : DS.Colors.accent)
+                        .background(action.isDestructive ? DS.Colors.destructive : accent)
                     }
                     .buttonStyle(.plain)
                     .accessibilityHidden(offset == 0)
@@ -51,11 +52,11 @@ struct FinanceSwipeRow<Content: View>: View {
             .opacity(offset == 0 ? 0 : 1)
 
             content()
-                .background(DS.Colors.surface)
+                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .offset(x: offset)
                 .gesture(swipe)
         }
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityActions {
             ForEach(actions) { action in

@@ -151,6 +151,35 @@ public final class NotesStore: ObservableObject {
 
     public func dismissUndo() { recentlyDeleted = nil }
 
+    // MARK: Recently deleted (round 6)
+
+    /// Brings back a deleted note whose text is still kept («Отменить», Профиль → Недавно удалённые).
+    public func restore(_ id: String) {
+        guard var note = all[id], note.deleted, !note.text.isEmpty else { return }
+        if recentlyDeleted?.id == id { recentlyDeleted = nil }
+        note.deleted = false
+        note.updatedAt = max(now(), note.updatedAt + 1)
+        store(note)
+    }
+
+    /// Erases a deleted note's text for good. The empty tombstone stays, so other devices drop the note too.
+    public func purge(_ id: String) {
+        guard var note = all[id], note.deleted, !note.text.isEmpty else { return }
+        if recentlyDeleted?.id == id { recentlyDeleted = nil }
+        note.text = ""
+        note.pinned = false
+        note.updatedAt = max(now(), note.updatedAt + 1)
+        store(note)
+    }
+
+    #if DEBUG
+    /// Debug screenshots only: replaces what is shown with made-up notes. Nothing is sealed, cached or synced here.
+    func showDemo(_ notes: [Note]) {
+        all = Dictionary(notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        recentlyDeleted = nil
+    }
+    #endif
+
     private func store(_ note: Note) {
         guard let key, let sealed = try? seal(note, key: key) else { return }
         all[note.id] = note

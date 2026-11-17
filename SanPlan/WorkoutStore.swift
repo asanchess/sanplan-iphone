@@ -743,6 +743,13 @@ public final class WorkoutStore: ObservableObject {
 
     public var records: [WorkoutRecord] { history.records }
 
+    #if DEBUG
+    /// Screenshots only (`--screenshot-demo-data`): made-up history in memory, not written anywhere.
+    public func showDemoHistory(_ records: [WorkoutRecord]) {
+        history.records = records
+    }
+    #endif
+
     /// Saves an edited workout or one added by hand.
     public func saveRecord(_ record: WorkoutRecord, now: Int64 = WorkoutStore.nowMs()) {
         let exists = history.records.contains { $0.id == record.id }
