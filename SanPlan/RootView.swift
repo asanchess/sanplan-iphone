@@ -384,7 +384,7 @@ private struct ShellCaptureButton: ViewModifier {
         // The shell's bar inset does not reach inside a NavigationStack either: reserve it here, outermost.
         content
             .captureButton(isEnabled: capture?.isEnabled ?? false, action: { capture?.action() })
-            .clearOfShellBar()
+            .shellRoot()
     }
 }
 

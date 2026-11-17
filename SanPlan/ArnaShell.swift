@@ -116,7 +116,7 @@ private struct ShellBarInsetKey: EnvironmentKey { static let defaultValue: CGFlo
 
 extension EnvironmentValues {
     /// Height of the shared bottom bar. UIKit-backed containers (NavigationSplitView) do not receive
-    /// the shell's safe-area inset, so they reserve this space themselves via `clearOfShellBar()`.
+    /// the shell's safe-area inset, so they reserve this space themselves via `shellRoot()`.
     var shellBarInset: CGFloat {
         get { self[ShellBarInsetKey.self] }
         set { self[ShellBarInsetKey.self] = newValue }
@@ -129,19 +129,25 @@ extension EnvironmentValues {
     }
 }
 
-private struct ClearOfShellBar: ViewModifier {
+private struct ShellRoot: ViewModifier {
     @Environment(\.shellBarInset) private var inset
+    @Environment(\.tabIsActive) private var tabIsActive
 
     func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
-            Color.clear.frame(height: inset).accessibilityHidden(true)
-        }
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: inset).accessibilityHidden(true)
+            }
+            // Repeated here: TabStage's accessibilityHidden does not reach through UIKit-backed stacks,
+            // so VoiceOver (and UI tests) found the hidden Today tab's buttons from other tabs.
+            .accessibilityHidden(!tabIsActive)
     }
 }
 
 extension View {
-    /// Keeps content (and its «+») above the shared bottom bar inside a NavigationSplitView column.
-    func clearOfShellBar() -> some View { modifier(ClearOfShellBar()) }
+    /// Apply at the root inside a NavigationStack / NavigationSplitView column: keeps content and its
+    /// «+» above the shared bottom bar and hides the whole tab from accessibility while it is in the background.
+    func shellRoot() -> some View { modifier(ShellRoot()) }
 }
 
 // MARK: - Undo
