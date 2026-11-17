@@ -56,9 +56,10 @@ struct NotesScreen: View {
             List(selection: $selection) {
                 Section {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-                        ScreenHeader("Заметки") {
+                        ScreenHeader("Заметки", kicker: "\(ReviewFormat.plural(store.notes.count, "заметка", "заметки", "заметок")) · зашифрованы") {
                         }
                         searchField
+                            .petTip("Поиск идёт по всем заметкам сразу.")
                         syncLine
                     }
                     .listRowInsets(EdgeInsets(top: DS.Metrics.spacing16, leading: DS.Metrics.screenGutter, bottom: DS.Metrics.spacing8, trailing: DS.Metrics.screenGutter))

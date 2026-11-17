@@ -130,6 +130,7 @@ public struct PlanScreen: View {
                             switch viewMode {
                             case .day:
                                 weekStrip
+                                    .petTip("День выбирается здесь. Нажмите на число — покажу его планы.")
                                 agendaDayList
                             case .week:
                                 weekView
@@ -154,6 +155,7 @@ public struct PlanScreen: View {
                 .safeAreaInset(edge: .bottom) {
                     if !recorder.isRecordingOrPaused {
                         composer
+                            .petTip("Пишите словами: «завтра в 9 стоматолог» — разберу сам.")
                     }
                 }
             }
@@ -392,8 +394,13 @@ public struct PlanScreen: View {
                 if it.item.kind == "task" && it.badge != "Черновик" {
                     let completed = it.item.completed == true
                     Button(action: {
+                        let id = it.item.id
+                        let title = it.item.title
                         Task {
-                            await store.toggleTaskCompletion(id: it.item.id, completed: !completed)
+                            await store.toggleTaskCompletion(id: id, completed: !completed)
+                            UndoCenter.shared.show(completed ? "Снова открыто: \(title)" : "Сделано: \(title)") {
+                                Task { await store.toggleTaskCompletion(id: id, completed: completed) }
+                            }
                         }
                     }) {
                         Image(systemName: completed ? "checkmark.circle.fill" : "circle")

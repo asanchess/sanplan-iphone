@@ -173,7 +173,7 @@ struct HabitRowView: View {
     var body: some View {
         HStack(spacing: DS.Metrics.spacing12) {
             Button {
-                habits.tap(habit, on: today)
+                habits.tapUndoable(habit, on: today)
             } label: {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle")
                     .font(.title)
@@ -381,12 +381,14 @@ struct HabitEditorSheet: View {
                     Button("Сохранить") { save() }.disabled(!canSave)
                 }
             }
-            .confirmationDialog("Удалить привычку и все её отметки?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            .confirmationDialog("Удалить привычку?", isPresented: $confirmingDelete, titleVisibility: .visible) {
                 Button("Удалить", role: .destructive) {
-                    if let existing { habits.delete(id: existing.id) }
+                    if let existing { habits.deleteKeepingTrash(id: existing.id) }
                     dismiss()
                 }
                 Button("Отмена", role: .cancel) {}
+            } message: {
+                Text("Её можно вернуть 30 дней: Профиль → Недавно удалённые.")
             }
         }
         .onAppear(perform: load)

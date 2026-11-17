@@ -284,9 +284,11 @@ struct GoalEditorSheet: View {
             }
             .confirmationDialog("Удалить цель?", isPresented: $confirmingDelete, titleVisibility: .visible) {
                 Button("Удалить", role: .destructive) {
-                    if let existing { goals.delete(id: existing.id) }
+                    if let existing { goals.deleteKeepingTrash(id: existing.id) }
                     dismiss()
                 }
+            } message: {
+                Text("Её можно вернуть 30 дней: Профиль → Недавно удалённые.")
             }
             .onAppear(perform: load)
         }

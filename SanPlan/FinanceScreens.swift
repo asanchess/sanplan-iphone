@@ -63,6 +63,21 @@ public struct FinanceScreen: View {
     /// Gregorian day in Qyzylorda whatever calendar the phone uses.
     private var todayString: String { FinanceText.today() }
 
+    /// «НОЯБРЬ · ЧИСТЫМИ 182 400 ₸» from the canvas; without a balance only the month.
+    private var moneyKicker: String {
+        let month = Date().formatted(.dateTime.month(.standaloneWide).locale(Locale(identifier: "ru_RU")))
+        guard let clean = (try? FinanceBudgeting.snapshot(store.state, today: todayString))?.cleanMinor else { return month }
+        return "\(month) · чистыми \(FinanceText.money(clean))"
+    }
+
+    /// Траты этого месяца и сумма лимитов в тенге, для «Можно потратить сегодня» по нажатию.
+    private var monthSpending: (spent: Int64, limit: Int64)? {
+        guard let limits = store.state.budget?.limits, !limits.isEmpty else { return nil }
+        let byCategory = store.periodSummary(from: String(todayString.prefix(7)) + "-01", to: todayString).byCategory
+        let spent = limits.keys.reduce(Int64(0)) { $0 + (byCategory[$1] ?? 0) }
+        return (spent, limits.values.reduce(0, +) / FinanceBudgeting.oneTenge)
+    }
+
     private var currentMonthString: String {
         String(todayString.prefix(7))
     }
@@ -112,13 +127,15 @@ public struct FinanceScreen: View {
                             if !store.state.records.isEmpty {
                                 VStack(spacing: DS.Metrics.spacing12) {
                                     CleanHeader(snapshot: snapshot) { showBreakdown = true }
-                                    CanSpendTodayCard(result: store.canSpendToday(on: todayString))
+                                    CanSpendTodayCard(result: store.canSpendToday(on: todayString), month: monthSpending)
+                                        .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
                                 }
                             }
                             messages
 
                             if showComposer || !drafts.isEmpty {
                                 composerSection.id("composer")
+                                    .petTip("Пишите как удобно: «кофе 1200» — категорию подберу сам.")
                             }
                             if !drafts.isEmpty {
                                 reviewSection
@@ -180,8 +197,9 @@ public struct FinanceScreen: View {
             Button("Удалить", role: .destructive) {
                 if let rec = recordToDelete {
                     do {
-                        try store.remove(recordId: rec.id, today: todayString)
-                        statusMessage = "Запись удалена."
+                        let next = try removeFinanceRecord(state: store.state, id: rec.id)
+                        try store.replaceStateUndoable(with: next, today: todayString, message: "Удалено: \(rec.title)")
+                        statusMessage = nil
                     } catch {
                         errorMessage = error.localizedDescription
                     }
@@ -189,7 +207,7 @@ public struct FinanceScreen: View {
                 }
             }
         } message: {
-            Text("Запись будет удалена, а статистика пересчитана.")
+            Text("Статистика пересчитается. Сразу после удаления можно нажать «Отменить».")
         }
         .confirmationDialog(
             "Категория операции",
@@ -337,7 +355,12 @@ public struct FinanceScreen: View {
     private func applyChange(_ message: String?, _ change: (FinanceState) throws -> FinanceState) -> String? {
         errorMessage = nil
         do {
-            try store.replaceState(with: change(store.state), today: todayString)
+            let next = try change(store.state)
+            if let message {
+                try store.replaceStateUndoable(with: next, today: todayString, message: message)
+            } else {
+                try store.replaceState(with: next, today: todayString)
+            }
             statusMessage = message
             return nil
         } catch {
@@ -358,7 +381,7 @@ public struct FinanceScreen: View {
     // MARK: - Header Bar
 
     private func headerBar(_ proxy: ScrollViewProxy) -> some View {
-        ScreenHeader("Деньги") {
+        ScreenHeader("Деньги", kicker: moneyKicker) {
             CircleIconButton(
                 icon: "plus",
                 accessibilityLabel: "Добавить запись"

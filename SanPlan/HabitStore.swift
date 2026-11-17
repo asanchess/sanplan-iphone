@@ -272,3 +272,76 @@ public final class HabitStore: ObservableObject {
         knownRecordIDs = desiredIDs
     }
 }
+
+// MARK: - Отмена и «Недавно удалённые»
+
+private struct HabitTrashEntry: Codable {
+    var habit: Habit
+    var marks: [String: Int]
+    var deletedAt: Date
+}
+
+extension HabitStore: RecentlyDeletedSource {
+    /// Отметка тапом с общей плашкой «Отменить»: случайное нажатие возвращается одним касанием.
+    func tapUndoable(_ habit: Habit, on day: String) {
+        let before = amount(habit, on: day)
+        let after = tap(habit, on: day)
+        let message: String
+        if after == 0 {
+            message = "Отметка снята: \(habit.title)"
+        } else if habit.target.isCountable {
+            message = "\(habit.title): \(after) из \(habit.target.amount)"
+        } else {
+            message = "Отмечено: \(habit.title)"
+        }
+        UndoCenter.shared.show(message) { [weak self] in
+            guard let self, let current = self.habits.first(where: { $0.id == habit.id }) else { return }
+            self.setAmount(current, on: day, amount: before)
+        }
+    }
+
+    private var trashKey: String? { key.map { "\($0).trash" } }
+
+    private var trash: [HabitTrashEntry] {
+        get {
+            guard let trashKey, let data = defaults.data(forKey: trashKey) else { return [] }
+            return (try? JSONDecoder().decode([HabitTrashEntry].self, from: data)) ?? []
+        }
+        set {
+            guard let trashKey else { return }
+            let limit = Date().addingTimeInterval(-Double(RecentlyDeleted.keepDays) * 86_400)
+            let kept = newValue.filter { $0.deletedAt >= limit }
+            if kept.isEmpty { defaults.removeObject(forKey: trashKey) } else { defaults.set(try? JSONEncoder().encode(kept), forKey: trashKey) }
+        }
+    }
+
+    /// Удаление, которое можно вернуть: 5 секунд «Отменить», потом 30 дней в «Недавно удалённых» (только на этом телефоне).
+    func deleteKeepingTrash(id: String) {
+        guard let habit = habits.first(where: { $0.id == id }) else { return }
+        trash = [HabitTrashEntry(habit: habit, marks: marks[id] ?? [:], deletedAt: Date())] + trash.filter { $0.habit.id != id }
+        delete(id: id)
+        RecentlyDeleted.shared.register(self)
+        UndoCenter.shared.show("Привычка удалена: \(habit.title)") { [weak self] in
+            self?.restoreDeleted(id: "habit:" + id)
+        }
+    }
+
+    var deletedItems: [DeletedItem] {
+        trash.map { DeletedItem(id: "habit:" + $0.habit.id, title: "Привычка «\($0.habit.title)»", section: .plans, deletedAt: $0.deletedAt) }
+    }
+
+    func restoreDeleted(id: String) {
+        let raw = id.hasPrefix("habit:") ? String(id.dropFirst(6)) : id
+        guard let entry = trash.first(where: { $0.habit.id == raw }) else { return }
+        trash = trash.filter { $0.habit.id != raw }
+        guard !habits.contains(where: { $0.id == raw }) else { return }
+        habits.append(entry.habit)
+        if !entry.marks.isEmpty { marks[raw] = entry.marks }
+        save()
+    }
+
+    func purgeDeleted(id: String) {
+        let raw = id.hasPrefix("habit:") ? String(id.dropFirst(6)) : id
+        trash = trash.filter { $0.habit.id != raw }
+    }
+}

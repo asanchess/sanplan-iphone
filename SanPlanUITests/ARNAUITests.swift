@@ -481,11 +481,11 @@ final class ARNAUITests: XCTestCase {
 
     // MARK: - Interaction helpers
 
-    @MainActor
     private func tabIndex(_ title: String) -> Int {
         ["Сегодня": 0, "Деньги": 1, "Планы": 2, "Тренировка": 3, "Заметки": 4][title] ?? -1
     }
 
+    @MainActor
     private func openTab(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
         hideKeyboardIfNeeded()
         let tab = app.buttons["tab-\(tabIndex(title))"]

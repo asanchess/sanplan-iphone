@@ -104,6 +104,8 @@ public struct RootView: View {
         }
         .task {
             if let tab = screenshotTab { selectedTab = tab }
+            RecentlyDeleted.shared.register(HabitStore.shared)
+            RecentlyDeleted.shared.register(GoalStore.shared)
             seedScreenshotWorkout()
             openPendingAlarmText()
             if !isScreenshotSignedInMode {

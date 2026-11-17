@@ -169,9 +169,13 @@ struct StatementsSection: View {
     private func confirm(_ pending: PendingStatement) {
         do {
             let next = try StatementImport.apply(pending.preview, to: store.state, importId: pending.id, fileName: pending.fileName, today: today)
+            let added = next.records.filter { $0.importId == pending.id }.count
+            let importId = pending.id
             try store.replaceState(with: next, today: today)
             suggestions = StatementImport.mergeSuggestions(in: store.state, importId: pending.id)
-            let added = store.state.records.filter { $0.importId == pending.id }.count
+            UndoCenter.shared.show("Выписка загружена: \(MoneyFormat.operations(added))") { [store, today] in
+                try? store.replaceState(with: StatementImport.deleteImport(importId, from: store.state), today: today)
+            }
             let skipped = pending.preview.records.count - added
             statusMessage = "Добавлено: \(MoneyFormat.operations(added))."
                 + (skipped > 0 ? " Уже были загружены раньше: \(skipped)." : "")
@@ -192,7 +196,7 @@ struct StatementsSection: View {
 
     private func delete(_ item: FinanceImport) {
         do {
-            try store.replaceState(with: StatementImport.deleteImport(item.id, from: store.state), today: today)
+            try store.replaceStateUndoable(with: StatementImport.deleteImport(item.id, from: store.state), today: today, message: "Выписка удалена")
             suggestions.removeAll { suggestion in !store.state.records.contains { $0.id == suggestion.importedId } }
             statusMessage = "Выписка удалена."
         } catch {

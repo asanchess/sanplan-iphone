@@ -48,6 +48,7 @@ public struct WorkoutScreen: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.vertical, DS.Metrics.spacing8)
+                    .petTip("Здесь план тренировки и история. Время считается от старта до финиша.")
 
                     switch section {
                     case .history:

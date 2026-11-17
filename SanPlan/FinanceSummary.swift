@@ -20,6 +20,9 @@ public struct FinancePeriodSummary: Equatable {
 public struct CanSpendToday: Equatable {
     public let amount: Int64
     public let basis: String
+    /// Равная доля остатка лимитов на сегодня и сколько из неё уже потрачено (тенге); nil — без расчёта по дням.
+    public var dayLimit: Int64? = nil
+    public var spentToday: Int64 = 0
 }
 
 public struct SavingsGoalSummary: Equatable, Identifiable {
@@ -122,7 +125,7 @@ public enum FinanceSummaries {
                 basis = "Ограничено свободными деньгами: на счетах \(FinanceBudgeting.money(balance)), накопления и платежи плана вычтены"
             }
         }
-        return CanSpendToday(amount: tenge(amount), basis: basis)
+        return CanSpendToday(amount: tenge(amount), basis: basis, dayLimit: tenge(share), spentToday: tenge(todaySpent))
     }
 
     static func dayWord(_ n: Int) -> String {

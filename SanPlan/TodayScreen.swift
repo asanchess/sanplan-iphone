@@ -41,7 +41,7 @@ public struct TodayScreen: View {
                 DS.Colors.canvas.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
-                        ScreenHeader("Сегодня") {
+                        ScreenHeader("Сегодня", kicker: Date().formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "ru_RU")))) {
                         }
                         if let line = StreakLine.text(appStreak?(reviewDay)) {
                             Text(line)
@@ -52,9 +52,11 @@ public struct TodayScreen: View {
                         reviewCard
                         plansCard
                         habitsCard
+                            .petTip("Нажмите кружок — привычка отмечена. Ошиблись — «Отменить» внизу.")
                         goalsCard
                         pinnedNotesCard
                         moneyCard
+                            .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
                         workoutCard
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
@@ -98,7 +100,7 @@ public struct TodayScreen: View {
                 ForEach(block.rows) { row in
                     HStack(spacing: DS.Metrics.spacing12) {
                         Button {
-                            if let habit = habitStore.habits.first(where: { $0.id == row.id }) { habitStore.tap(habit, on: reviewDay) }
+                            if let habit = habitStore.habits.first(where: { $0.id == row.id }) { habitStore.tapUndoable(habit, on: reviewDay) }
                         } label: {
                             Image(systemName: row.done ? "checkmark.circle.fill" : "circle")
                                 .font(.title2)

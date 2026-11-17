@@ -273,3 +273,56 @@ public final class GoalStore: ObservableObject {
         knownRecordIDs = desiredIDs
     }
 }
+
+// MARK: - «Недавно удалённые»
+
+private struct GoalTrashEntry: Codable {
+    var goal: Goal
+    var deletedAt: Date
+}
+
+extension GoalStore: RecentlyDeletedSource {
+    private var trashKey: String? { key.map { "\($0).trash" } }
+
+    private var trash: [GoalTrashEntry] {
+        get {
+            guard let trashKey, let data = defaults.data(forKey: trashKey) else { return [] }
+            return (try? JSONDecoder().decode([GoalTrashEntry].self, from: data)) ?? []
+        }
+        set {
+            guard let trashKey else { return }
+            let limit = Date().addingTimeInterval(-Double(RecentlyDeleted.keepDays) * 86_400)
+            let kept = newValue.filter { $0.deletedAt >= limit }
+            if kept.isEmpty { defaults.removeObject(forKey: trashKey) } else { defaults.set(try? JSONEncoder().encode(kept), forKey: trashKey) }
+        }
+    }
+
+    /// Удаление с «Отменить» на 5 секунд и 30 днями в «Недавно удалённых» (только на этом телефоне).
+    func deleteKeepingTrash(id: String) {
+        guard let goal = goals.first(where: { $0.id == id }) else { return }
+        trash = [GoalTrashEntry(goal: goal, deletedAt: Date())] + trash.filter { $0.goal.id != id }
+        delete(id: id)
+        RecentlyDeleted.shared.register(self)
+        UndoCenter.shared.show("Цель удалена: \(goal.title)") { [weak self] in
+            self?.restoreDeleted(id: "goal:" + id)
+        }
+    }
+
+    var deletedItems: [DeletedItem] {
+        trash.map { DeletedItem(id: "goal:" + $0.goal.id, title: "Цель «\($0.goal.title)»", section: .plans, deletedAt: $0.deletedAt) }
+    }
+
+    func restoreDeleted(id: String) {
+        let raw = id.hasPrefix("goal:") ? String(id.dropFirst(5)) : id
+        guard let entry = trash.first(where: { $0.goal.id == raw }) else { return }
+        trash = trash.filter { $0.goal.id != raw }
+        guard !goals.contains(where: { $0.id == raw }) else { return }
+        goals.append(entry.goal)
+        save()
+    }
+
+    func purgeDeleted(id: String) {
+        let raw = id.hasPrefix("goal:") ? String(id.dropFirst(5)) : id
+        trash = trash.filter { $0.goal.id != raw }
+    }
+}
