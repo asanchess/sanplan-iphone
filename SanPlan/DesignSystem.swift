@@ -300,6 +300,7 @@ public struct SkewTag: View {
             .tracking(0.5)
             .foregroundColor(DS.Colors.canvas)
             .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
             .background(color)

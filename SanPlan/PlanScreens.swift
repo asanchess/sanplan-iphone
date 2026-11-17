@@ -194,11 +194,13 @@ public struct PlanScreen: View {
     /// «5 ДЕЛ · 4 ПРИВЫЧКИ · 2 ЦЕЛИ» from the canvas: tasks for today, active habits and goals.
     private var plansKicker: String {
         let tasks = store.daySummary(for: PlanDomain.today(timeZone: store.timeZone)).total
-        return [
-            ReviewFormat.plural(tasks, "дело", "дела", "дел"),
-            ReviewFormat.plural(habits.activeHabits.count, "привычка", "привычки", "привычек"),
-            ReviewFormat.plural(goals.activeGoals.count, "цель", "цели", "целей")
-        ].joined(separator: " · ")
+        // Zero counts say nothing and push the tag past the header buttons, so only non-zero parts are shown.
+        let parts = [
+            (tasks, ReviewFormat.plural(tasks, "дело", "дела", "дел")),
+            (habits.activeHabits.count, ReviewFormat.plural(habits.activeHabits.count, "привычка", "привычки", "привычек")),
+            (goals.activeGoals.count, ReviewFormat.plural(goals.activeGoals.count, "цель", "цели", "целей"))
+        ].filter { $0.0 > 0 }.map(\.1)
+        return parts.isEmpty ? ReviewFormat.plural(0, "дело", "дела", "дел") : parts.joined(separator: " · ")
     }
 
     private var topBar: some View {
