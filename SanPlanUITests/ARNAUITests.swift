@@ -527,7 +527,7 @@ final class ARNAUITests: XCTestCase {
         let field = composerField(Labels.moneyComposer)
         if field.waitForExistence(timeout: 2) { return field }
 
-        let first = button("Добавить первую запись")
+        let first = app.buttons["money-first-record"]
         let another = exactButton("Добавить запись")
         let resume = button("Продолжить черновик")
         XCTAssertTrue(waitUntil(5) { first.exists || another.exists || resume.exists },

@@ -404,6 +404,7 @@ public struct FinanceScreen: View {
                 PillButton("Добавить первую запись") {
                     showComposer = true
                 }
+                .accessibilityIdentifier("money-first-record")
             }
             .frame(maxWidth: .infinity)
         }

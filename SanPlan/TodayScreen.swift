@@ -301,7 +301,8 @@ public struct TodayScreen: View {
             case nil:
                 EmptyView()
             }
-            PillButton((finance.summary?.spendableMinor ?? finance.summary?.balanceMinor) == nil ? "Добавить первую запись" : "Открыть деньги", style: .secondary) { selectedTab = .money }
+            // This only switches tabs, so it never shares a label with the Money screen's own «Добавить первую запись».
+            PillButton((finance.summary?.spendableMinor ?? finance.summary?.balanceMinor) == nil ? "Начать учёт денег" : "Открыть деньги", style: .secondary) { selectedTab = .money }
         }
     }
 
