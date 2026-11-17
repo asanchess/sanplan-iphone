@@ -203,10 +203,10 @@ public struct PlanScreen: View {
 
     private var topBar: some View {
         ScreenHeader("Планы", kicker: plansKicker) {
-            HeaderTextButton("Будильники", icon: "alarm") {
+            // A round icon like the other header actions: a text pill wrapped onto two lines and squeezed the kicker.
+            CircleIconButton(icon: "alarm", accessibilityLabel: "Будильники") {
                 isShowingAlarms = true
             }
-
         }
     }
 
