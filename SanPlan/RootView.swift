@@ -43,6 +43,10 @@ public struct RootView: View {
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
+    @State private var showProgress = false
+    @State private var keyboardVisible = false
+    @State private var mounted: Set<MainTab> = []
+    @ObservedObject private var undoCenter = UndoCenter.shared
     @ObservedObject private var reviewNotifications = ReviewNotifications.shared
 
     private var isScreenshotSignedInMode: Bool {
@@ -112,7 +116,10 @@ public struct RootView: View {
             switch phase {
             case .signedOut:
                 showSettingsSheet = false
+                showProgress = false
                 showCapture = false
+                mounted = []
+                undoCenter.dismiss()
                 selectedTab = .today
                 model.clearAccountData()
                 onboarding.accountChanged(nil)
@@ -210,79 +217,46 @@ public struct RootView: View {
     }
 
     private var mainTabsView: some View {
-        TabView(selection: $selectedTab) {
-            Tab(MainTab.today.title, systemImage: MainTab.today.icon, value: MainTab.today) {
-                TodayScreen(
-                    plans: model.plans,
-                    finance: model.finance,
-                    workouts: model.workouts,
-                    selectedTab: $selectedTab,
-                    showSettings: $showSettingsSheet,
-                    notes: model.notes,
-                    reviewsVault: model.reviewsVault,
-                    inputs: model.inputs,
-                    appStreak: { [model] day in model.appStreak(today: day) },
-                    dictation: model.dictation,
-                    onOpenGoals: { selectedTab = .plans; goalsRequest += 1 },
-                    onOpenHabits: { selectedTab = .plans; habitsRequest += 1 },
-                    reviewRequest: reviewNotifications.dayReviewRequests,
-                    review: model.reviews
-                )
-                .captureButton(action: openCapture)
-            }
-
-            Tab(MainTab.plans.title, systemImage: MainTab.plans.icon, value: MainTab.plans) {
-                // Plans and Money keep their own composer at the bottom, so no second «+» there.
-                PlanScreen(
-                    store: model.plans,
-                    recorder: model.recorder,
-                    inputs: model.inputs,
-                    dictation: model.dictation,
-                    workouts: model.workouts,
-                    showSettings: $showSettingsSheet,
-                    onOpenWorkout: { selectedTab = .workout },
-                    streakSources: model.streakSources,
-                    savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
-                    weekRatings: model.reviews.weeks,
-                    goalsRequest: goalsRequest,
-                    habitsRequest: habitsRequest
-                )
-                .keyboardDismissBar()
-            }
-
-            Tab(MainTab.notes.title, systemImage: MainTab.notes.icon, value: MainTab.notes) {
-                NotesScreen(
-                    store: model.notes,
-                    vault: model.vault,
-                    showSettings: $showSettingsSheet,
-                    onMakePlan: { handOff($0, to: .plans) },
-                    onMakeExpense: { handOff($0, to: .money) },
-                    onCapture: openCapture
-                )
-                .keyboardDismissBar()
-            }
-
-            Tab(MainTab.money.title, systemImage: MainTab.money.icon, value: MainTab.money) {
-                FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
-                    .keyboardDismissBar()
-            }
-
-            Tab(MainTab.workout.title, systemImage: MainTab.workout.icon, value: MainTab.workout) {
-                WorkoutTab(store: model.workouts, showSettings: $showSettingsSheet, onCapture: openCapture)
+        ZStack {
+            DS.Colors.canvas.ignoresSafeArea()
+            ForEach(MainTab.ordered) { tab in
+                if mounted.contains(tab) || tab == selectedTab {
+                    TabStage(isActive: tab == selectedTab) { screen(for: tab) }
+                        .environment(\.sectionAccent, tab.accent)
+                }
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
-        .tabViewSidebarHeader {
-            Button(action: openCapture) {
-                Label("Записать", systemImage: "plus.circle.fill")
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(DS.Colors.accent)
-                    .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget, alignment: .leading)
+        .environment(\.headerShortcuts, HeaderShortcuts(
+            openProfile: { showSettingsSheet = true },
+            openProgress: { showProgress = true }
+        ))
+        .overlayPreferenceValue(PetTipKey.self) { tips in
+            GeometryReader { proxy in
+                PetLayer(
+                    tips: tips.map { PetResolvedTip(text: $0.text, rect: proxy[$0.anchor]) },
+                    area: proxy.size,
+                    idleLine: "Это главное на экране «\(selectedTab.title)». Спрятать меня можно в профиле."
+                )
             }
-            .keyboardShortcut("n", modifiers: .command)
         }
+        .overlay(alignment: .bottom) {
+            UndoToast(center: undoCenter)
+                .padding(.bottom, 80)
+                .animation(.easeOut(duration: 0.2), value: undoCenter.offer?.id)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardVisible {
+                ArnaTabBar(selection: $selectedTab, tabs: MainTab.ordered)
+            }
+        }
+        .onChange(of: selectedTab, initial: true) { _, tab in mounted.insert(tab) }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardVisible = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardVisible = false }
         .tint(DS.Colors.accent)
         .onChange(of: reviewNotifications.dayReviewRequests) { _, _ in selectedTab = .today }
+        .sheet(isPresented: $showProgress) {
+            ProgressScreen(plans: model.plans, finance: model.finance, workouts: model.workouts) { tab in selectedTab = tab }
+        }
         .sheet(isPresented: $showCapture) {
             CaptureSheet(
                 inputs: model.inputs,
@@ -293,6 +267,62 @@ public struct RootView: View {
                 onSaved: {},
                 askData: { [model] in AskData.current(plans: model.plans, finance: model.finance, workouts: model.workouts) }
             )
+        }
+    }
+
+    @ViewBuilder
+    private func screen(for tab: MainTab) -> some View {
+        switch tab {
+        case .today:
+            TodayScreen(
+                plans: model.plans,
+                finance: model.finance,
+                workouts: model.workouts,
+                selectedTab: $selectedTab,
+                showSettings: $showSettingsSheet,
+                notes: model.notes,
+                reviewsVault: model.reviewsVault,
+                inputs: model.inputs,
+                appStreak: { [model] day in model.appStreak(today: day) },
+                dictation: model.dictation,
+                onOpenGoals: { selectedTab = .plans; goalsRequest += 1 },
+                onOpenHabits: { selectedTab = .plans; habitsRequest += 1 },
+                reviewRequest: reviewNotifications.dayReviewRequests,
+                review: model.reviews
+            )
+            .captureButton(action: openCapture)
+        case .plans:
+            // Plans and Money keep their own composer at the bottom, so no second «+» there.
+            PlanScreen(
+                store: model.plans,
+                recorder: model.recorder,
+                inputs: model.inputs,
+                dictation: model.dictation,
+                workouts: model.workouts,
+                showSettings: $showSettingsSheet,
+                onOpenWorkout: { selectedTab = .workout },
+                streakSources: model.streakSources,
+                savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
+                weekRatings: model.reviews.weeks,
+                goalsRequest: goalsRequest,
+                habitsRequest: habitsRequest
+            )
+            .keyboardDismissBar()
+        case .notes:
+            NotesScreen(
+                store: model.notes,
+                vault: model.vault,
+                showSettings: $showSettingsSheet,
+                onMakePlan: { handOff($0, to: .plans) },
+                onMakeExpense: { handOff($0, to: .money) },
+                onCapture: openCapture
+            )
+            .keyboardDismissBar()
+        case .money:
+            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
+                .keyboardDismissBar()
+        case .workout:
+            WorkoutTab(store: model.workouts, showSettings: $showSettingsSheet, onCapture: openCapture)
         }
     }
 
@@ -325,27 +355,26 @@ private struct WorkoutTab: View {
     }
 }
 
-/// The round «+» that opens the shared composer. Shown on narrow screens (on wide ones the sidebar has «Записать»)
-/// and hidden while the keyboard is up. It sits in the safe area, so lists scroll clear of it.
+/// The round «+» that opens the shared composer, hidden while the keyboard is up. It sits in the safe area, so lists scroll clear of it.
 private struct CaptureButton: ViewModifier {
     let isEnabled: Bool
     let action: () -> Void
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var keyboardVisible = false
 
     func body(content: Content) -> some View {
         content
             .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-                if isEnabled && sizeClass == .compact && !keyboardVisible {
+                if isEnabled && !keyboardVisible {
                     Button(action: action) {
                         Image(systemName: "plus")
                             .font(.title2.weight(.semibold))
                             .foregroundColor(.white)
                             .frame(width: 56, height: 56)
-                            .background(DS.Colors.accentGradient, in: Circle())
-                            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+                            .background(DS.Colors.accentDeep, in: Circle())
+                            .overlay(Circle().stroke(DS.Colors.ink, lineWidth: 2))
+                            .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressScaleStyle())
                     .keyboardShortcut("n", modifiers: .command)
                     .accessibilityLabel("Записать")
                     .accessibilityHint("Заметка, план или трата")

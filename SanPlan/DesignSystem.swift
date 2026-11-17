@@ -2,103 +2,57 @@ import SwiftUI
 import UIKit
 
 public enum DS {
+    /// Round-5 palette (soft plum, dark only). Names kept so every screen picks it up without edits.
     public enum Colors {
-        public static let canvas = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 1.0)
-                : UIColor(red: 245/255, green: 246/255, blue: 248/255, alpha: 1.0)
-        })
+        static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
+            Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255, opacity: a)
+        }
+        public static let canvas = hex(0x17122A)
+        public static let surface = hex(0x211A3A)
+        public static let surfaceRaised = hex(0x2A2148)
+        public static let hairline = hex(0x3A2F5E)
+        public static let navBar = hex(0x1C1533)
+        public static let textPrimary = hex(0xF1ECFF)
+        public static let textSecondary = hex(0xB8AFD4)
+        public static let textMuted = hex(0x8E84AE)
+        /// The hard «ink» used for the round-5 border and offset shadow.
+        public static let ink = hex(0x0B0816)
+        public static let accent = hex(0x8B6CF0)
+        public static let accentDeep = hex(0x6A48D7)
+        public static let onAccent = Color.white
+        public static let alarmTint = hex(0x6A48D7)
+        public static let controlTint = hex(0x8B6CF0)
+        public static let accentGradientStart = hex(0x8B6CF0)
+        public static let accentGradientEnd = hex(0x6A48D7)
+        public static let positive = hex(0x6FD6B0)
+        public static let warning = hex(0xF2C879)
+        public static let destructive = hex(0xFF8A7A)
 
-        public static let surface = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 14/255, green: 16/255, blue: 20/255, alpha: 1.0)
-                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
-        })
-
-        public static let surfaceRaised = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 23/255, green: 26/255, blue: 32/255, alpha: 1.0)
-                : UIColor(red: 238/255, green: 240/255, blue: 244/255, alpha: 1.0)
-        })
-
-        public static let hairline = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(white: 1.0, alpha: 0.12)
-                : UIColor(white: 0.0, alpha: 0.10)
-        })
-
-        public static let textPrimary = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
-                : UIColor(red: 11/255, green: 13/255, blue: 18/255, alpha: 1.0)
-        })
-
-        public static let textSecondary = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 167/255, green: 173/255, blue: 184/255, alpha: 1.0)
-                : UIColor(red: 91/255, green: 98/255, blue: 112/255, alpha: 1.0)
-        })
-
-        /// The ARNA logo lilac (#C6B2F4) in dark; a deeper violet (#6B4FD8) in light so white text on it stays readable.
-        public static let accent = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 198/255, green: 178/255, blue: 244/255, alpha: 1.0)
-                : UIColor(red: 107/255, green: 79/255, blue: 216/255, alpha: 1.0)
-        })
-
-        /// Text and icons placed on an accent fill: the logo's ink in dark, white in light.
-        public static let onAccent = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 27/255, green: 25/255, blue: 34/255, alpha: 1.0)
-                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
-        })
-
-        /// System alarm buttons draw white text on this tint, so it stays deep enough for 5.6:1.
-        public static let alarmTint = Color(red: 107/255, green: 79/255, blue: 216/255)
-
-        /// Tint for system controls that draw white over it (date pickers, prominent toolbar buttons):
-        /// #7438DF in dark (6.2:1 with white), the light accent in light.
-        public static let controlTint = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 116/255, green: 56/255, blue: 223/255, alpha: 1.0)
-                : UIColor(red: 107/255, green: 79/255, blue: 216/255, alpha: 1.0)
-        })
-
-        public static let accentGradientStart = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 198/255, green: 178/255, blue: 244/255, alpha: 1.0)
-                : UIColor(red: 142/255, green: 108/255, blue: 240/255, alpha: 1.0)
-        })
-
-        public static let accentGradientEnd = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 142/255, green: 108/255, blue: 240/255, alpha: 1.0)
-                : UIColor(red: 91/255, green: 63/255, blue: 200/255, alpha: 1.0)
-        })
-
-        public static let positive = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 52/255, green: 199/255, blue: 123/255, alpha: 1.0)
-                : UIColor(red: 18/255, green: 128/255, blue: 74/255, alpha: 1.0)
-        })
-
-        public static let warning = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 255/255, green: 179/255, blue: 64/255, alpha: 1.0)
-                : UIColor(red: 168/255, green: 100/255, blue: 0/255, alpha: 1.0)
-        })
-
-        public static let destructive = Color(UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 255/255, green: 90/255, blue: 82/255, alpha: 1.0)
-                : UIColor(red: 201/255, green: 48/255, blue: 42/255, alpha: 1.0)
-        })
+        /// Section accents from the canvas.
+        public static let today = hex(0xB9A4FF)
+        public static let plans = hex(0x7FB2FF)
+        public static let notes = hex(0xF2C879)
+        public static let money = hex(0x6FD6B0)
+        public static let workout = hex(0xFF8A7A)
 
         public static let accentGradient = LinearGradient(
             colors: [accentGradientStart, accentGradientEnd],
-            startPoint: .leading,
-            endPoint: .trailing
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
         )
+    }
+
+    /// Dela Gothic One for titles and big numbers, Golos Text for everything else; both follow Dynamic Type.
+    public enum Fonts {
+        public static func display(_ size: CGFloat, relativeTo style: Font.TextStyle = .title) -> Font {
+            .custom("DelaGothicOne-Regular", size: size, relativeTo: style)
+        }
+        public static func text(_ size: CGFloat = 17, _ weight: Font.Weight = .regular, relativeTo style: Font.TextStyle = .body) -> Font {
+            .custom("Golos Text", size: size, relativeTo: style).weight(weight)
+        }
+        public static let title = display(28, relativeTo: .largeTitle)
+        public static let body = text(17)
+        public static let label = text(13, .bold, relativeTo: .caption)
     }
 
     public enum Metrics {
@@ -109,7 +63,7 @@ public enum DS {
         public static let spacing24: CGFloat = 24
         public static let spacing32: CGFloat = 32
 
-        public static let cardRadius: CGFloat = 24
+        public static let cardRadius: CGFloat = 20
         public static let innerRadius: CGFloat = 14
         public static let pillHeight: CGFloat = 50
         public static let screenGutter: CGFloat = 20
@@ -162,19 +116,25 @@ public struct PillButton: View {
                             .font(.system(size: 16, weight: .semibold))
                     }
                     Text(title)
-                        .font(.body.weight(.semibold))
+                        .font(DS.Fonts.text(17, .bold))
                 }
             }
             .foregroundColor(foregroundColor)
             .frame(maxWidth: .infinity)
             .frame(height: DS.Metrics.pillHeight)
             .background(backgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2))
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2)
-                    .stroke(borderColor, lineWidth: 1)
+                    .stroke(borderColor, lineWidth: 2)
             )
-            .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2))
+            .background(
+                RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2)
+                    .fill(style == .primary ? DS.Colors.ink : .clear)
+                    .offset(x: 4, y: 4)
+            )
         }
+        .buttonStyle(PressScaleStyle())
         .disabled(!isEnabled || isLoading)
         .opacity(isEnabled ? 1.0 : 0.45)
     }
@@ -186,14 +146,14 @@ public struct PillButton: View {
         case .secondary:
             return DS.Colors.textPrimary
         case .destructive:
-            return Color.white
+            return DS.Colors.canvas
         }
     }
 
     private var backgroundColor: Color {
         switch style {
         case .primary:
-            return DS.Colors.accent
+            return DS.Colors.accentDeep
         case .secondary:
             return DS.Colors.surfaceRaised
         case .destructive:
@@ -204,9 +164,9 @@ public struct PillButton: View {
     private var borderColor: Color {
         switch style {
         case .primary:
-            return Color.clear
+            return DS.Colors.ink
         case .secondary:
-            return DS.Colors.hairline
+            return Color.clear
         case .destructive:
             return Color.clear
         }
@@ -234,13 +194,10 @@ public struct CircleIconButton: View {
                 .font(.system(size: 18, weight: .regular))
                 .foregroundColor(DS.Colors.textPrimary)
                 .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
-                .background(DS.Colors.surfaceRaised)
+                .background(DS.Colors.surface)
                 .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .stroke(DS.Colors.hairline, lineWidth: 1)
-                )
         }
+        .buttonStyle(PressScaleStyle())
         .accessibilityLabel(accessibilityLabelText)
     }
 }
@@ -260,13 +217,12 @@ public struct HeaderTextButton: View {
     public var body: some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.subheadline.weight(.medium))
+                .font(DS.Fonts.text(15, .semibold, relativeTo: .subheadline))
                 .foregroundColor(DS.Colors.textPrimary)
                 .padding(.horizontal, DS.Metrics.spacing12)
                 .frame(minHeight: DS.Metrics.minHitTarget)
-                .background(DS.Colors.surfaceRaised)
+                .background(DS.Colors.surface)
                 .clipShape(Capsule())
-                .overlay(Capsule().stroke(DS.Colors.hairline, lineWidth: 1))
         }
     }
 }
@@ -286,32 +242,135 @@ public struct Card<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DS.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Metrics.cardRadius)
-                .stroke(DS.Colors.hairline, lineWidth: 1)
-        )
     }
 }
 
-/// The one top bar every tab uses: a light large title with round actions on the same line.
+/// The one top bar every tab uses: a skewed accent tag over a Dela title, the screen's own actions,
+/// then «Прогресс» and the hero avatar that opens «Профиль» (supplied by the root through the environment).
 public struct ScreenHeader<Actions: View>: View {
     private let title: String
+    private let kicker: String?
     private let actions: Actions
+    @Environment(\.sectionAccent) private var accent
+    @Environment(\.headerShortcuts) private var shortcuts
 
-    public init(_ title: String, @ViewBuilder actions: () -> Actions) {
+    public init(_ title: String, kicker: String? = nil, @ViewBuilder actions: () -> Actions) {
         self.title = title
+        self.kicker = kicker
         self.actions = actions()
     }
 
     public var body: some View {
-        HStack(spacing: DS.Metrics.spacing8) {
-            Text(title)
-                .font(.largeTitle.weight(.light))
-                .foregroundColor(DS.Colors.textPrimary)
-                .accessibilityAddTraits(.isHeader)
-            Spacer()
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                if let kicker, !kicker.isEmpty {
+                    SkewTag(kicker, color: accent)
+                }
+                Text(title)
+                    .font(DS.Fonts.title)
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 0)
             actions
+            if let shortcuts {
+                CircleIconButton(icon: "chart.bar.xaxis", accessibilityLabel: "Прогресс", action: shortcuts.openProgress)
+                ProfileAvatarButton(accent: accent, action: shortcuts.openProfile)
+            }
         }
+    }
+}
+
+/// The skewed accent label from the canvas: dark text on the section colour with a hard ink shadow.
+public struct SkewTag: View {
+    private let text: String
+    private let color: Color
+
+    public init(_ text: String, color: Color) {
+        self.text = text
+        self.color = color
+    }
+
+    public var body: some View {
+        Text(text.uppercased())
+            .font(DS.Fonts.text(12, .heavy, relativeTo: .caption))
+            .tracking(0.5)
+            .foregroundColor(DS.Colors.canvas)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 2)
+            .background(color)
+            .background(DS.Colors.ink.offset(x: 3, y: 3))
+            .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.176, d: 1, tx: 3, ty: 0))
+            .padding(.leading, 3)
+    }
+}
+
+/// The hero's head in a ringed circle: the way into «Профиль и настройки».
+public struct ProfileAvatarButton: View {
+    let accent: Color
+    let action: () -> Void
+
+    public var body: some View {
+        Button(action: action) {
+            Image("PetThink")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 76)
+                .padding(.top, 2)
+                .frame(width: 42, height: 42, alignment: .top)
+                .clipped()
+                .background(DS.Colors.surfaceRaised)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(accent, lineWidth: 2))
+                .background(Circle().fill(DS.Colors.ink).offset(x: 3, y: 3))
+                .frame(width: 46, height: 46)
+        }
+        .buttonStyle(PressScaleStyle())
+        .accessibilityLabel("Профиль и настройки")
+    }
+}
+
+/// Root-supplied header buttons, so every tab shows the same «Прогресс» and avatar.
+public struct HeaderShortcuts {
+    public var openProfile: () -> Void
+    public var openProgress: () -> Void
+}
+
+private struct SectionAccentKey: EnvironmentKey { static let defaultValue: Color = DS.Colors.today }
+private struct HeaderShortcutsKey: EnvironmentKey { static let defaultValue: HeaderShortcuts? = nil }
+
+public extension EnvironmentValues {
+    var sectionAccent: Color {
+        get { self[SectionAccentKey.self] }
+        set { self[SectionAccentKey.self] = newValue }
+    }
+    var headerShortcuts: HeaderShortcuts? {
+        get { self[HeaderShortcutsKey.self] }
+        set { self[HeaderShortcutsKey.self] = newValue }
+    }
+}
+
+/// Small press-down scale used by every tappable surface; none under «Уменьшение движения».
+public struct PressScaleStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    public init() {}
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+public extension View {
+    /// The hard «ink» frame for the screen's main card and main buttons.
+    func inked(cornerRadius: CGFloat = DS.Metrics.cardRadius, shadow: CGFloat = 6) -> some View {
+        self
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(DS.Colors.ink, lineWidth: 2))
+            .background(RoundedRectangle(cornerRadius: cornerRadius).fill(DS.Colors.ink).offset(x: shadow, y: shadow))
     }
 }
 
@@ -323,10 +382,12 @@ public struct SectionHeader: View {
     }
 
     public var body: some View {
-        Text(title)
-            .font(.title3.weight(.regular))
-            .foregroundColor(DS.Colors.textPrimary)
+        Text(title.uppercased())
+            .font(DS.Fonts.label)
+            .tracking(0.8)
+            .foregroundColor(DS.Colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

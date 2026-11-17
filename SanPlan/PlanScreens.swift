@@ -198,12 +198,6 @@ public struct PlanScreen: View {
                 isShowingAlarms = true
             }
 
-            CircleIconButton(
-                icon: "person.crop.circle",
-                accessibilityLabel: "Открыть настройки"
-            ) {
-                showSettings = true
-            }
         }
     }
 

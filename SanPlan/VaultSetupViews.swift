@@ -17,7 +17,6 @@ struct VaultGateView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                     ScreenHeader("Заметки") {
-                        CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") { showSettings = true }
                     }
                     content
                 }

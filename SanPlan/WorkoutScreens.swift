@@ -35,12 +35,6 @@ public struct WorkoutScreen: View {
 
                 VStack(spacing: 0) {
                     ScreenHeader("Тренировка") {
-                        CircleIconButton(
-                            icon: "person.crop.circle",
-                            accessibilityLabel: "Настройки"
-                        ) {
-                            showSettings = true
-                        }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, DS.Metrics.spacing16)

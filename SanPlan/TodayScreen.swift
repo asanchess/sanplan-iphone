@@ -42,9 +42,6 @@ public struct TodayScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                         ScreenHeader("Сегодня") {
-                            CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") {
-                                showSettings = true
-                            }
                         }
                         if let line = StreakLine.text(appStreak?(reviewDay)) {
                             Text(line)

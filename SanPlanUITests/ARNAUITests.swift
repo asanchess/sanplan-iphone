@@ -310,7 +310,7 @@ final class ARNAUITests: XCTestCase {
         launch(tab: 0)
         assertTodayVisible()
 
-        let gear = exactButton("Настройки")
+        let gear = exactButton("Профиль и настройки")
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
         gear.tap()
 
@@ -323,7 +323,7 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(exactButton("Меньше: Подходов").exists)
         XCTAssertTrue(text("Применяется к новым упражнениям. Уже добавленные не меняются.").exists)
 
-        let close = exactButton("Закрыть настройки")
+        let close = exactButton("Закрыть профиль")
         XCTAssertTrue(close.waitForExistence(timeout: 5))
         close.tap()
         XCTAssertTrue(waitUntil(5) { !self.text("Учетная запись").exists }, "Settings sheet did not close")
@@ -375,6 +375,7 @@ final class ARNAUITests: XCTestCase {
         let app = XCUIApplication()
         var arguments: [String] = []
         if signedIn { arguments.append("--screenshot-signed-in") }
+        arguments.append("--no-pet")
         if let tab { arguments += ["--screenshot-tab", String(tab)] }
         if let activeWorkout { arguments += ["--screenshot-active-workout", activeWorkout] }
         app.launchArguments += arguments
@@ -481,9 +482,13 @@ final class ARNAUITests: XCTestCase {
     // MARK: - Interaction helpers
 
     @MainActor
+    private func tabIndex(_ title: String) -> Int {
+        ["Сегодня": 0, "Деньги": 1, "Планы": 2, "Тренировка": 3, "Заметки": 4][title] ?? -1
+    }
+
     private func openTab(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
         hideKeyboardIfNeeded()
-        let tab = app.tabBars.buttons[title]
+        let tab = app.buttons["tab-\(tabIndex(title))"]
         if tab.waitForExistence(timeout: 5) {
             tab.tap()
         } else {
@@ -579,7 +584,7 @@ final class ARNAUITests: XCTestCase {
         let frame = element.frame
         guard !frame.isEmpty else { return false }
         var bottom = app.windows.firstMatch.frame.maxY
-        let tabBar = app.tabBars.firstMatch
+        let tabBar = app.otherElements["arna-tab-bar"]
         if tabBar.exists, !tabBar.frame.isEmpty { bottom = min(bottom, tabBar.frame.minY) }
         let keyboard = app.keyboards.firstMatch
         if keyboard.exists, !keyboard.frame.isEmpty { bottom = min(bottom, keyboard.frame.minY) }

@@ -9,6 +9,7 @@ public struct SettingsView: View {
 
     @State private var showSignOutConfirmation: Bool = false
     @ObservedObject private var sounds = AlertSoundSettings.shared
+    @AppStorage("pet.visible") private var petVisible = true
 
     public init() {}
 
@@ -26,6 +27,9 @@ public struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: DS.Metrics.spacing24) {
+                        ScreenHeader("Профиль", kicker: "Настройки и данные") {
+                            CircleIconButton(icon: "xmark", accessibilityLabel: "Закрыть профиль") { dismiss() }
+                        }
                         if let error = authService.errorMessage {
                             ErrorBanner(message: error) {
                                 authService.errorMessage = nil
@@ -122,6 +126,48 @@ public struct SettingsView: View {
 
                         WorkoutDefaultsSection(store: workouts)
 
+                        // Герой
+                        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                            SectionHeader("Герой")
+                            Card {
+                                VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                                    Toggle(isOn: $petVisible) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Показывать героя")
+                                                .font(DS.Fonts.body)
+                                                .foregroundColor(DS.Colors.textPrimary)
+                                            Text("Ходит внизу экрана. Нажмите на него — покажет главное.")
+                                                .font(DS.Fonts.text(14, relativeTo: .footnote))
+                                                .foregroundColor(DS.Colors.textSecondary)
+                                        }
+                                    }
+                                    .tint(DS.Colors.today)
+                                    .accessibilityIdentifier("pet-toggle")
+                                }
+                            }
+                        }
+
+                        // Недавно удалённые
+                        NavigationLink {
+                            RecentlyDeletedScreen()
+                        } label: {
+                            HStack {
+                                Image(systemName: "trash")
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                Text("Недавно удалённые")
+                                    .font(DS.Fonts.body)
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundColor(DS.Colors.textMuted)
+                            }
+                            .padding(DS.Metrics.spacing16)
+                            .frame(minHeight: DS.Metrics.minHitTarget)
+                            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: DS.Metrics.cardRadius))
+                        }
+                        .accessibilityIdentifier("recently-deleted")
+
                         // О приложении
                         VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                             SectionHeader("О приложении")
@@ -156,18 +202,8 @@ public struct SettingsView: View {
                     .padding(.vertical, DS.Metrics.spacing24)
                 }
             }
-            .navigationTitle("Настройки")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    CircleIconButton(
-                        icon: "xmark",
-                        accessibilityLabel: "Закрыть настройки"
-                    ) {
-                        dismiss()
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
+            .environment(\.sectionAccent, DS.Colors.today)
             .confirmationDialog(
                 "Вы уверены, что хотите выйти?",
                 isPresented: $showSignOutConfirmation,

@@ -57,7 +57,6 @@ struct NotesScreen: View {
                 Section {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
                         ScreenHeader("Заметки") {
-                            CircleIconButton(icon: "person.crop.circle", accessibilityLabel: "Настройки") { showSettings = true }
                         }
                         searchField
                         syncLine

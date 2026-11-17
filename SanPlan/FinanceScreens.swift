@@ -369,12 +369,6 @@ public struct FinanceScreen: View {
                     withAnimation { proxy.scrollTo("composer", anchor: .top) }
                 }
             }
-            CircleIconButton(
-                icon: "person.crop.circle",
-                accessibilityLabel: "Настройки"
-            ) {
-                showSettings = true
-            }
         }
         .padding(.top, DS.Metrics.spacing16)
         .padding(.bottom, DS.Metrics.spacing12)
