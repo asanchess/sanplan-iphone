@@ -362,11 +362,12 @@ private struct CaptureButton: ViewModifier {
     let isEnabled: Bool
     let action: () -> Void
     @State private var keyboardVisible = false
+    @Environment(\.tabIsActive) private var tabIsActive
 
     func body(content: Content) -> some View {
         content
             .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-                if isEnabled && !keyboardVisible {
+                if isEnabled && tabIsActive && !keyboardVisible {
                     Button(action: action) {
                         Image(systemName: "plus")
                             .font(.title2.weight(.semibold))

@@ -106,7 +106,18 @@ struct TabStage<Content: View>: View {
             .allowsHitTesting(isActive)
             .accessibilityHidden(!isActive)
             .transformPreference(PetTipKey.self) { if !isActive { $0 = [] } }
+            .environment(\.tabIsActive, isActive)
             .zIndex(isActive ? 1 : 0)
+    }
+}
+
+private struct TabIsActiveKey: EnvironmentKey { static let defaultValue = true }
+
+extension EnvironmentValues {
+    /// False for a tab kept alive in the background: its «+» and shortcuts must not answer.
+    var tabIsActive: Bool {
+        get { self[TabIsActiveKey.self] }
+        set { self[TabIsActiveKey.self] = newValue }
     }
 }
 
