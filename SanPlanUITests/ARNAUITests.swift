@@ -353,8 +353,28 @@ final class ARNAUITests: XCTestCase {
         // The round-6 profile header scrolls with the list, so bring it back before closing.
         scrollTo(close)
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
+        print("ARNA-DIAG before close frame=(close.frame)
+(app.debugDescription)")
         close.tap()
-        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
+        let closed = waitUntil(5) { !self.text("Электронная почта").exists }
+        if !closed { print("ARNA-DIAG after close
+(app.debugDescription)") }
+        XCTAssertTrue(closed, "Profile sheet did not close")
+    }
+
+    /// Control for test09: the profile closes from its header without visiting a page first.
+    @MainActor
+    func test11_ProfileClosesFromHeader() {
+        launch(tab: 0)
+        assertTodayVisible()
+        let gear = exactButton("Профиль и настройки")
+        XCTAssertTrue(gear.waitForExistence(timeout: 5))
+        gear.tap()
+        XCTAssertTrue(text("Электронная почта").waitForExistence(timeout: 10), "Profile sheet did not open")
+        let close = exactButton("Закрыть профиль")
+        XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
+        close.tap()
+        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close from the header")
     }
 
     // MARK: - 10. Notes and the shared «+»
