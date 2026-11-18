@@ -46,6 +46,7 @@ struct AccountDataSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ProfileGroup("Аккаунт") {
+                ProfileNameRow(email: email)
                 ProfileRow("Электронная почта") { ProfileValue(email) }
                 if let exportURL {
                     ShareLink(item: exportURL) {

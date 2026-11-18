@@ -170,6 +170,49 @@ struct MoneyOutlineButton: View {
     }
 }
 
+/// A fold in «Операции» («История операций · 124»): the whole row toggles, the chevron turns down while open.
+struct MoneyFoldHeader: View {
+    let title: String
+    let count: Int
+    let isOpen: Bool
+    let action: () -> Void
+    @Environment(\.sectionAccent) private var accent
+
+    init(_ title: String, count: Int, isOpen: Bool, action: @escaping () -> Void) {
+        self.title = title
+        self.count = count
+        self.isOpen = isOpen
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text("\(title) · \(count)")
+                    .font(DS.Fonts.text(16, .bold))
+                    .foregroundColor(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(accent)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(count)")
+        .accessibilityValue(isOpen ? "развёрнуто" : "свёрнуто")
+        .accessibilityHint(isOpen ? "Свернуть" : "Развернуть")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
 /// A small text action in the section colour, at least 44 points high.
 struct MoneyTextButton: View {
     let title: String

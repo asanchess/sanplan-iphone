@@ -9,6 +9,8 @@ public struct FinanceScreen: View {
     @ObservedObject private var store: FinanceStore
     @ObservedObject private var inputs: InputDrafts
     @ObservedObject private var dictation: SpeechDictation
+    /// The account's key session: the backup file is sealed with a key derived from its data key.
+    @ObservedObject private var vault: VaultKeySession
     /// Reads phrases through the server's Gemini; nil keeps everything on the phone's own rules.
     private let client: APIClient?
 
@@ -49,8 +51,8 @@ public struct FinanceScreen: View {
     /// What the single file importer is open for; SwiftUI presents only one importer per screen.
     @State private var importsStatement = false
     @State private var pickedStatement: URL?
+    /// Only for opening an older backup protected by a password.
     @State private var vaultPasswordPrompt: String = ""
-    @State private var vaultPasswordConfirm: String = ""
     @State private var isExporting: Bool = false
     @State private var isImporting: Bool = false
     @State private var pendingImportEnvelope: FinanceVaultEnvelope? = nil
@@ -59,10 +61,11 @@ public struct FinanceScreen: View {
 
     @Environment(\.sectionAccent) private var accent
 
-    public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, client: APIClient? = nil, showSettings: Binding<Bool>) {
+    public init(store: FinanceStore, inputs: InputDrafts, dictation: SpeechDictation, vault: VaultKeySession, client: APIClient? = nil, showSettings: Binding<Bool>) {
         self.store = store
         self.inputs = inputs
         self.dictation = dictation
+        self.vault = vault
         self.client = client
         self._showSettings = showSettings
     }
@@ -70,14 +73,15 @@ public struct FinanceScreen: View {
     /// Gregorian day in Qyzylorda whatever calendar the phone uses.
     private var todayString: String { FinanceText.today() }
 
-    /// «НОЯБРЬ · ЧИСТЫМИ 182 400 ₸» from the canvas; without a balance only the month.
+    /// «НОЯБРЬ»: only the month; the net has its own large line «Чистыми за ноябрь» under the day limit.
     private var moneyKicker: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
-        formatter.dateFormat = "LLLL"
-        let month = formatter.string(from: Date())
-        guard let clean = (try? FinanceBudgeting.snapshot(store.state, today: todayString))?.cleanMinor else { return month }
-        return "\(month) · чистыми \(FinanceText.money(clean))"
+        FinanceText.monthName(currentMonthString)
+    }
+
+    /// «Чистыми за ноябрь +197 972 ₸» under «Можно потратить сегодня»; nil without a balance.
+    private var monthNet: (month: String, minor: Int64)? {
+        guard let clean = snapshot?.cleanMinor else { return nil }
+        return (FinanceText.monthName(currentMonthString), clean)
     }
 
     /// Траты этого месяца и сумма лимитов в тенге, для «Можно потратить сегодня» по нажатию.
@@ -145,6 +149,7 @@ public struct FinanceScreen: View {
                                     result: store.canSpendToday(on: todayString),
                                     month: monthSpending,
                                     clean: cleanLine,
+                                    net: monthNet,
                                     onBreakdown: { showBreakdown = true },
                                     onSetLimits: { tab = .plan }
                                 )
@@ -362,6 +367,8 @@ public struct FinanceScreen: View {
         case .plan:
             FinancePlanTab(store: store, today: todayString, apply: financeApply)
         case .operations:
+            // Top to bottom: «Выписки из банка» with the folded «История загрузок», then the folded «История операций».
+            statementsSection
             OperationsFeed(
                 store: store, filter: $ledgerFilter,
                 onEdit: { recordToEdit = $0 },
@@ -369,7 +376,6 @@ public struct FinanceScreen: View {
                 onCategory: { recordToCategorize = $0 }
             )
             ManualEntriesCard(state: store.state) { recordToEdit = $0 }
-            statementsSection
             ReconcileCard(snapshot: snapshot) { showReconcile = true }
             vaultActionsSection
         }
@@ -776,30 +782,18 @@ public struct FinanceScreen: View {
             VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                 SectionHeader("Сохранение и копия")
 
-                Text(store.state.records.isEmpty
-                     ? "Данные хранятся только на этом телефоне. Если есть копия с другого устройства, её можно восстановить."
-                     : "Данные хранятся только на этом телефоне. Копия — файл, защищённый вашим паролем; без пароля его не открыть.")
+                Text(storageText + " " + backupText)
                     .font(.caption)
                     .foregroundColor(DS.Colors.textSecondary)
 
                 VStack(spacing: DS.Metrics.spacing12) {
                     if !store.state.records.isEmpty {
-                        SecureField("Пароль для копии", text: $vaultPasswordPrompt)
-                            .moneyField()
-
                         PillButton(
                             "Сохранить копию в Файлы",
                             style: .secondary,
-                            isEnabled: vaultPasswordPrompt.count >= 8
+                            isEnabled: hasAccountKey
                         ) {
                             exportVault()
-                        }
-
-                        if vaultPasswordPrompt.count < 8 {
-                            Text("Пароль — не короче 8 символов.")
-                                .font(.caption)
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
 
@@ -807,6 +801,32 @@ public struct FinanceScreen: View {
                         importsStatement = false
                         showImportSheet = true
                     }
+                }
+
+                // An older copy protected by a password: ask for it as before.
+                if let envelope = pendingImportEnvelope, pendingImportState == nil {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Эта копия защищена паролем. Введите пароль, которым её сохранили.")
+                            .font(.subheadline)
+                            .foregroundColor(DS.Colors.textSecondary)
+
+                        SecureField("Пароль от копии", text: $vaultPasswordPrompt)
+                            .moneyField()
+
+                        HStack(spacing: DS.Metrics.spacing12) {
+                            PillButton("Открыть копию", style: .secondary, isEnabled: vaultPasswordPrompt.count >= 8) {
+                                openPasswordBackup(envelope)
+                            }
+
+                            PillButton("Отмена", style: .secondary) {
+                                self.pendingImportEnvelope = nil
+                                self.vaultPasswordPrompt = ""
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(DS.Colors.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
                 }
 
                 if let pendingState = pendingImportState {
@@ -841,13 +861,53 @@ public struct FinanceScreen: View {
         }
     }
 
+    /// The account's key is on this phone (signed in and loaded).
+    private var hasAccountKey: Bool {
+        vault.phase == .ready && vault.dataKey != nil
+    }
+
+    /// Where money lives now, from the store's storage state.
+    private var storageText: String {
+        switch store.storage {
+        case .cloud: return "Данные хранятся в облаке в зашифрованном виде и на этом телефоне."
+        case .migrating: return "Данные переносятся в облако в зашифрованном виде и пока хранятся на этом телефоне."
+        case .local: return "Данные хранятся только на этом телефоне."
+        }
+    }
+
+    private var backupText: String {
+        if store.state.records.isEmpty {
+            return "Если есть копия с другого устройства, её можно восстановить."
+        }
+        if hasAccountKey {
+            return "Копия зашифрована ключом вашего аккаунта: открыть её можно, войдя в этот же аккаунт Google."
+        }
+        return "Сохранить копию можно после входа в аккаунт Google: она шифруется ключом аккаунта."
+    }
+
     private func exportVault() {
+        // No unencrypted fallback: without the account key there is no copy.
+        guard hasAccountKey, let key = vault.dataKey else {
+            errorMessage = "Сохранить копию можно после входа в аккаунт Google."
+            return
+        }
+        do {
+            let backup = try FinanceVault.sealAccountBackup(state: store.state, accountKey: key)
+            let data = try JSONEncoder().encode(backup)
+            self.exportedDocument = EncryptedVaultDocument(data: data)
+            self.showExportSheet = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func openPasswordBackup(_ envelope: FinanceVaultEnvelope) {
+        let password = vaultPasswordPrompt
         Task {
             do {
-                let envelope = try await FinanceVault.sealFinance(state: store.state, password: vaultPasswordPrompt)
-                let data = try JSONEncoder().encode(envelope)
-                self.exportedDocument = EncryptedVaultDocument(data: data)
-                self.showExportSheet = true
+                let opened = try await FinanceVault.openFinance(envelope: envelope, password: password)
+                self.pendingImportState = opened
+                self.pendingImportEnvelope = nil
                 self.vaultPasswordPrompt = ""
             } catch {
                 errorMessage = error.localizedDescription
@@ -870,18 +930,19 @@ public struct FinanceScreen: View {
                 guard let json = String(data: data, encoding: .utf8) else {
                     throw FinanceVaultError.invalidEnvelope("Некорректный файл финансов.")
                 }
-                let envelope = try FinanceVault.readVaultEnvelope(from: json)
-                self.pendingImportEnvelope = envelope
-
-                // Prompt user to open envelope with password
-                Task {
-                    do {
-                        let opened = try await FinanceVault.openFinance(envelope: envelope, password: vaultPasswordPrompt)
-                        self.pendingImportState = opened
-                        self.vaultPasswordPrompt = ""
-                    } catch {
-                        errorMessage = error.localizedDescription
+                self.pendingImportState = nil
+                self.pendingImportEnvelope = nil
+                self.vaultPasswordPrompt = ""
+                switch try FinanceVault.backupKind(of: json) {
+                case .accountKey:
+                    let backup = try FinanceVault.readAccountBackup(from: json)
+                    guard hasAccountKey, let key = vault.dataKey else {
+                        throw FinanceVaultError.decryptionFailed(FinanceVault.accountKeyMissingMessage)
                     }
+                    self.pendingImportState = try FinanceVault.openAccountBackup(backup, accountKey: key)
+                case .password:
+                    // An older copy: the password field appears in the section.
+                    self.pendingImportEnvelope = try FinanceVault.readVaultEnvelope(from: json)
                 }
             } catch {
                 errorMessage = error.localizedDescription

@@ -55,10 +55,15 @@ struct StatementsSection: View {
     @State private var pending: PendingStatement?
     @State private var suggestions: [StatementImport.MergeSuggestion] = []
     @State private var importToDelete: FinanceImport?
+    /// «История загрузок» starts folded; not kept between launches.
+    @State private var showsImports = false
 
     @Environment(\.sectionAccent) private var accent
 
-    /// Canvas: an outline link «Выписки из банка» (52 high, radius 18, hairline 1.5) under the feed.
+    private var imports: [FinanceImport] { store.state.imports ?? [] }
+
+    /// Canvas: an outline link «Выписки из банка» (52 high, radius 18, hairline 1.5) on top of «Операции»,
+    /// then the past imports folded behind «История загрузок · N».
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
             MoneyOutlineButton("Выписки из банка", icon: "doc.text.magnifyingglass", isLoading: isReading) {
@@ -74,25 +79,17 @@ struct StatementsSection: View {
                 mergeRow(suggestion)
             }
 
-            ForEach(store.state.imports ?? []) { item in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(item.bank) · \(MoneyFormat.operations(item.count))")
-                            .font(DS.Fonts.text(16, .semibold))
-                            .foregroundColor(DS.Colors.textPrimary)
-                        Text(periodText(item))
-                            .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
-                            .foregroundColor(DS.Colors.textSecondary)
-                    }
-                    Spacer()
-                    Button("Удалить") { importToDelete = item }
-                        .font(DS.Fonts.text(14, .semibold, relativeTo: .caption))
-                        .foregroundColor(DS.Colors.destructive)
-                        .frame(minHeight: DS.Metrics.minHitTarget)
+            if !imports.isEmpty {
+                MoneyFoldHeader("История загрузок", count: imports.count, isOpen: showsImports) {
+                    withAnimation(.snappy) { showsImports.toggle() }
                 }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 60)
-                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .accessibilityIdentifier("money-imports-history")
+            }
+
+            if showsImports {
+                ForEach(imports) { item in
+                    importRow(item)
+                }
             }
         }
         .onChange(of: pickedFile) { _, url in
@@ -115,6 +112,28 @@ struct StatementsSection: View {
         } message: {
             Text("Записи, добавленные вручную, останутся.")
         }
+    }
+
+    /// One past import: bank, operations, period, and «Удалить».
+    private func importRow(_ item: FinanceImport) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(item.bank) · \(MoneyFormat.operations(item.count))")
+                    .font(DS.Fonts.text(16, .semibold))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Text(periodText(item))
+                    .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            Spacer()
+            Button("Удалить") { importToDelete = item }
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .caption))
+                .foregroundColor(DS.Colors.destructive)
+                .frame(minHeight: DS.Metrics.minHitTarget)
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 60)
+        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func periodText(_ item: FinanceImport) -> String {

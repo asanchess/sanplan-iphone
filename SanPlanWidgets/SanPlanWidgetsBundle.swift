@@ -273,7 +273,7 @@ enum WidgetPalette {
     }
     /// rgba(12, 9, 24, .88)
     static let plate = hex(0x0C0918, 0.88)
-    static let coral = hex(0xFF8A7A)
+    static let coral = hex(0xEE9A8C)
     static let onCoral = hex(0x2A0F0B)
     static let ink = hex(0x0B0816)
     static let outline = hex(0x5A4A8A)

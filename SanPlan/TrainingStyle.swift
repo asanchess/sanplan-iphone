@@ -4,9 +4,10 @@ import SwiftUI
 /// and the small building blocks the section's screens share.
 enum TrainingPalette {
     /// Hard shadow under accent buttons: a dark shade of the workout colour.
-    static let inkShade = DS.Colors.hex(0x7A2E25)
+    /// Shades follow the softened #EE9A8C (same hue and lightness as before, less saturation).
+    static let inkShade = DS.Colors.hex(0x6F3930)
     /// Start of the hero card gradient.
-    static let heroStart = DS.Colors.hex(0xC9574A)
+    static let heroStart = DS.Colors.hex(0xB9685B)
     /// Text on the workout colour.
     static let onAccent = DS.Colors.hex(0x2A0F0B)
     /// Number badge behind the exercise index.
@@ -16,7 +17,7 @@ enum TrainingPalette {
     /// Dashed outline of a rest day in the week row.
     static let restDay = DS.Colors.hex(0x5A4A8A)
     /// Bars that are not highlighted in a chart.
-    static let quietBar = DS.Colors.hex(0x8C4A43)
+    static let quietBar = DS.Colors.hex(0x82544D)
 }
 
 /// The glow and the dot field in the top right corner of every Training screen.

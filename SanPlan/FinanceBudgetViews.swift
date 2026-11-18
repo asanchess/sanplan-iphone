@@ -1591,44 +1591,71 @@ struct OperationsFeed: View {
     let onCategory: (FinanceRecord) -> Void
 
     @State private var pageSize = 60
+    /// «История операций» starts folded; plain view state, not kept between launches.
+    @State private var showsHistory = false
+    /// Days the owner opened or closed by hand («yyyy-MM-dd» → open); untouched days start open only if they are today.
+    @State private var openDays: [String: Bool] = [:]
 
     private static let page = 60
 
-    /// Canvas «Операции»: filters and search on top, then days («СЕГОДНЯ») with 60-pt rows on #211A3A, 10 apart.
-    /// Always open now: the feed is the tab, not a fold inside it.
+    /// Canvas «Операции», folded: «История операций · N» opens filters, search and the days («СЕГОДНЯ»), each day
+    /// folded behind its header (today open) with 60-pt rows on #211A3A, 10 apart.
     var body: some View {
         let days = FinanceBudgeting.ledger(store.state, filter: filter)
         let totals = FinanceBudgeting.ledgerTotals(days)
+        let today = FinanceText.today()
         VStack(alignment: .leading, spacing: 10) {
-            filters
-            searchField
-            if isFiltered {
-                Text("Найдено: \(MoneyFormat.operations(totals.count)) · расходы \(FinanceText.money(totals.expenseMinor)) · доходы \(FinanceText.money(totals.incomeMinor))")
-                    .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
-                    .foregroundColor(DS.Colors.textSecondary)
+            MoneyFoldHeader("История операций", count: totals.count, isOpen: showsHistory) {
+                withAnimation(.snappy) { showsHistory.toggle() }
             }
-            if days.isEmpty {
-                Text(isFiltered ? "Ничего не найдено." : "Операций за \(periodTitle) нет.")
-                    .font(DS.Fonts.text(15, .medium))
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .padding(.vertical, DS.Metrics.spacing8)
-            }
-            ForEach(paged(days)) { day in
-                dayHeader(day)
-                ForEach(day.entries) { entry in
-                    FinanceSwipeRow(actions: swipeActions(for: entry)) {
-                        LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
+            .accessibilityIdentifier("money-ops-history")
+            if showsHistory {
+                filters
+                searchField
+                if isFiltered {
+                    Text("Найдено: \(MoneyFormat.operations(totals.count)) · расходы \(FinanceText.money(totals.expenseMinor)) · доходы \(FinanceText.money(totals.incomeMinor))")
+                        .font(DS.Fonts.text(14, .medium, relativeTo: .caption))
+                        .foregroundColor(DS.Colors.textSecondary)
+                }
+                if days.isEmpty {
+                    Text(isFiltered ? "Ничего не найдено." : "Операций за \(periodTitle) нет.")
+                        .font(DS.Fonts.text(15, .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .padding(.vertical, DS.Metrics.spacing8)
+                }
+                ForEach(paged(days)) { day in
+                    dayHeader(day, today: today, isOpen: isOpen(day, today: today))
+                    if isOpen(day, today: today) {
+                        ForEach(day.entries) { entry in
+                            FinanceSwipeRow(actions: swipeActions(for: entry)) {
+                                LedgerRow(entry: entry, pairSource: pairSource(entry)) { onEdit(entry.record) }
+                            }
+                        }
                     }
                 }
-            }
-            if totals.count > pageSize {
-                Button("Показать ещё") { pageSize += Self.page }
-                    .font(DS.Fonts.text(16, .bold))
-                    .foregroundColor(accent)
-                    .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
+                if totals.count > pageSize {
+                    Button("Показать ещё") { pageSize += Self.page }
+                        .font(DS.Fonts.text(16, .bold))
+                        .foregroundColor(accent)
+                        .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget)
+                }
             }
         }
         .onChange(of: filter) { _, _ in pageSize = Self.page }
+        .onAppear {
+            // A category picked in «Обзор» lands here: show its operations, not a folded header.
+            if filter.category != nil { showsHistory = true }
+        }
+    }
+
+    /// Search and a category from «Обзор» show every matching day open; otherwise only today starts open.
+    private var opensAllDays: Bool {
+        filter.category != nil || !filter.query.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func isOpen(_ day: LedgerDay, today: String) -> Bool {
+        if opensAllDays { return true }
+        return openDays[day.date] ?? (day.date == today)
     }
 
     /// Swipe left: change the category (income and spending only) or delete.
@@ -1728,21 +1755,41 @@ struct OperationsFeed: View {
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
     }
 
-    /// «СЕГОДНЯ» as on the canvas, with the day's net on the right.
-    private func dayHeader(_ day: LedgerDay) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(MoneyDays.title(day.date, today: FinanceText.today()).uppercased())
-                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
-                .tracking(0.8)
-                .foregroundColor(DS.Colors.textSecondary)
-            Spacer(minLength: 8)
-            Text(FinanceText.signed(day.netMinor))
-                .font(DS.Fonts.text(13, .bold, relativeTo: .caption).monospacedDigit())
-                .foregroundColor(DS.Colors.textMuted)
+    /// «СЕГОДНЯ» as on the canvas, with the day's net on the right; a tap folds or opens the day.
+    /// While searching every day stays open, so the header is not a toggle then.
+    private func dayHeader(_ day: LedgerDay, today: String, isOpen: Bool) -> some View {
+        let title = MoneyDays.title(day.date, today: today)
+        let net = FinanceText.signed(day.netMinor)
+        return Button {
+            guard !opensAllDays else { return }
+            withAnimation(.snappy) { openDays[day.date] = !isOpen }
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                if !opensAllDays {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                }
+                Text(title.uppercased())
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                    .tracking(0.8)
+                    .foregroundColor(DS.Colors.textSecondary)
+                Spacer(minLength: 8)
+                Text(net)
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption).monospacedDigit())
+                    .foregroundColor(DS.Colors.textMuted)
+            }
+            .frame(maxWidth: .infinity, minHeight: DS.Metrics.minHitTarget, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .padding(.top, DS.Metrics.spacing12)
+        .buttonStyle(.plain)
+        .padding(.top, DS.Metrics.spacing4)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("\(title), \(net)")
+        .accessibilityValue(isOpen ? "развёрнуто" : "свёрнуто")
+        .accessibilityAddTraits([.isHeader, .isButton])
+        .accessibilityIdentifier("money-day-\(day.date)")
     }
 
     private func monthLabel(_ month: String) -> String {

@@ -5,6 +5,7 @@ import Foundation
 /// - `s-plan-drafts`, kind `planDrafts`: `drafts` (PlanDraftSync.swift; web src/plan-drafts-sync.mjs).
 /// - `s-app-settings`, kind `app`: `onboardingDone` (AppSettingsStore.swift; web src/settings-store.mjs).
 /// - `s-training`, kind `training`: `restSound` (rest sound on/off; web src/workout-sync.mjs). Volume and Apple Health stay on the device.
+/// - `s-profile`, kind `profile`: `nickname`, the name the profile shows (ProfileName.swift; the web does not use it yet).
 /// Keep ONE `VaultCollection<SettingsPayload>` (AppModel.settingsVault): a second collection named `settings`
 /// would share its cache and overwrite it. JSON is the same as the web's; fields this app does not know are ignored.
 public struct SettingsPayload: Codable, Equatable, @unchecked Sendable {
@@ -18,6 +19,8 @@ public struct SettingsPayload: Codable, Equatable, @unchecked Sendable {
     public var restVolume: Int?
     public var planVolume: Int?
     public var onboardingDone: Bool?
+    /// Имя в профиле вместо части почты до «@»; nil — не задано.
+    public var nickname: String?
 
     public init(kind: String) { self.kind = kind }
     public init(restTone: String) { self.kind = "training"; self.restTone = restTone }
@@ -26,7 +29,7 @@ public struct SettingsPayload: Codable, Equatable, @unchecked Sendable {
     public init(drafts: [PlanItem]) { self.kind = "planDrafts"; self.drafts = drafts }
     public init(onboardingDone: Bool) { self.kind = "app"; self.onboardingDone = onboardingDone }
 
-    private enum CodingKeys: String, CodingKey { case kind, drafts, restSound, restTone, planTone, restVolume, planVolume, onboardingDone }
+    private enum CodingKeys: String, CodingKey { case kind, drafts, restSound, restTone, planTone, restVolume, planVolume, onboardingDone, nickname }
     /// A record without `kind` (written before kinds existed) still opens; its owner reads it by record id.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -38,5 +41,6 @@ public struct SettingsPayload: Codable, Equatable, @unchecked Sendable {
         restVolume = try c.decodeIfPresent(Int.self, forKey: .restVolume)
         planVolume = try c.decodeIfPresent(Int.self, forKey: .planVolume)
         onboardingDone = try c.decodeIfPresent(Bool.self, forKey: .onboardingDone)
+        nickname = try c.decodeIfPresent(String.self, forKey: .nickname)
     }
 }

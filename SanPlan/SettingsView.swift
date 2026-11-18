@@ -17,7 +17,9 @@ public struct SettingsView: View {
 
     @ObservedObject private var wardrobe = MascotWardrobe.shared
     @ObservedObject private var deleted = RecentlyDeleted.shared
+    @ObservedObject private var names = ProfileNameStore.shared
     @AppStorage("pet.visible") private var petVisible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var path: [ProfileRoute] = []
 
     private let onOpenProgress: (() -> Void)?
@@ -84,20 +86,41 @@ public struct SettingsView: View {
 
     // MARK: Top
 
+    /// The nickname from «Аккаунт → Имя», or the part of the email before «@».
     private var displayName: String {
         if ScreenshotRoute.demoData { return "Алекс" }
-        let email = accountEmailText
-        guard let at = email.firstIndex(of: "@") else { return email }
-        let name = String(email[..<at])
-        return name.isEmpty ? email : name.prefix(1).uppercased() + name.dropFirst()
+        return ProfileNickname.display(nickname: names.nickname, email: accountEmailText)
+    }
+
+    /// «Показывать героя» on: the mascot stands as before. Off: it sits resting, faded, with a caption.
+    private var arcMascot: some View {
+        VStack(spacing: 4) {
+            if petVisible {
+                MascotSkinImage(skin: wardrobe.skinID, pose: .shrug, height: 112)
+                    .shadow(color: .black.opacity(0.4), radius: 4, y: 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
+            } else {
+                MascotSkinImage(skin: wardrobe.skinID, pose: .rest, height: 90)
+                    .saturation(0.3)
+                    .opacity(0.75)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
+                Text("Отдыхает")
+                    .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                    .opacity(0.85)
+                    .transition(.opacity)
+            }
+        }
+        .frame(minHeight: 112)
+        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.8), value: petVisible)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(petVisible ? "Герой" : "Герой отдыхает")
     }
 
     private var arcCard: some View {
         let arc = wardrobe.currentArc
         let weeks = wardrobe.weeksInCurrentArc
         return HStack(alignment: .center, spacing: 14) {
-            MascotSkinImage(skin: wardrobe.skinID, pose: .shrug, height: 112)
-                .shadow(color: .black.opacity(0.4), radius: 4, y: 4)
+            arcMascot
             VStack(alignment: .leading, spacing: 8) {
                 Text("АРКА · \(arc.title.uppercased())")
                     .font(DS.Fonts.text(13, .heavy, relativeTo: .caption))

@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import SanPlan
 
 final class FinanceVaultTests: XCTestCase {
@@ -112,5 +113,104 @@ final class FinanceVaultTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error type: \(error)")
         }
+    }
+
+    // MARK: - Backup under the account key
+
+    private func sampleState() -> FinanceState {
+        var state = emptyFinance()
+        state.records.append(FinanceRecord(
+            id: "test-record-marker",
+            kind: "expense",
+            title: "Test lunch",
+            amountMinor: 250000,
+            date: "2026-05-01",
+            category: "Кафе и рестораны"
+        ))
+        return state
+    }
+
+    private func json(_ backup: FinanceAccountBackup) throws -> String {
+        String(decoding: try JSONEncoder().encode(backup), as: UTF8.self)
+    }
+
+    func testAccountBackupRoundTrip() throws {
+        let key = SymmetricKey(size: .bits256)
+        let state = sampleState()
+
+        let backup = try FinanceVault.sealAccountBackup(state: state, accountKey: key)
+        XCTAssertEqual(backup.format, "asan-finance-backup")
+        XCTAssertEqual(backup.version, 2)
+        XCTAssertEqual(backup.kind, "account-key")
+        XCTAssertEqual(backup.kdf, "HKDF-SHA256")
+
+        let text = try json(backup)
+        XCTAssertFalse(text.contains("test-record-marker"), "The file must not carry plaintext records")
+        XCTAssertFalse(text.contains("Test lunch"), "The file must not carry plaintext records")
+        XCTAssertEqual(try FinanceVault.backupKind(of: text), .accountKey)
+
+        let read = try FinanceVault.readAccountBackup(from: text)
+        let opened = try FinanceVault.openAccountBackup(read, accountKey: key)
+        XCTAssertEqual(opened, state)
+    }
+
+    func testAccountBackupUsesFreshSaltAndNonce() throws {
+        let key = SymmetricKey(size: .bits256)
+        let first = try FinanceVault.sealAccountBackup(state: sampleState(), accountKey: key)
+        let second = try FinanceVault.sealAccountBackup(state: sampleState(), accountKey: key)
+        XCTAssertNotEqual(first.salt, second.salt)
+        XCTAssertNotEqual(first.box, second.box)
+    }
+
+    func testAccountBackupWithOtherAccountKeyFails() throws {
+        let backup = try FinanceVault.sealAccountBackup(state: sampleState(), accountKey: SymmetricKey(size: .bits256))
+        do {
+            _ = try FinanceVault.openAccountBackup(backup, accountKey: SymmetricKey(size: .bits256))
+            XCTFail("Another account's key must not open the copy")
+        } catch let err as FinanceVaultError {
+            XCTAssertEqual(err, .decryptionFailed(FinanceVault.otherAccountMessage))
+            XCTAssertTrue(FinanceVault.otherAccountMessage.hasPrefix("Эту копию сделал другой аккаунт"))
+        }
+    }
+
+    func testAccountBackupTamperedBoxFails() throws {
+        let key = SymmetricKey(size: .bits256)
+        var backup = try FinanceVault.sealAccountBackup(state: sampleState(), accountKey: key)
+        var box = try XCTUnwrap(Data(base64Encoded: backup.box))
+        box[box.count - 1] ^= 0xFF
+        backup.box = box.base64EncodedString()
+        XCTAssertThrowsError(try FinanceVault.openAccountBackup(backup, accountKey: key))
+    }
+
+    func testOldPasswordFixtureIsDetectedAndStillOpens() async throws {
+        struct FixtureData: Decodable {
+            let passphrase: String
+            let envelope: FinanceVaultEnvelope
+        }
+        let fixture = try JSONDecoder().decode(FixtureData.self, from: Data(fixtureJson.utf8))
+        let text = String(decoding: try JSONEncoder().encode(fixture.envelope), as: UTF8.self)
+
+        XCTAssertEqual(try FinanceVault.backupKind(of: text), .password)
+        let envelope = try FinanceVault.readVaultEnvelope(from: text)
+        let opened = try await FinanceVault.openFinance(envelope: envelope, password: fixture.passphrase)
+        XCTAssertEqual(opened.records, [])
+    }
+
+    func testFreshPasswordFileIsDetectedAsPassword() async throws {
+        let envelope = try await FinanceVault.sealFinance(state: emptyFinance(), password: "correct-passphrase-8")
+        let text = String(decoding: try JSONEncoder().encode(envelope), as: UTF8.self)
+        XCTAssertEqual(try FinanceVault.backupKind(of: text), .password)
+    }
+
+    func testBackupKindRejectsUnknownFiles() {
+        XCTAssertThrowsError(try FinanceVault.backupKind(of: "{\"format\":\"something-else\"}"))
+        XCTAssertThrowsError(try FinanceVault.backupKind(of: "{\"format\":\"asan-finance-backup\",\"kind\":\"password\"}"))
+        XCTAssertThrowsError(try FinanceVault.backupKind(of: "not json"))
+    }
+
+    func testAccountBackupRejectsOtherVersion() throws {
+        var backup = try FinanceVault.sealAccountBackup(state: sampleState(), accountKey: SymmetricKey(size: .bits256))
+        backup.version = 3
+        XCTAssertThrowsError(try FinanceVault.readAccountBackup(from: try json(backup)))
     }
 }

@@ -129,6 +129,7 @@ public final class AppModel: ObservableObject {
                 self.plans.attachDrafts(collection: self.settingsVault, account: account)
                 self.appSettings.setCollection(self.settingsVault)
                 AlertSoundSettings.shared.attach(collection: self.settingsVault)
+                ProfileNameStore.shared.attach(collection: self.settingsVault)
                 self.finance.attach(collection: self.financeVault)
                 self.workouts.attachVault(self.trainingVault, account: account)
             }
@@ -218,6 +219,7 @@ public final class AppModel: ObservableObject {
         plans.detachDrafts()
         appSettings.setCollection(nil)
         AlertSoundSettings.shared.detach()
+        ProfileNameStore.shared.detach()
         settingsVault.detach()
     }
 

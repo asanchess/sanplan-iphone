@@ -268,16 +268,37 @@ final class RecentlyDeleted: ObservableObject {
         sources.values.first { source in source.deletedItems.contains { $0.id == item.id } }?.restoreDeleted(id: item.id)
     }
 
+    /// «Удалить навсегда»: the owning store erases the item the same way the 30-day expiry does
+    /// (goal and habit trash on this phone; a note keeps only its empty tombstone, so other devices drop it too).
     func purge(_ item: DeletedItem) {
         objectWillChange.send()
         sources.values.first { source in source.deletedItems.contains { $0.id == item.id } }?.purgeDeleted(id: item.id)
     }
+
+    /// «Очистить всё»: every registered store erases everything it keeps as deleted.
+    func purgeAll() {
+        objectWillChange.send()
+        for source in sources.values {
+            for item in source.deletedItems { source.purgeDeleted(id: item.id) }
+        }
+    }
 }
 
 struct RecentlyDeletedScreen: View {
+    /// What «Удалить навсегда» is about to erase: one item or everything.
+    private enum PurgeRequest {
+        case one(DeletedItem)
+        case all
+    }
+
     @ObservedObject var store = RecentlyDeleted.shared
-    @State private var purgeTarget: DeletedItem?
+    @State private var purgeRequest: PurgeRequest?
     @Environment(\.dismiss) private var dismiss
+
+    private var purgeTitle: String {
+        if case .all? = purgeRequest { return "Очистить всё?" }
+        return "Удалить навсегда?"
+    }
 
     var body: some View {
         ScrollView {
@@ -287,6 +308,20 @@ struct RecentlyDeletedScreen: View {
                 Text("Здесь лежит удалённое за последние \(RecentlyDeleted.keepDays) дней. Потом оно стирается само.")
                     .font(DS.Fonts.text(15, relativeTo: .subheadline))
                     .foregroundColor(DS.Colors.textSecondary)
+                if !store.items.isEmpty {
+                    HStack {
+                        Text("Удержите запись, чтобы удалить её навсегда.")
+                            .font(DS.Fonts.text(13, relativeTo: .caption))
+                            .foregroundColor(DS.Colors.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("Очистить всё") { purgeRequest = .all }
+                            .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                            .foregroundColor(DS.Colors.destructive)
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("recently-deleted-clear")
+                    }
+                }
                 if store.items.isEmpty {
                     EmptyState(title: "Пусто", message: "Удалённые записи появятся здесь", icon: "trash")
                 }
@@ -312,9 +347,9 @@ struct RecentlyDeletedScreen: View {
                     .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 18))
                     .contextMenu {
                         Button("Вернуть", systemImage: "arrow.uturn.backward") { store.restore(item) }
-                        Button("Удалить навсегда", systemImage: "trash", role: .destructive) { purgeTarget = item }
+                        Button("Удалить навсегда", systemImage: "trash", role: .destructive) { purgeRequest = .one(item) }
                     }
-                    .accessibilityAction(named: "Удалить навсегда") { purgeTarget = item }
+                    .accessibilityAction(named: "Удалить навсегда") { purgeRequest = .one(item) }
                 }
             }
             .padding(.horizontal, DS.Metrics.screenGutter)
@@ -323,11 +358,18 @@ struct RecentlyDeletedScreen: View {
         }
         .background(DS.Colors.canvas.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .confirmationDialog("Удалить навсегда?", isPresented: Binding(get: { purgeTarget != nil }, set: { if !$0 { purgeTarget = nil } }), titleVisibility: .visible) {
-            Button("Удалить навсегда", role: .destructive) { if let item = purgeTarget { store.purge(item) } }
+        // `presenting:` hands the request to the buttons even after the binding has been reset by the dismissal.
+        .alert(purgeTitle, isPresented: Binding(get: { purgeRequest != nil }, set: { if !$0 { purgeRequest = nil } }),
+               presenting: purgeRequest) { request in
+            Button("Удалить навсегда", role: .destructive) {
+                switch request {
+                case .one(let item): store.purge(item)
+                case .all: store.purgeAll()
+                }
+            }
             Button("Отмена", role: .cancel) {}
-        } message: {
-            Text("Это нельзя вернуть.")
+        } message: { _ in
+            Text("Восстановить будет нельзя.")
         }
     }
 }

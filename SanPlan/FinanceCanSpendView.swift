@@ -10,6 +10,8 @@ struct CanSpendTodayCard: View {
     var month: (spent: Int64, limit: Int64)? = nil
     /// «Чистыми X ₸» with its note; nil hides the breakdown link.
     var clean: (amount: String, note: String, warns: Bool)? = nil
+    /// «Чистыми за ноябрь»: the month name («ноябрь») and the net in minor units; nil hides the line.
+    var net: (month: String, minor: Int64)? = nil
     var onBreakdown: (() -> Void)? = nil
     var onSetLimits: (() -> Void)? = nil
     @State private var showMonth = false
@@ -18,6 +20,9 @@ struct CanSpendTodayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             mainButton
+            if let net {
+                netLine(net)
+            }
             if showMonth || result == nil {
                 details
                     .transition(.opacity)
@@ -87,7 +92,8 @@ struct CanSpendTodayCard: View {
             Button(action: onBreakdown) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Чистыми \(clean.amount)")
+                        // The net itself is the big line above; here only the way into its breakdown.
+                        Text(net == nil ? "Чистыми \(clean.amount)" : "Из чего складываются чистыми")
                             .font(DS.Fonts.text(16, .bold))
                             .foregroundColor(DS.Colors.textPrimary)
                         Image(systemName: "chevron.right")
@@ -110,6 +116,33 @@ struct CanSpendTodayCard: View {
         if result == nil, let onSetLimits {
             MoneyTextButton("Задать лимиты", action: onSetLimits)
         }
+    }
+
+    /// «ЧИСТЫМИ ЗА НОЯБРЬ» and «+197 972 ₸» in large heavy type: the accent while it holds, red below zero.
+    private func netLine(_ net: (month: String, minor: Int64)) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("ЧИСТЫМИ ЗА \(net.month.uppercased())")
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .tracking(0.8)
+                .foregroundColor(DS.Colors.textSecondary)
+            Text(FinanceText.signed(net.minor))
+                .font(DS.Fonts.text(32, .heavy, relativeTo: .title))
+                .monospacedDigit()
+                .foregroundColor(net.minor < 0 ? DS.Colors.destructive : accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Чистыми за \(net.month): \(Self.spoken(net.minor))")
+        .accessibilityIdentifier("money-net-month")
+    }
+
+    /// «плюс 197 972 тенге», «минус 3 400 тенге», «0 тенге».
+    private static func spoken(_ minor: Int64) -> String {
+        let sign = minor > 0 ? "плюс " : (minor < 0 ? "минус " : "")
+        return sign + FinanceText.money(abs(minor)).replacingOccurrences(of: "₸", with: "тенге")
     }
 
     private func bar(_ fraction: Double) -> some View {

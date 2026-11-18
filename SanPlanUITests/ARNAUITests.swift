@@ -548,10 +548,16 @@ final class ARNAUITests: XCTestCase {
         if segment.waitForExistence(timeout: 3) { segment.tap() }
     }
 
-    /// Round 6: the feed is the «Операции» tab itself, always open; waits for its search field.
+    /// «История операций» starts folded under the statements: opens it (today's day is open) and waits for its search field.
     @MainActor
     private func expandOperationsFeed(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(app.textFields["operations-search"].waitForExistence(timeout: 5),
+        let search = app.textFields["operations-search"]
+        if !search.exists {
+            let header = app.buttons["money-ops-history"]
+            scrollTo(header, file: file, line: line)
+            header.tap()
+        }
+        XCTAssertTrue(search.waitForExistence(timeout: 5),
                       "Operations feed is not shown", file: file, line: line)
     }
 

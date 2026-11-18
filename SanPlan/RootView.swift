@@ -338,7 +338,7 @@ public struct RootView: View {
             )
             .keyboardDismissBar()
         case .money:
-            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
+            FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, vault: model.vault, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
                 .keyboardDismissBar()
         case .workout:
             WorkoutTab(store: model.workouts, showSettings: $showSettingsSheet, onCapture: openCapture)

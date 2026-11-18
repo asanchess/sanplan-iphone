@@ -33,7 +33,8 @@ public enum DS {
         public static let plans = hex(0x7FB2FF)
         public static let notes = hex(0xF2C879)
         public static let money = hex(0x6FD6B0)
-        public static let workout = hex(0xFF8A7A)
+        /// Softened coral (owner 18.11): dark ink text stays readable on it.
+        public static let workout = hex(0xEE9A8C)
 
         public static let accentGradient = LinearGradient(
             colors: [accentGradientStart, accentGradientEnd],

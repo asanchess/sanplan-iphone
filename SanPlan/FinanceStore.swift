@@ -154,7 +154,11 @@ public final class FinanceStore: ObservableObject {
             guard self.collection === collection, storage == .migrating else { return }
             guard synced else {
                 storage = .local
-                notice = "Финансы пока не выгружены в облако: нет связи. Данные сохранены на телефоне, выгрузка повторится позже."
+                if case .offline = collection.syncState {
+                    notice = "Финансы пока не выгружены в облако: нет связи. Данные сохранены на телефоне, выгрузка повторится позже."
+                } else {
+                    notice = "Выгрузка финансов в облако не завершилась (осталось записей: \(collection.pendingCount)). Данные на телефоне, выгрузка продолжится при следующем открытии."
+                }
                 return
             }
             if state == local { break }
@@ -209,12 +213,14 @@ public final class FinanceStore: ObservableObject {
     /// Writes the difference between the collection and `next`.
     private func writeToCollection(_ next: FinanceState, _ collection: VaultCollection<FinancePayload>) throws {
         let plan = FinanceCloud.plan(existing: FinanceCloud.existing(collection.items), state: next)
-        for entry in plan.puts {
-            guard collection.put(entry.id, entry.data) != nil else {
-                throw FinanceError.invalidState("Не удалось сохранить в облачное хранилище.")
+        try collection.batch {
+            for entry in plan.puts {
+                guard collection.put(entry.id, entry.data) != nil else {
+                    throw FinanceError.invalidState("Не удалось сохранить в облачное хранилище.")
+                }
             }
+            for id in plan.removes { _ = collection.remove(id) }
         }
-        for id in plan.removes { _ = collection.remove(id) }
     }
 
     // MARK: - State Management

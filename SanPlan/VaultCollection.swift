@@ -74,6 +74,10 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
     /// Highest server `seq` received; live sync asks only for records after it (nil/0: everything).
     public private(set) var syncCursor = 0
     private var waiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+    /// Bumped each time the server answers a record: a waiter keeps waiting while an upload is still moving.
+    private var progressMark = 0
+    /// Inside `batch`: writes skip the disk and the whole cache is saved once at the end.
+    private var batchDepth = 0
     /// Callers of `sync()` that arrived while a pass was running; they resume when that pass (re-run for them) ends.
     private var passWaiters: [CheckedContinuation<Void, Never>] = []
     private let fileManager: FileManager
@@ -184,17 +188,31 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
 
     /// Migration import: idempotent by id; a record already present with the same data is skipped.
     public func importMany(_ entries: [(id: String, data: Payload, updatedAt: Int64)]) -> (written: Int, skipped: Int) {
-        var written = 0, skipped = 0
-        for entry in entries {
-            if let old = all[entry.id], !old.deleted, old.data == entry.data { skipped += 1; continue }
-            if put(entry.id, entry.data, updatedAt: entry.updatedAt) != nil { written += 1 }
+        batch { () -> (written: Int, skipped: Int) in
+            var written = 0, skipped = 0
+            for entry in entries {
+                if let old = all[entry.id], !old.deleted, old.data == entry.data { skipped += 1; continue }
+                if put(entry.id, entry.data, updatedAt: entry.updatedAt) != nil { written += 1 }
+            }
+            return (written, skipped)
         }
-        return (written, skipped)
+    }
+
+    /// Many edits at once: the encrypted cache is written to disk once at the end instead of after every record
+    /// (thousands of statement lines rewrote the whole file thousands of times).
+    public func batch<T>(_ body: () throws -> T) rethrows -> T {
+        batchDepth += 1
+        defer {
+            batchDepth -= 1
+            if batchDepth == 0 { saveCache() }
+        }
+        return try body()
     }
 
     /// True once every local edit is on the server; false if the account changes first, the server fails or answers
-    /// with an error, or nothing is confirmed within `timeout`. It always returns: a migration waiting on it must never
-    /// hang, because writes are held back while it waits (the money «Идёт перенос» freeze).
+    /// with an error, or the upload makes no progress for `timeout`. A long first upload (thousands of records) keeps
+    /// it waiting as long as the server keeps confirming records. It always returns: a migration waiting on it must
+    /// never hang, because writes are held back while it waits (the money «Идёт перенос» freeze).
     /// Local copies of migrated data may be deleted only after this returns true.
     public func whenSynced(timeout: Duration = .seconds(20)) async -> Bool {
         guard key != nil else { return false }
@@ -205,9 +223,15 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         return await withCheckedContinuation { continuation in
             waiters.append((id, continuation))
             Task { [weak self] in
-                try? await Task.sleep(for: timeout)
-                guard let self, self.generation == started else { return }
-                self.answerWaiter(id, false)
+                var seen = self?.progressMark ?? 0
+                while true {
+                    try? await Task.sleep(for: timeout)
+                    guard let self, self.generation == started,
+                          self.waiters.contains(where: { $0.id == id }) else { return }
+                    if self.progressMark != seen { seen = self.progressMark; continue }
+                    self.answerWaiter(id, false)
+                    return
+                }
             }
         }
     }
@@ -227,7 +251,7 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         guard let key, let sealed = try? seal(item, key: key) else { return false }
         all[item.id] = item
         cache[item.id] = CacheEntry(revision: cache[item.id]?.revision ?? 0, c: sealed, dirty: true)
-        saveCache()
+        if batchDepth == 0 { saveCache() }
         scheduleSync(after: syncDelay)
         return true
     }
@@ -287,10 +311,15 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
         }
     }
 
+    /// Uploads dirty records one by one. The cache file is saved every `pushSaveEvery` answers and at the end (also
+    /// when a request fails), not after each record: rewriting the whole file per record made big uploads crawl.
     private func push(key: SymmetricKey, transport: any VaultTransport, generation started: Int) async throws {
+        var unsaved = 0
+        defer { if unsaved > 0, generation == started { saveCache() } }
         for (id, entry) in cache where entry.dirty {
             let result = try await transport.put(collection, record: VaultRemoteRecord(id: id, revision: entry.revision, c: entry.c))
             guard generation == started else { return }
+            progressMark &+= 1
             guard var latest = cache[id] else { continue }
             switch result {
             case .saved(let revision):
@@ -300,9 +329,12 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
             case .conflict(let current):
                 resolveConflict(id: id, current: current, key: key)
             }
-            saveCache()
+            unsaved += 1
+            if unsaved >= Self.pushSaveEvery { saveCache(); unsaved = 0 }
         }
     }
+
+    static var pushSaveEvery: Int { 50 }
 
     private func resolveConflict(id: String, current: VaultRemoteRecord?, key: SymmetricKey) {
         let local = all[id]

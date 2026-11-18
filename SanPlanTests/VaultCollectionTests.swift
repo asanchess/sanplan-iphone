@@ -124,6 +124,23 @@ final class VaultCollectionTests: XCTestCase {
         XCTAssertEqual(a.pendingCount, 0)
     }
 
+    /// A big first upload takes longer than the wait's timeout; it must still count as synced while records keep
+    /// arriving on the server (money migrations used to give up after 20 s and say «нет связи»).
+    func testWhenSyncedKeepsWaitingWhileUploadProgresses() async throws {
+        let key = SymmetricKey(size: .bits256), server = MemoryVaultTransport()
+        let slow = SlowVaultTransport(inner: server, delay: .milliseconds(80))
+        let a = store()
+        a.attach(account: "acc1", key: key, transport: slow)
+        let local: [(id: String, data: Lift, updatedAt: Int64)] = (1...6).map {
+            (id: "t-slow-\($0)", data: Lift(title: "Подход \($0)", weight: 50 + $0, reps: 5), updatedAt: Int64($0))
+        }
+        XCTAssertEqual(a.importMany(local).written, 6)
+        let synced = await a.whenSynced(timeout: .milliseconds(200))
+        XCTAssertTrue(synced, "6 × 80 ms upload outlasts the 200 ms timeout but keeps progressing")
+        XCTAssertEqual(a.pendingCount, 0)
+        XCTAssertEqual(server.records.count, 6)
+    }
+
     func testRejectsIdsTheServerWouldRefuse() {
         XCTAssertFalse(VaultCollection<Lift>.isValidID("t1"))
         XCTAssertFalse(VaultCollection<Lift>.isValidID("тренировка-01"))
@@ -145,5 +162,20 @@ final class VaultCollectionTests: XCTestCase {
         relaunched.attach(account: "acc1", key: k1, transport: nil)
         XCTAssertEqual(relaunched.item("habit-0001")?.data?.title, "Вода")
         XCTAssertEqual(relaunched.pendingCount, 1, "unsent edit is still queued after relaunch")
+    }
+}
+
+/// Answers every upload after a pause, like a slow mobile connection.
+private final class SlowVaultTransport: VaultTransport, @unchecked Sendable {
+    let inner: MemoryVaultTransport
+    let delay: Duration
+    init(inner: MemoryVaultTransport, delay: Duration) { self.inner = inner; self.delay = delay }
+    func fetchAccountKey() async throws -> VaultAccountKey { try await inner.fetchAccountKey() }
+    func adoptKey(_ key: Data) async throws -> VaultAdoptResult { try await inner.adoptKey(key) }
+    func stamps() async throws -> [String: Int] { try await inner.stamps() }
+    func list(_ collection: String, since: Int?) async throws -> VaultListing { try await inner.list(collection, since: since) }
+    func put(_ collection: String, record: VaultRemoteRecord) async throws -> VaultPutResult {
+        try await Task.sleep(for: delay)
+        return try await inner.put(collection, record: record)
     }
 }
