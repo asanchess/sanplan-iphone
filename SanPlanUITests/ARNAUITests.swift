@@ -354,6 +354,10 @@ final class ARNAUITests: XCTestCase {
         scrollTo(close)
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
         close.tap()
+        // A tap that lands while the scroll still glides only stops the scroll; tap again once it has settled.
+        if !waitUntil(2, { !self.text("Электронная почта").exists }), close.exists, close.isHittable {
+            close.tap()
+        }
         XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
     }
 

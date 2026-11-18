@@ -908,6 +908,7 @@ struct WorkoutStatTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(RoundedRectangle(cornerRadius: DS.Metrics.cardRadius, style: .continuous).fill(DS.Colors.surface))
         .accessibilityElement(children: .combine)
     }

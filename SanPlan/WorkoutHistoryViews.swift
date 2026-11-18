@@ -170,8 +170,9 @@ struct WorkoutHistoryView: View {
     }
 
     private func statTiles(_ current: PeriodSummary, previous: PeriodSummary, against: String) -> some View {
-        let columns = [GridItem(.flexible(), spacing: DS.Metrics.spacing12), GridItem(.flexible(), spacing: DS.Metrics.spacing12)]
-        return LazyVGrid(columns: columns, spacing: DS.Metrics.spacing12) {
+        // Grid, not LazyVGrid: a row takes its taller tile's height, so a tile without a note keeps the same box.
+        return Grid(horizontalSpacing: DS.Metrics.spacing12, verticalSpacing: DS.Metrics.spacing12) {
+            GridRow {
             WorkoutStatTile(
                 title: "Тренировки",
                 value: "\(current.workouts)",
@@ -184,6 +185,8 @@ struct WorkoutHistoryView: View {
                 detail: delta(Double(current.totalSeconds - previous.totalSeconds), against: against) { WorkoutFormat.duration(Int($0)) },
                 detailColor: deltaColor(current.totalSeconds - previous.totalSeconds)
             )
+            }
+            GridRow {
             WorkoutStatTile(
                 title: "В среднем",
                 value: current.workouts == 0 ? "—" : WorkoutFormat.duration(current.averageSeconds),
@@ -196,6 +199,7 @@ struct WorkoutHistoryView: View {
                 detail: delta(current.tonnageKg - previous.tonnageKg, against: against) { WorkoutFormat.tonnage($0) },
                 detailColor: deltaColor(Int(current.tonnageKg - previous.tonnageKg))
             )
+            }
         }
     }
 

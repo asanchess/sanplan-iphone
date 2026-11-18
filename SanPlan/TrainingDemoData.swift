@@ -48,7 +48,8 @@ enum TrainingDemoData {
     static func history(now: Date) -> [WorkoutRecord] {
         let day: Int64 = 86_400_000
         let nowMs = Int64(now.timeIntervalSince1970 * 1000)
-        let offsets = [2, 4, 7, 9, 11, 14, 16, 19, 21, 23, 26, 28, 30, 33, 35, 38, 41]
+        // Day 0 keeps the current week (and month) non-empty whatever weekday the screenshot runs on.
+        let offsets = [0, 2, 4, 7, 9, 11, 14, 16, 19, 21, 23, 26, 28, 30, 33, 35, 38, 41]
         return offsets.enumerated().map { number, offset in
             let start = nowMs - Int64(offset) * day - 2 * 3_600_000
             let climb = Double(6 - offset / 7) * 1.25
