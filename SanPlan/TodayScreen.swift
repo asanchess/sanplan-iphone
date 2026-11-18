@@ -88,11 +88,29 @@ public struct TodayScreen: View {
             review.setCollection(reviewsVault)
             finance.refreshSummary(today: PlanDomain.today())
             if ScreenshotRoute.is("summary") { openSummary(.day) }
-            await plans.reload()
+            if ScreenshotRoute.demoData {
+                seedScreenshotDemo()
+            } else {
+                await plans.reload()
+            }
         }
         // Reviews follow the signed-in account: money switches owner on sign-in and sign-out.
         .onChange(of: finance.state) { _, _ in syncReviewOwner() }
         .onChange(of: reviewsVault?.isAvailable) { _, _ in review.setCollection(reviewsVault) }
+    }
+
+    /// Debug screenshots: «Сегодня» opens first, before Plans and Money seed themselves, so it puts the same
+    /// made-up plans and money in memory. Nothing is written: plans skip disk/alarm sync, money has no owner.
+    private func seedScreenshotDemo() {
+        #if DEBUG
+        let today = PlanDomain.today(timeZone: plans.timeZone)
+        if plans.plans.isEmpty {
+            plans.plans = PlansDemo.plans(today: today, timeZone: plans.timeZone)
+            plans.selectedDate = today
+        }
+        let moneyDay = FinanceText.today()
+        finance.showScreenshotDemo(MoneyDemo.state(today: moneyDay), today: moneyDay)
+        #endif
     }
 
     private func openSummary(_ mode: SummaryScreen.Mode) {

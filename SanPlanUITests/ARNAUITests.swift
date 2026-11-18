@@ -306,10 +306,13 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Finish confirmation did not appear")
         // iOS 26 shows the dialog as a popover without the cancel button; a tap outside cancels it.
         let keepGoing = exactButton("Продолжить тренировку")
+        let dismissRegion = app.otherElements["PopoverDismissRegion"]
         if keepGoing.exists {
             keepGoing.tap()
+        } else if dismissRegion.exists {
+            dismissRegion.tap()
         } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.5)).tap()
         }
         XCTAssertTrue(waitUntil(5) { !self.exactButton("Завершить и сохранить").exists }, "The finish dialog did not close")
         XCTAssertTrue(text("Отдых").exists, "Cancelling the dialog changed the workout")
@@ -347,7 +350,8 @@ final class ARNAUITests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { !restBetweenExercises.exists }, "Workout settings did not close")
 
         let close = exactButton("Закрыть профиль")
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        // The round-6 profile header scrolls with the list, so bring it back before closing.
+        scrollTo(close)
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
         close.tap()
         XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
