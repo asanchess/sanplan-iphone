@@ -320,7 +320,7 @@ public struct AlarmsScreen: View {
                 }
                 Button("Оставить", role: .cancel) {}
             } message: {
-                Text("Сигналы ARNA исчезнут с этого телефона. Расписание останется и вернётся при следующей синхронизации.")
+                Text("Сигналы A-san исчезнут с этого телефона. Расписание останется и вернётся при следующей синхронизации.")
             }
         }
         .environment(\.sectionAccent, DS.Colors.plans)

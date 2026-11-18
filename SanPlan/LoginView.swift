@@ -85,10 +85,10 @@ public struct LoginView: View {
                 Spacer()
 
                 VStack(spacing: DS.Metrics.spacing16) {
-                    Text("ARNA")
+                    Text("A-san")
                         .font(.system(size: 48, weight: .light, design: .default))
                         .foregroundColor(DS.Colors.textPrimary)
-                        .tracking(4)
+                        .tracking(2)
                 }
 
                 Spacer()

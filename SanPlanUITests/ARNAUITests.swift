@@ -29,7 +29,7 @@ final class ARNAUITests: XCTestCase {
         // AuthService.loadStatus asks the server first; with no session cookie it ends signed out.
         let google = button("Войти через Google")
         XCTAssertTrue(google.waitForExistence(timeout: 30), "Login screen did not appear")
-        XCTAssertTrue(text("ARNA").exists, "ARNA wordmark missing on the login screen")
+        XCTAssertTrue(text("A-san").exists, "A-san wordmark missing on the login screen")
         XCTAssertFalse(app.tabBars.firstMatch.exists, "Tabs must not show before sign-in")
 
         let owner = exactButton("Вход для владельца")
