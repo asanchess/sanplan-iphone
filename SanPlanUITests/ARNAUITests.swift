@@ -372,7 +372,14 @@ final class ARNAUITests: XCTestCase {
         let close = exactButton("Закрыть профиль")
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
         close.tap()
-        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close from the header")
+        let closed = waitUntil(5) { !self.text("Электронная почта").exists }
+        if !closed {
+            // Diagnostics: can the sheet be dismissed at all by a swipe?
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+            print("ARNA-DIAG swipe closed: \(waitUntil(5) { !self.text("Электронная почта").exists })")
+        }
+        XCTAssertTrue(closed, "Profile sheet did not close from the header")
     }
 
     // MARK: - 10. Notes and the shared «+»

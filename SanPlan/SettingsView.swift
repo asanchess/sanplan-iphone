@@ -35,6 +35,9 @@ public struct SettingsView: View {
     }
 
     private func close() {
+        #if DEBUG
+        NSLog("ARNA-CLOSE profile close tapped, owner flag: %@", onClose == nil ? "no" : "yes")
+        #endif
         if let onClose { onClose() } else { dismiss() }
     }
 
