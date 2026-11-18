@@ -92,7 +92,7 @@ public struct RootView: View {
             SettingsView(onOpenProgress: {
                 showSettingsSheet = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showProgress = true }
-            }, plans: model.plans)
+            }, onClose: { showSettingsSheet = false }, plans: model.plans)
                 .environmentObject(onboarding)
         }
         .alert("Будильник", isPresented: Binding(

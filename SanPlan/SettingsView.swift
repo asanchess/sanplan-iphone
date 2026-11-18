@@ -21,20 +21,28 @@ public struct SettingsView: View {
     @State private var path: [ProfileRoute] = []
 
     private let onOpenProgress: (() -> Void)?
+    private let onClose: (() -> Void)?
     private let plans: PlanStore?
 
     /// - onOpenProgress: «Открыть прогресс» in the arc card; hidden when nil. RootView closes this sheet in it.
     /// - plans: lets the profile count arc weeks itself (with the workouts from the environment).
-    public init(onOpenProgress: (() -> Void)? = nil, plans: PlanStore? = nil) {
+    /// - onClose: closes the sheet from its owner. The environment `dismiss` read here did not close it after
+    ///   a page was pushed and popped in the NavigationStack (UI test 09), so the owner's flag is used when given.
+    public init(onOpenProgress: (() -> Void)? = nil, onClose: (() -> Void)? = nil, plans: PlanStore? = nil) {
         self.onOpenProgress = onOpenProgress
+        self.onClose = onClose
         self.plans = plans
+    }
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     public var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    ProfileHeader(kicker: "Профиль и настройки", title: "Профиль", backLabel: "Закрыть профиль") { dismiss() }
+                    ProfileHeader(kicker: "Профиль и настройки", title: "Профиль", backLabel: "Закрыть профиль") { close() }
                     if let error = authService.errorMessage {
                         ErrorBanner(message: error) { authService.errorMessage = nil }
                     }
@@ -48,7 +56,7 @@ public struct SettingsView: View {
                         }
                         .accessibilityIdentifier("recently-deleted")
                     }
-                    AccountDataSection(email: accountEmailText, onDeleted: { dismiss() }, onSignedOut: { dismiss() })
+                    AccountDataSection(email: accountEmailText, onDeleted: { close() }, onSignedOut: { close() })
                 }
                 .padding(.horizontal, DS.Metrics.screenGutter)
                 .padding(.top, 18)
@@ -61,7 +69,7 @@ public struct SettingsView: View {
                 case .mascot:
                     ProfileMascotScreen()
                 case .settings(let section):
-                    ProfileSettingsScreen(section: section, closeProfile: { dismiss() })
+                    ProfileSettingsScreen(section: section, closeProfile: { close() })
                 case .recentlyDeleted:
                     RecentlyDeletedScreen()
                 }
