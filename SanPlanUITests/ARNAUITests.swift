@@ -353,12 +353,10 @@ final class ARNAUITests: XCTestCase {
         // The round-6 profile header scrolls with the list, so bring it back before closing.
         scrollTo(close)
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
-        print("ARNA-DIAG before close frame=(close.frame)
-(app.debugDescription)")
+        print("ARNA-DIAG before close frame=\(close.frame)\n\(app.debugDescription)")
         close.tap()
         let closed = waitUntil(5) { !self.text("Электронная почта").exists }
-        if !closed { print("ARNA-DIAG after close
-(app.debugDescription)") }
+        if !closed { print("ARNA-DIAG after close\n\(app.debugDescription)") }
         XCTAssertTrue(closed, "Profile sheet did not close")
     }
 
