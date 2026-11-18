@@ -237,9 +237,13 @@ final class ARNAUITests: XCTestCase {
         }
         XCTAssertTrue(startRest.waitForExistence(timeout: 5), "«Подход сделан, отдых» missing during a working set")
         startRest.tap()
-        dismissSystemAlertIfPresent(timeout: 5) // AlarmKit asks on the first rest.
-
-        XCTAssertTrue(text("Отдых").waitForExistence(timeout: 5), "Rest phase did not start")
+        // AlarmKit asks on the first rest, sometimes several seconds late on CI; answer it whenever it comes.
+        let restLabel = text("Отдых")
+        let restStarted = waitUntil(20) {
+            self.dismissSystemAlertIfPresent(timeout: 0.5)
+            return restLabel.exists
+        }
+        XCTAssertTrue(restStarted, "Rest phase did not start")
         XCTAssertTrue(button("Пропустить отдых").exists, "Skip rest control missing")
         XCTAssertTrue(exactButton("Пауза").exists, "Pause control missing")
         XCTAssertTrue(exactButton("Добавить 60 секунд").exists, "+60 s control missing")
