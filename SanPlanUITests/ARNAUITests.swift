@@ -353,14 +353,11 @@ final class ARNAUITests: XCTestCase {
         // The round-6 profile header scrolls with the list, so bring it back before closing.
         scrollTo(close)
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
-        print("ARNA-DIAG before close frame=\(close.frame)\n\(app.debugDescription)")
         close.tap()
-        let closed = waitUntil(5) { !self.text("Электронная почта").exists }
-        if !closed { print("ARNA-DIAG after close\n\(app.debugDescription)") }
-        XCTAssertTrue(closed, "Profile sheet did not close")
+        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close")
     }
 
-    /// Control for test09: the profile closes from its header without visiting a page first.
+    /// The profile closes from its header right after opening (the arc card's stripes once swallowed this tap).
     @MainActor
     func test11_ProfileClosesFromHeader() {
         launch(tab: 0)
@@ -372,14 +369,7 @@ final class ARNAUITests: XCTestCase {
         let close = exactButton("Закрыть профиль")
         XCTAssertTrue(waitUntil(5) { close.isHittable }, "Profile close button not reachable")
         close.tap()
-        let closed = waitUntil(5) { !self.text("Электронная почта").exists }
-        if !closed {
-            // Diagnostics: can the sheet be dismissed at all by a swipe?
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
-            print("ARNA-DIAG swipe closed: \(waitUntil(5) { !self.text("Электронная почта").exists })")
-        }
-        XCTAssertTrue(closed, "Profile sheet did not close from the header")
+        XCTAssertTrue(waitUntil(5) { !self.text("Электронная почта").exists }, "Profile sheet did not close from the header")
     }
 
     // MARK: - 10. Notes and the shared «+»

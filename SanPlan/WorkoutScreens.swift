@@ -280,9 +280,12 @@ public struct WorkoutScreen: View {
                     .rotationEffect(.degrees(24))
                     .offset(x: 6)
             }
+            // Clipping hides the long stripes but does not stop them taking taps meant for views above the card.
+            .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
         .clipShape(shape)
+        .contentShape(shape)
         .overlay(shape.stroke(DS.Colors.ink, lineWidth: 2))
         .background(shape.fill(DS.Colors.ink).offset(x: 6, y: 6))
         .padding(.trailing, 6)

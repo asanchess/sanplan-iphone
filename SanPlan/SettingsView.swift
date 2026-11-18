@@ -26,8 +26,7 @@ public struct SettingsView: View {
 
     /// - onOpenProgress: «Открыть прогресс» in the arc card; hidden when nil. RootView closes this sheet in it.
     /// - plans: lets the profile count arc weeks itself (with the workouts from the environment).
-    /// - onClose: closes the sheet from its owner. The environment `dismiss` read here did not close it after
-    ///   a page was pushed and popped in the NavigationStack (UI test 09), so the owner's flag is used when given.
+    /// - onClose: closes the sheet through its owner's flag; the environment `dismiss` is used when nil.
     public init(onOpenProgress: (() -> Void)? = nil, onClose: (() -> Void)? = nil, plans: PlanStore? = nil) {
         self.onOpenProgress = onOpenProgress
         self.onClose = onClose
@@ -35,9 +34,6 @@ public struct SettingsView: View {
     }
 
     private func close() {
-        #if DEBUG
-        NSLog("ARNA-CLOSE profile close tapped, owner flag: %@", onClose == nil ? "no" : "yes")
-        #endif
         if let onClose { onClose() } else { dismiss() }
     }
 
@@ -158,9 +154,13 @@ public struct SettingsView: View {
                 Rectangle().fill(Color.white.opacity(0.10)).frame(width: 18, height: 400)
                     .rotationEffect(.degrees(24)).offset(x: 6, y: -60)
             }
+            // The stripes reach far past the card; clipping hides them but does not stop them taking taps,
+            // and they covered the header's «Закрыть профиль» above the card.
+            .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
         .clipShape(RoundedRectangle(cornerRadius: 24))
+        .contentShape(RoundedRectangle(cornerRadius: 24))
         .inked(cornerRadius: 24, shadow: 6)
         .padding(.trailing, 6)
         .accessibilityElement(children: .contain)

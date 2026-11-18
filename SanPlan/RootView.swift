@@ -88,9 +88,6 @@ public struct RootView: View {
                 }
             }
         }
-        #if DEBUG
-        .onChange(of: showSettingsSheet) { old, new in NSLog("ARNA-CLOSE showSettingsSheet %@ -> %@", "\(old)", "\(new)") }
-        #endif
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView(onOpenProgress: {
                 showSettingsSheet = false
