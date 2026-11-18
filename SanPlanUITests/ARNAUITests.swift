@@ -109,8 +109,7 @@ final class ARNAUITests: XCTestCase {
 
         let field = openMoneyComposer()
         scrollTo(field)
-        field.tap()
-        field.typeText("потратил 2500 на обед \(token)")
+        typeInto(field, "потратил 2500 на обед \(token)")
         XCTAssertTrue(waitUntil(5) { self.value(of: field).contains(token) },
                       "Typed text did not reach the money field; value: \(value(of: field))")
         hideKeyboardIfNeeded()
@@ -155,8 +154,7 @@ final class ARNAUITests: XCTestCase {
 
         let field = openMoneyComposer()
         scrollTo(field)
-        field.tap()
-        field.typeText("черновик \(token)")
+        typeInto(field, "черновик \(token)")
         XCTAssertTrue(waitUntil(5) { self.value(of: field).contains(token) }, "Typed text did not reach the money field")
         hideKeyboardIfNeeded()
 
@@ -179,8 +177,7 @@ final class ARNAUITests: XCTestCase {
 
         let field = composerField(Labels.plansComposer)
         scrollTo(field)
-        field.tap()
-        field.typeText("встреча \(token)")
+        typeInto(field, "встреча \(token)")
         XCTAssertTrue(waitUntil(5) { self.value(of: field).contains(token) }, "Typed text did not reach the plans field")
         hideKeyboardIfNeeded()
 
@@ -389,8 +386,7 @@ final class ARNAUITests: XCTestCase {
         plus.tap()
         let field = composerField("Мысль, список, план или трата")
         XCTAssertTrue(field.waitForExistence(timeout: 5), "Composer did not open")
-        field.tap()
-        field.typeText("заметка \(token)")
+        typeInto(field, "заметка \(token)")
         let save = exactButton("Сохранить заметку")
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
@@ -403,8 +399,7 @@ final class ARNAUITests: XCTestCase {
         exactButton("Записать").tap()
         let again = composerField("Мысль, список, план или трата")
         XCTAssertTrue(again.waitForExistence(timeout: 5))
-        again.tap()
-        again.typeText("созвон \(token) завтра в 10")
+        typeInto(again, "созвон \(token) завтра в 10")
         hideKeyboardIfNeeded()
         let makePlan = button("Сделать планом")
         XCTAssertTrue(makePlan.waitForExistence(timeout: 5))
@@ -628,6 +623,15 @@ final class ARNAUITests: XCTestCase {
 
     @MainActor
     @discardableResult
+    /// Taps a field until it holds the keyboard, then types; on a slow simulator the first tap can land before focus.
+    private func typeInto(_ field: XCUIElement, _ text: String) {
+        for _ in 0..<3 {
+            field.tap()
+            if waitUntil(3, { (field.value(forKey: "hasKeyboardFocus") as? Bool) == true }) { break }
+        }
+        field.typeText(text)
+    }
+
     private func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
