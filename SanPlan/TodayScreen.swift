@@ -31,6 +31,8 @@ public struct TodayScreen: View {
     /// A section that is off leaves no tile, ring or line here (its data stays).
     @ObservedObject private var sections = SectionSettings.shared
     @Environment(\.headerShortcuts) private var shortcuts
+    /// Read so the whole screen is drawn again at midnight: date line, rings, «Дальше сегодня», the program day.
+    @Environment(\.dayKey) private var dayKey
     @State private var summaryOpen = false
     @State private var summaryMode: SummaryScreen.Mode = .day
 
@@ -106,6 +108,7 @@ public struct TodayScreen: View {
         // Reviews follow the signed-in account: money switches owner on sign-in and sign-out.
         .onChange(of: finance.state) { _, _ in syncReviewOwner() }
         .onChange(of: reviewsVault?.isAvailable) { _, _ in review.setCollection(reviewsVault) }
+        .onChange(of: dayKey) { _, day in finance.refreshSummary(today: day) }
     }
 
     /// Debug screenshots: «Сегодня» opens first, before Plans and Money seed themselves, so it puts the same

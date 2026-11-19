@@ -11,7 +11,7 @@ struct WorkoutBuilderView: View {
     @State private var renaming: RenameTarget?
     @State private var renameText = ""
     @State private var titleDraft = ""
-    /// Exercises start folded: number, name, one line of the target. A tap opens the steppers.
+    /// Exercises start folded: number, name and chevron. A tap opens the steppers.
     @State private var expanded: Set<String> = []
     /// The exercise being dragged (by ≡ or a long press on its head), how far, and the cards' frames.
     @State private var dragID: String?
@@ -19,6 +19,18 @@ struct WorkoutBuilderView: View {
     @State private var cardFrames: [String: CGRect] = [:]
     @Environment(\.sectionAccent) private var accent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dayKey) private var dayKey
+
+    /// 1 = Monday … 7 = Sunday for a "yyyy-MM-dd" key.
+    private static func weekday(of key: String) -> Int {
+        let parser = DateFormatter()
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = TimeZone(identifier: "UTC")
+        parser.dateFormat = "yyyy-MM-dd"
+        guard let date = parser.date(from: key) else { return 1 }
+        return WorkoutProgram.weekday(of: date, timeZone: TimeZone(identifier: "UTC") ?? .current)
+    }
 
     private struct RenameTarget: Identifiable {
         let id: String
@@ -71,6 +83,9 @@ struct WorkoutBuilderView: View {
         .onChange(of: weekday) { _, _ in
             titleDraft = day?.title ?? ""
             expanded = []
+        }
+        .onChange(of: dayKey) { old, new in
+            weekday = DayTurn.follow(weekday: weekday, oldToday: Self.weekday(of: old), newToday: Self.weekday(of: new))
         }
         .sheet(isPresented: $showLibrary) {
             ExerciseLibrarySheet { name in
@@ -249,19 +264,12 @@ struct WorkoutBuilderView: View {
                     .contentTransition(.numericText())
                     .accessibilityHidden(true)
                 HStack(spacing: DS.Metrics.spacing8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(exercise.name)
-                            .font(.headline)
-                            .foregroundColor(DS.Colors.textPrimary)
-                            .multilineTextAlignment(.leading)
-                        if !isOpen {
-                            Text(WorkoutFormat.exerciseSummary(exercise))
-                                .font(.footnote.monospacedDigit())
-                                .foregroundColor(DS.Colors.textSecondary)
-                                .transition(.opacity)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Folded: the number, the name and the chevron only (owner, 19.11); the target is read aloud.
+                    Text(exercise.name)
+                        .font(.headline)
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: "chevron.down")
                         .font(.footnote.weight(.bold))
                         .foregroundColor(DS.Colors.textSecondary)

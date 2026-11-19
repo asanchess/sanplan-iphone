@@ -8,6 +8,8 @@ public struct WorkoutScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.shellCapture) private var capture
     @Environment(\.sectionAccent) private var accent
+    /// Read so the day's plan and «Ритм недели» follow the real day after midnight.
+    @Environment(\.dayKey) private var dayKey
 
     @State private var isEditingPlan: Bool = false
     @State private var section: Part = WorkoutScreen.initialSection

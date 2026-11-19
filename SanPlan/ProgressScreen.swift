@@ -4,6 +4,8 @@ import SwiftUI
 /// Four numbers for an explicit period, the arc, goals, notes and «Может, забыли?».
 /// Every number opens exactly what it is about through `DeepLinks`; RootView switches the tab and closes this sheet.
 struct ProgressScreen: View {
+    /// Read so the week and month follow the real day after midnight.
+    @Environment(\.dayKey) private var dayKey
     @ObservedObject var plans: PlanStore
     @ObservedObject var finance: FinanceStore
     @ObservedObject var workouts: WorkoutStore

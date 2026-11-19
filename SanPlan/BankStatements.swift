@@ -91,6 +91,28 @@ public enum BankStatementParser {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
+    /// Every account in one PDF: a file with several accounts («Номер счета» changes) gives one statement per
+    /// account, each keeping the document head (bank, period). A one-account file gives just `parse(raw)`.
+    public static func parseAll(_ raw: String) throws -> [ParsedStatement] {
+        let text = flat(normalise(raw))
+        let headers = matchesWithRange(accountHeader, text)
+        // A page header repeats the same account; only a change of account starts a new part.
+        var cuts: [(start: String.Index, account: String)] = []
+        for (range, account) in headers where cuts.last?.account != account {
+            cuts.append((range.lowerBound, account))
+        }
+        guard Set(cuts.map(\.account)).count > 1, let first = cuts.first else { return [try parse(raw)] }
+        let head = String(text[..<first.start])
+        var parts: [ParsedStatement] = []
+        for (index, cut) in cuts.enumerated() {
+            let end = index + 1 < cuts.count ? cuts[index + 1].start : text.endIndex
+            let body = String(text[cut.start..<end])
+            if let part = try? parse(head + " " + body) { parts.append(part) }
+        }
+        guard !parts.isEmpty else { throw StatementError.noTransactions }
+        return parts
+    }
+
     public static func parse(_ raw: String) throws -> ParsedStatement {
         let text = flat(normalise(raw))
         // The bank named first is the header; later mentions are counterparties, e.g. a Halyk transfer to a Kaspi card.
@@ -260,7 +282,17 @@ public enum BankStatementParser {
 
     /// «Номер счета: KZ00…0001» or «Account number KZT: KZ00…0002» → «0001».
     static func accountSuffix(_ text: String) -> String? {
-        match(regex(#"(?:Номер счета|Номер счёта|Account number)[^:]{0,8}: ?(KZ[0-9A-Z]{18})"#), text).map { String($0[1].suffix(4)) }
+        match(accountHeader, text).map { String($0[1].suffix(4)) }
+    }
+
+    static let accountHeader = regex(#"(?:Номер счета|Номер счёта|Account number)[^:]{0,8}: ?(KZ[0-9A-Z]{18})"#)
+
+    /// Each account header with where it starts and the account's last four characters.
+    private static func matchesWithRange(_ regex: NSRegularExpression, _ text: String) -> [(Range<String.Index>, String)] {
+        regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap { m in
+            guard let whole = Range(m.range, in: text), let number = Range(m.range(at: 1), in: text) else { return nil }
+            return (whole, String(text[number].suffix(4)))
+        }
     }
 
     /// «2 500,00» → 250000.

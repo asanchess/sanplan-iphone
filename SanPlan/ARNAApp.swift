@@ -10,6 +10,8 @@ struct ARNAApp: App {
                 .environmentObject(model.auth)
                 .environmentObject(model.alarms)
                 .environmentObject(model.workouts)
+                // Профиль → Настройки → Планы lists and edits the alarms in place.
+                .environmentObject(model.plans)
         }
     }
 }

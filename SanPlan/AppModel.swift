@@ -137,9 +137,27 @@ public final class AppModel: ObservableObject {
         let planStore = self.plans
         let resync = PlanAlarmResync(alarms: alarms, plansLoaded: { planStore.hasLoadedPlans }, plans: { planStore.plans.map { $0.toNativePlan() } })
         planSoundWatcher = PlanSoundWatcher { Task { await resync.soundChanged() } }
+        // Midnight, a new time zone or a clock change: «сегодня» moves on even if the app never left the screen.
+        for name in [UIApplication.significantTimeChangeNotification, Notification.Name.NSCalendarDayChanged] {
+            _ = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.checkDay() }
+            }
+        }
         #if DEBUG
         if screenshots { seedScreenshotNotes() }
         #endif
+    }
+
+    /// Today's "yyyy-MM-dd"; RootView hands it to every tab as `\.dayKey`.
+    @Published public private(set) var today: String = PlanDomain.today()
+
+    /// Moves «сегодня» on. Plans follow only if they were showing the old today.
+    public func checkDay() {
+        let now = PlanDomain.today()
+        guard now != today else { return }
+        let old = today
+        today = now
+        plans.dayTurned(from: old, to: now)
     }
 
     #if DEBUG
@@ -250,6 +268,7 @@ public final class AppModel: ObservableObject {
     }
 
     public func becameActive() {
+        checkDay()
         finance.reloadIfUnavailable()
         finance.retryMoveIfNeeded()
         workouts.reloadIfUnavailable()

@@ -3,6 +3,8 @@ import SwiftUI
 /// The «Планы» tab (canvas `docs/design/canvas-r5/Plans.html`): plans, habits and goals behind one switcher,
 /// alarms behind the clock in the header, and one bottom field «Что запланировать?» for all three.
 public struct PlanScreen: View {
+    /// Read so the «сегодня» mark in the week strip moves at midnight even when another day is open.
+    @Environment(\.dayKey) private var dayKey
     @ObservedObject public var store: PlanStore
     @ObservedObject public var recorder: VoiceRecorder
     @ObservedObject public var inputs: InputDrafts

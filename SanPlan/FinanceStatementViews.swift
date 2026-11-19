@@ -53,6 +53,9 @@ struct StatementsSection: View {
 
     @State private var isReading = false
     @State private var pending: PendingStatement?
+    /// More accounts from the same file, shown one after another.
+    @State private var queued: [PendingStatement] = []
+    @ObservedObject private var inbox = StatementInbox.shared
     @State private var suggestions: [StatementImport.MergeSuggestion] = []
     @State private var importToDelete: FinanceImport?
     /// «История загрузок» starts folded; not kept between launches.
@@ -97,7 +100,9 @@ struct StatementsSection: View {
             pickedFile = nil
             read(url)
         }
-        .sheet(item: $pending) { pending in
+        // A PDF shared from the bank app («Поделиться → A-san») waits in the inbox until this section is on screen.
+        .onReceive(inbox.$files) { _ in takeShared() }
+        .sheet(item: $pending, onDismiss: showNext) { pending in
             StatementPreviewSheet(pending: pending, onImport: { confirm(pending) }, onCancel: { self.pending = nil })
         }
         .confirmationDialog(
@@ -166,25 +171,46 @@ struct StatementsSection: View {
         errorMessage = nil
         let rules = store.state.merchantCategories
         Task {
-            let outcome: Result<PendingStatement, Error> = await Task.detached(priority: .userInitiated) {
+            let outcome: Result<[PendingStatement], Error> = await Task.detached(priority: .userInitiated) {
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 do {
                     let text = try BankStatementParser.text(ofPDFAt: url)
-                    let statement = try BankStatementParser.parse(text)
-                    let importId = "imp-" + UUID().uuidString.prefix(8).lowercased()
-                    let preview = StatementImport.preview(statement, importId: importId, rules: rules)
-                    return .success(PendingStatement(id: importId, fileName: url.lastPathComponent, preview: preview))
+                    // One file can hold several accounts; each becomes its own import.
+                    return .success(try BankStatementParser.parseAll(text).map { statement in
+                        let importId = "imp-" + UUID().uuidString.prefix(8).lowercased()
+                        let preview = StatementImport.preview(statement, importId: importId, rules: rules)
+                        return PendingStatement(id: importId, fileName: url.lastPathComponent, preview: preview)
+                    })
                 } catch {
                     return .failure(error)
                 }
             }.value
             isReading = false
+            inbox.discard(url)
             switch outcome {
-            case .success(let statement): pending = statement
-            case .failure(let error): errorMessage = error.localizedDescription
+            case .success(let statements):
+                queued.append(contentsOf: statements)
+                if pending == nil { showNext() }
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+                takeShared()
             }
         }
+    }
+
+    /// The next account of the file, or else the next shared file.
+    private func showNext() {
+        if !queued.isEmpty {
+            pending = queued.removeFirst()
+        } else {
+            takeShared()
+        }
+    }
+
+    private func takeShared() {
+        guard !isReading, pending == nil, queued.isEmpty, let url = inbox.next() else { return }
+        read(url)
     }
 
     private func confirm(_ pending: PendingStatement) {

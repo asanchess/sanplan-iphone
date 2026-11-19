@@ -62,7 +62,9 @@ struct ProfileSettingsScreen: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
     @EnvironmentObject private var workouts: WorkoutStore
+    @EnvironmentObject private var planStore: PlanStore
     @ObservedObject private var sounds = AlertSoundSettings.shared
+    @State private var alarmEditor: AlarmEditorTarget?
     @ObservedObject private var sections = SectionSettings.shared
 
     @State private var section: ProfileSettingsSection
@@ -175,8 +177,34 @@ struct ProfileSettingsScreen: View {
                     .buttonStyle(ProfileRowButtonStyle())
                 }
                 AlertSoundRow(title: "Звук напоминаний", choice: sounds.plan, onSelect: sounds.setPlan, volume: sounds.planVolume, onVolume: sounds.setPlanVolume)
-                ProfileNavRow(name: "Все будильники", note: "Открыть в «Планах»") { open(.alarms) }
             }
+            // The alarms themselves, edited here: no trip to «Планы» (owner, 19.11 G).
+            ProfileGroup("Сигналы") {
+                let rows = AlarmRows.build(plans: planStore.plans, nowMs: Int64(Date().timeIntervalSince1970 * 1000), showAll: false)
+                ForEach(rows) { row in
+                    Button { alarmEditor = .existing(row.plan) } label: {
+                        ProfileRow(row.plan.title, note: row.nextSignal.map { PlanDateTime.long($0.fireMs, timeZone: row.timeZone) } ?? AlarmRows.status(of: row)) {
+                            if let ms = row.nextSignal?.fireMs {
+                                ProfileValue(PlanDateTime.clock(ms, timeZone: row.timeZone))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(ProfileRowButtonStyle())
+                    .accessibilityHint("Изменить будильник")
+                }
+                Button { alarmEditor = .new } label: {
+                    ProfileRow("Создать будильник", nameColor: DS.Colors.plans).contentShape(Rectangle())
+                }
+                .buttonStyle(ProfileRowButtonStyle())
+                .accessibilityIdentifier("settings-new-alarm")
+            }
+        }
+        .sheet(item: $alarmEditor) { target in
+            AlarmEditor(store: planStore, target: target)
+                .keyboardDismissBar()
+                .environment(\.sectionAccent, DS.Colors.plans)
+                .tint(DS.Colors.plans)
         }
     }
 

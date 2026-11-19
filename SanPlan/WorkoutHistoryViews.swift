@@ -3,6 +3,8 @@ import SwiftUI
 /// «История»: week or month, its numbers against the one before, a chart of the last weeks or months, the streak,
 /// a calendar of training days, and every workout, each of which opens for editing.
 struct WorkoutHistoryView: View {
+    /// Read so «эта неделя» and the heatmap follow the real day after midnight.
+    @Environment(\.dayKey) private var dayKey
     @ObservedObject var store: WorkoutStore
     /// Owned by the screen, so a deep link can pick it.
     @Binding var period: Period

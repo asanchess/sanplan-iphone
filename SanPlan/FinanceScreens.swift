@@ -44,6 +44,8 @@ public struct FinanceScreen: View {
     @State private var showReconcile = false
     @State private var ledgerFilter = LedgerFilter(month: FinanceText.currentMonth())
     @State private var didApplyScreenshotRoute = false
+    /// Read so «можно сегодня», the month and the week are drawn again when the day turns over.
+    @Environment(\.dayKey) private var dayKey
 
     // Vault Import / Export
     @State private var showExportSheet: Bool = false
@@ -192,6 +194,13 @@ public struct FinanceScreen: View {
         .onAppear {
             applyScreenshotRoute()
             store.refreshSummary(today: todayString, horizonDays: horizonDays)
+        }
+        .onChange(of: dayKey) { old, new in
+            store.refreshSummary(today: todayString, horizonDays: horizonDays)
+            // A new month: the ledger that showed «this month» shows the new one; a month picked on purpose stays.
+            if let month = ledgerFilter.month {
+                ledgerFilter.month = DayTurn.follow(selected: month, oldToday: String(old.prefix(7)), newToday: String(new.prefix(7)))
+            }
         }
         .onReceive(DeepLinks.shared.$pending) { link in
             guard let link else { return }

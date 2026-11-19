@@ -214,6 +214,14 @@ public final class PlanStore: ObservableObject {
         }
     }
 
+    /// The day turned over: a screen that stood on the old «сегодня» moves to the new one and loads its window.
+    public func dayTurned(from old: String, to new: String) {
+        let next = DayTurn.follow(selected: selectedDate, oldToday: old, newToday: new)
+        guard next != selectedDate else { return }
+        selectedDate = next
+        Task { await ensureRangeLoaded() }
+    }
+
     /// Moving between weeks only reaches the network once the selected day leaves the loaded window.
     public func ensureRangeLoaded() async {
         if let range = loadedRange, selectedDate >= range.start, selectedDate < range.end { return }

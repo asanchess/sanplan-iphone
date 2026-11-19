@@ -211,6 +211,18 @@ final class StatementImportTests: XCTestCase {
         ])
     }
 
+    func testOneFileWithTwoAccountsGivesTwoStatements() throws {
+        let second = Self.halykText.replacingOccurrences(of: "KZ000000000000000002", with: "KZ000000000000000003")
+        let parts = try BankStatementParser.parseAll(Self.halykText + "\n" + second)
+        XCTAssertEqual(parts.map(\.account), ["0002", "0003"])
+        XCTAssertEqual(parts.map(\.bank), [.halyk, .halyk])
+        XCTAssertEqual(parts[0].transactions, Self.halykExpected)
+        XCTAssertEqual(parts[1].transactions, Self.halykExpected)
+        // One account repeated on every page stays one statement.
+        XCTAssertEqual(try BankStatementParser.parseAll(Self.halykText).count, 1)
+        XCTAssertEqual(try BankStatementParser.parseAll(Self.kaspiText).map(\.account), ["0001"])
+    }
+
     func testHalykCellLayoutUsesAccountCurrencyColumnsAndFees() throws {
         let s = try BankStatementParser.parse(Self.halykText)
         XCTAssertEqual(s.bank, .halyk)

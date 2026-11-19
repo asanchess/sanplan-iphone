@@ -236,6 +236,7 @@ public struct RootView: View {
                     TabStage(isActive: tab == selectedTab) { screen(for: tab) }
                         .environment(\.sectionAccent, tab.accent)
                         .environment(\.shellBarInset, keyboardVisible ? 0 : tabBarHeight)
+                        .environment(\.dayKey, model.today)
                 }
             }
         }
@@ -321,6 +322,11 @@ public struct RootView: View {
             showProgress = false
             showSettingsSheet = false
             selectedTab = tab
+        }
+        // «Поделиться → A-san» on a bank PDF: the file goes to «Деньги → Операции», which reads it at once.
+        .onOpenURL { url in
+            guard url.isFileURL, StatementInbox.shared.receive(url) else { return }
+            DeepLinks.shared.open(.moneyOperations)
         }
         .sheet(isPresented: $showProgress) {
             ProgressScreen(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes)
