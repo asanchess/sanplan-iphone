@@ -94,6 +94,13 @@ jobs:
             sleep 5
             xcrun simctl io "$simulator" screenshot "artifacts/screens/tour-$kind.png"
           done
+          # «Что ведём?» and «Сегодня» with only Plans and Notes kept.
+          xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-demo-data --screenshot-tab 0 --sections-choice
+          sleep 4
+          xcrun simctl io "$simulator" screenshot "artifacts/screens/sections-choice.png"
+          xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-demo-data --screenshot-tab 0 --screenshot-sections plans,notes
+          sleep 4
+          xcrun simctl io "$simulator" screenshot "artifacts/screens/sections-today-plans-notes.png"
       - name: Upload IPA and diagnostic logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

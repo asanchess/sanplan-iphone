@@ -6,8 +6,9 @@ import SwiftUI
 struct NoteEditorView: View {
     @ObservedObject var store: NotesStore
     let noteID: String
-    let onMakePlan: (String) -> Void
-    let onMakeExpense: (String) -> Void
+    /// nil while «Планы» / «Деньги» is turned off: the action is not offered.
+    let onMakePlan: ((String) -> Void)?
+    let onMakeExpense: ((String) -> Void)?
 
     @State private var text = ""
     @State private var focused = false
@@ -117,8 +118,12 @@ struct NoteEditorView: View {
                 Button { store.togglePin(noteID) } label: {
                     Label(note.pinned ? "Открепить" : "Закрепить", systemImage: note.pinned ? "pin.slash" : "pin")
                 }
-                Button { onMakePlan(note.text) } label: { Label("Сделать планом", systemImage: "calendar.badge.plus") }
-                Button { onMakeExpense(note.text) } label: { Label("Записать трату", systemImage: "creditcard") }
+                if let onMakePlan {
+                    Button { onMakePlan(note.text) } label: { Label("Сделать планом", systemImage: "calendar.badge.plus") }
+                }
+                if let onMakeExpense {
+                    Button { onMakeExpense(note.text) } label: { Label("Записать трату", systemImage: "creditcard") }
+                }
                 ShareLink(item: note.text) { Label("Поделиться", systemImage: "square.and.arrow.up") }
                 Divider()
                 Button(role: .destructive) {
@@ -135,13 +140,15 @@ struct NoteEditorView: View {
     private var suggestions: some View {
         if !focused, let note {
             let hints = NoteText.hints(note.text)
-            if hints.looksLikePlan || hints.looksLikeExpense {
+            let plan = hints.looksLikePlan ? onMakePlan : nil
+            let expense = hints.looksLikeExpense ? onMakeExpense : nil
+            if plan != nil || expense != nil {
                 HStack(spacing: DS.Metrics.spacing8) {
-                    if hints.looksLikePlan {
-                        NoteActionChip(title: "Сделать планом", icon: "calendar.badge.plus") { onMakePlan(note.text) }
+                    if let plan {
+                        NoteActionChip(title: "Сделать планом", icon: "calendar.badge.plus") { plan(note.text) }
                     }
-                    if hints.looksLikeExpense {
-                        NoteActionChip(title: "Записать трату", icon: "creditcard") { onMakeExpense(note.text) }
+                    if let expense {
+                        NoteActionChip(title: "Записать трату", icon: "creditcard") { expense(note.text) }
                     }
                     Spacer(minLength: 0)
                 }

@@ -28,6 +28,8 @@ public struct TodayScreen: View {
     @ObservedObject var review: ReviewStore
     @ObservedObject private var goals = GoalStore.shared
     @ObservedObject private var habitStore = HabitStore.shared
+    /// A section that is off leaves no tile, ring or line here (its data stays).
+    @ObservedObject private var sections = SectionSettings.shared
     @Environment(\.headerShortcuts) private var shortcuts
     @State private var summaryOpen = false
     @State private var summaryMode: SummaryScreen.Mode = .day
@@ -40,15 +42,19 @@ public struct TodayScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         ScreenHeader("Сегодня", kicker: Self.dateLine(Date())) {}
-                        heroCard
-                        ringsRow
-                            .tourTarget("today.rings")
-                        nextSection
-                            .tourTarget("today.next")
-                        habitsSection
-                            .tourTarget("today.habits")
-                        goalsSection
-                        pinnedNotesSection
+                        if sections.isOn(.plans) || sections.isOn(.workout) { heroCard }
+                        if sections.isOn(.plans) || sections.isOn(.money) {
+                            ringsRow
+                                .tourTarget("today.rings")
+                        }
+                        if sections.isOn(.plans) {
+                            nextSection
+                                .tourTarget("today.next")
+                            habitsSection
+                                .tourTarget("today.habits")
+                            goalsSection
+                        }
+                        if sections.isOn(.notes) { pinnedNotesSection }
                         progressCard
                             .tourTarget("today.progress")
                         reviewButton
@@ -149,33 +155,42 @@ public struct TodayScreen: View {
     }
 
     private var hero: TodayHero {
-        let session = activeSession
+        let showWorkout = sections.isOn(.workout)
+        let showPlans = sections.isOn(.plans)
+        let session = showWorkout ? activeSession : nil
         let name = session.map { $0.exercises.indices.contains($0.exerciseIndex) ? $0.exercises[$0.exerciseIndex].name : "" } ?? ""
-        let line = TodayWorkoutSummary.make(active: session != nil, currentName: name, days: workouts.training?.days ?? [], weekday: weekday)
+        let line = showWorkout
+            ? TodayWorkoutSummary.make(active: session != nil, currentName: name, days: workouts.training?.days ?? [], weekday: weekday)
+            : nil
         var detail = ""
         if let session {
             detail = session.exercises.isEmpty ? "" : "Упражнение \(min(session.exerciseIndex + 1, session.exercises.count)) из \(session.exercises.count)"
         } else if let line, let day = programDay(today: line.kind == .today) {
             detail = TodayWorkoutSummary.estimate(day)
         }
-        let next = openToday.first.map { (title: $0.item.title, time: $0.startMin.map(TodayFormat.clock) ?? "") }
+        let upcoming = showPlans ? openToday : []
+        let next = upcoming.first.map { (title: $0.item.title, time: $0.startMin.map(TodayFormat.clock) ?? "") }
         return TodayHeroSummary.make(
             workout: line, workoutDetail: detail,
-            workoutDoneToday: workouts.daySummary(for: reviewDay).completed,
-            nextPlan: next, openPlans: openToday.count
+            workoutDoneToday: showWorkout ? workouts.daySummary(for: reviewDay).completed : 0,
+            nextPlan: next, openPlans: upcoming.count
         )
     }
 
+    /// Without «Планы» an empty hero would only point at a section that is off: then there is no hero.
+    @ViewBuilder
     private var heroCard: some View {
         let hero = self.hero
-        return TodayHeroCard(hero: hero, open: { heroOpen(hero) }, primary: { heroPrimary(hero) })
-            .tourTarget("today.hero")
+        if hero.kind != .empty || sections.isOn(.plans) {
+            TodayHeroCard(hero: hero, open: { heroOpen(hero) }, primary: { heroPrimary(hero) })
+                .tourTarget("today.hero")
+        }
     }
 
     private func heroOpen(_ hero: TodayHero) {
         switch hero.kind {
         case .activeWorkout, .workout, .nextWorkout: selectedTab = .workout
-        case .plan, .empty: open(.plansAll)
+        case .plan, .empty: if sections.isOn(.plans) { open(.plansAll) }
         }
     }
 
@@ -192,6 +207,7 @@ public struct TodayScreen: View {
         let planDay = plans.daySummary(for: reviewDay)
         let habitDay = habitStore.daySummary(for: reviewDay)
         return HStack(spacing: 10) {
+            if sections.isOn(.plans) {
             TodayRing(
                 name: "Планы",
                 value: planDay.total > 0 ? "\(planDay.done)/\(planDay.total)" : "—",
@@ -208,7 +224,8 @@ public struct TodayScreen: View {
                 spoken: habitDay.total > 0 ? "Привычки: \(habitDay.done) из \(habitDay.total)" : "Привычек на сегодня нет",
                 action: { open(.habits) }
             )
-            moneyRing
+            }
+            if sections.isOn(.money) { moneyRing }
         }
     }
 
@@ -381,10 +398,10 @@ public struct TodayScreen: View {
         let beforeStart = ReviewCalendar.addDays(start, -7)
         let beforeEnd = ReviewCalendar.addDays(reviewDay, -7)
         return TodayWeekBrief.sentence(
-            spentNow: ReviewSummaries.financePeriod(finance.state, from: start, to: reviewDay).spentMinor,
-            spentBefore: ReviewSummaries.financePeriod(finance.state, from: beforeStart, to: beforeEnd).spentMinor,
-            workoutsNow: workouts.periodSummary(from: start, to: reviewDay).completed,
-            workoutsBefore: workouts.periodSummary(from: beforeStart, to: beforeEnd).completed
+            spentNow: sections.isOn(.money) ? ReviewSummaries.financePeriod(finance.state, from: start, to: reviewDay).spentMinor : 0,
+            spentBefore: sections.isOn(.money) ? ReviewSummaries.financePeriod(finance.state, from: beforeStart, to: beforeEnd).spentMinor : 0,
+            workoutsNow: sections.isOn(.workout) ? workouts.periodSummary(from: start, to: reviewDay).completed : 0,
+            workoutsBefore: sections.isOn(.workout) ? workouts.periodSummary(from: beforeStart, to: beforeEnd).completed : 0
         )
     }
 

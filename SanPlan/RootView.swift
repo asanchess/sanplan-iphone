@@ -40,6 +40,7 @@ public struct RootView: View {
     @State private var goalsRequest = 0
     @State private var habitsRequest = 0
     @ObservedObject private var tour = TourCenter.shared
+    @ObservedObject private var sections = SectionSettings.shared
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
@@ -105,7 +106,10 @@ public struct RootView: View {
             openPendingAlarmText()
         }
         .task {
-            if let tab = screenshotTab { selectedTab = tab }
+            #if DEBUG
+            if isScreenshotSignedInMode { sections.applyLaunchArguments(ProcessInfo.processInfo.arguments) }
+            #endif
+            if let tab = screenshotTab, sections.isOn(tab) { selectedTab = tab }
             // Round 6: sheets that a screenshot route opens straight away (sections handle their own sub-screens).
             if ScreenshotRoute.is("progress") { showProgress = true }
             if let screen = ScreenshotRoute.screen, screen.hasPrefix("profile") { showSettingsSheet = true }
@@ -130,9 +134,16 @@ public struct RootView: View {
                 undoCenter.dismiss()
                 selectedTab = .today
                 model.clearAccountData()
+                sections.detach()
                 tour.end()
             case .signedIn(let email):
                 model.accountSignedIn(email: email)
+                let process = ProcessInfo.processInfo
+                // UI tests sign in without a person to answer «Что ведём?»: only `--sections-choice` asks there.
+                let ask = !TourLaunch.isTestRun(arguments: process.arguments, environment: process.environment)
+                    || process.arguments.contains(SectionSettings.choiceArgument)
+                sections.attach(email: email, ask: ask)
+                if !sections.isOn(selectedTab) { selectedTab = .today }
             case .checking:
                 break
             }
@@ -220,7 +231,7 @@ public struct RootView: View {
     private var mainTabsView: some View {
         ZStack {
             DS.Colors.canvas.ignoresSafeArea()
-            ForEach(MainTab.ordered) { tab in
+            ForEach(sections.visibleTabs) { tab in
                 if mounted.contains(tab) || tab == selectedTab {
                     TabStage(isActive: tab == selectedTab) { screen(for: tab) }
                         .environment(\.sectionAccent, tab.accent)
@@ -239,7 +250,8 @@ public struct RootView: View {
                 PetLayer(area: proxy.size, tab: selectedTab) {
                     MascotReminders.lines(
                         MascotReminders.input(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes),
-                        focus: selectedTab
+                        focus: selectedTab,
+                        hidden: sections.hidden
                     )
                 }
             }
@@ -250,6 +262,20 @@ public struct RootView: View {
                 .animation(.easeOut(duration: 0.2), value: undoCenter.offer?.id)
         }
         .overlay { MascotTourOverlay() }
+        // «Что ведём?» comes first, once per account; the tour waits for the answer.
+        .overlay {
+            if sections.needsChoice {
+                SectionChoiceScreen { keep in
+                    withAnimation(.easeOut(duration: 0.25)) { sections.choose(keep: keep) }
+                }
+                .transition(.opacity)
+            }
+        }
+        // A section turned off takes its tab away: the person lands on «Сегодня», nothing of it stays mounted.
+        .onChange(of: sections.hidden) { _, _ in
+            if !sections.isOn(selectedTab) { selectedTab = .today }
+            mounted = mounted.filter { sections.isOn($0) }
+        }
         // The tour leads: its step picks the tab, and sheets and the keyboard step aside while it runs.
         .onChange(of: tour.step?.section) { _, section in
             if let section { selectedTab = section.tab }
@@ -261,18 +287,20 @@ public struct RootView: View {
             showCapture = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .task {
-            // First launch: once per device, never in UI tests or screenshots unless `--mascot-tour` asks.
+        .task(id: sections.needsChoice) {
+            // First launch: once per device, never in UI tests or screenshots unless `--mascot-tour` asks;
+            // and only after «Что ведём?», so the tour shows just the sections the person keeps.
+            guard !sections.needsChoice else { return }
             let process = ProcessInfo.processInfo
             guard let launch = TourLaunch.decide(arguments: process.arguments, environment: process.environment, defaults: .standard) else { return }
             try? await Task.sleep(for: .seconds(1.2))
-            guard !Task.isCancelled, !tour.isActive else { return }
+            guard !Task.isCancelled, !tour.isActive, !sections.needsChoice else { return }
             if !launch.forced { TourLaunch.markDone(.standard) }
             tour.start(launch.kind)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
-                ArnaTabBar(selection: $selectedTab, tabs: MainTab.ordered)
+                ArnaTabBar(selection: $selectedTab, tabs: sections.visibleTabs)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
                     // The tour picks the tab itself; a stray tap must not take the person away from it.
                     .allowsHitTesting(!tour.isActive)
@@ -287,7 +315,7 @@ public struct RootView: View {
         .onChange(of: reviewNotifications.dayReviewRequests) { _, _ in selectedTab = .today }
         // Round 6: an exact place asked for by Progress/Today/Summary: switch the tab, close sheets; the section shows the place.
         .onReceive(DeepLinks.shared.$pending) { link in
-            guard let link, let tab = MainTab(rawValue: link.tabRawValue) else { return }
+            guard let link, let tab = MainTab(rawValue: link.tabRawValue), sections.isOn(tab) else { return }
             showProgress = false
             showSettingsSheet = false
             selectedTab = tab
@@ -300,8 +328,9 @@ public struct RootView: View {
                 inputs: model.inputs,
                 dictation: model.dictation,
                 notes: model.notes,
-                onMakePlan: { handOff($0, to: .plans) },
-                onMakeExpense: { handOff($0, to: .money) },
+                onMakePlan: makePlan,
+                onMakeExpense: makeExpense,
+                notesOn: sections.isOn(.notes),
                 onSaved: {},
                 askData: { [model] in AskData.current(plans: model.plans, finance: model.finance, workouts: model.workouts) }
             )
@@ -328,7 +357,7 @@ public struct RootView: View {
                 reviewRequest: reviewNotifications.dayReviewRequests,
                 review: model.reviews
             )
-            .environment(\.shellCapture, ShellCapture(isEnabled: true, action: openCapture))
+            .environment(\.shellCapture, ShellCapture(isEnabled: captureAvailable, action: openCapture))
         case .plans:
             // Plans and Money keep their own composer at the bottom, so no second «+» there.
             PlanScreen(
@@ -338,7 +367,7 @@ public struct RootView: View {
                 dictation: model.dictation,
                 workouts: model.workouts,
                 showSettings: $showSettingsSheet,
-                onOpenWorkout: { selectedTab = .workout },
+                onOpenWorkout: { if sections.isOn(.workout) { selectedTab = .workout } },
                 streakSources: model.streakSources,
                 savingsOptions: model.finance.savingsGoals.map { GoalSavingsOption(id: $0.id, title: $0.title) },
                 weekRatings: model.reviews.weeks,
@@ -351,8 +380,8 @@ public struct RootView: View {
                 store: model.notes,
                 vault: model.vault,
                 showSettings: $showSettingsSheet,
-                onMakePlan: { handOff($0, to: .plans) },
-                onMakeExpense: { handOff($0, to: .money) },
+                onMakePlan: makePlan,
+                onMakeExpense: makeExpense,
                 onCapture: openCapture
             )
             .keyboardDismissBar()
@@ -360,9 +389,16 @@ public struct RootView: View {
             FinanceScreen(store: model.finance, inputs: model.inputs, dictation: model.dictation, vault: model.vault, client: isScreenshotSignedInMode ? nil : model.auth.client, showSettings: $showSettingsSheet)
                 .keyboardDismissBar()
         case .workout:
-            WorkoutTab(store: model.workouts, showSettings: $showSettingsSheet, onCapture: openCapture)
+            WorkoutTab(store: model.workouts, showSettings: $showSettingsSheet, captureAvailable: captureAvailable, onCapture: openCapture)
         }
     }
+
+    /// «Сделать планом» and «Записать трату» exist only while their section is on.
+    private var makePlan: ((String) -> Void)? { sections.isOn(.plans) ? { handOff($0, to: .plans) } : nil }
+    private var makeExpense: ((String) -> Void)? { sections.isOn(.money) ? { handOff($0, to: .money) } : nil }
+
+    /// «+» writes a note, a plan or a spending: with all three sections off it has nowhere to write.
+    private var captureAvailable: Bool { sections.isOn(.notes) || sections.isOn(.plans) || sections.isOn(.money) }
 
     private func openCapture() {
         // The composer shares the mic with Plans and Money: stop theirs rather than record into two places.
@@ -383,13 +419,14 @@ public struct RootView: View {
 private struct WorkoutTab: View {
     @ObservedObject var store: WorkoutStore
     @Binding var showSettings: Bool
+    let captureAvailable: Bool
     let onCapture: () -> Void
 
     var body: some View {
         WorkoutScreen(store: store, showSettings: $showSettings)
             .keyboardDismissBar()
             // A running workout owns the screen: no stray tap opens a composer over the timer.
-            .environment(\.shellCapture, ShellCapture(isEnabled: store.activeSession == nil, action: onCapture))
+            .environment(\.shellCapture, ShellCapture(isEnabled: captureAvailable && store.activeSession == nil, action: onCapture))
     }
 }
 

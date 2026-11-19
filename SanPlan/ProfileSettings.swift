@@ -33,6 +33,17 @@ enum ProfileSettingsSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// The tab whose settings these are; «Общие» belongs to «Сегодня», which is always on.
+    var tab: MainTab {
+        switch self {
+        case .general: return .today
+        case .plans: return .plans
+        case .notes: return .notes
+        case .money: return .money
+        case .workout: return .workout
+        }
+    }
+
     /// Shared settings stay violet; a section's own settings take its colour.
     var color: Color {
         switch self {
@@ -52,6 +63,7 @@ struct ProfileSettingsScreen: View {
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
     @EnvironmentObject private var workouts: WorkoutStore
     @ObservedObject private var sounds = AlertSoundSettings.shared
+    @ObservedObject private var sections = SectionSettings.shared
 
     @State private var section: ProfileSettingsSection
     /// Closes the whole profile sheet (the tour and the deep links need the tabs).
@@ -68,7 +80,8 @@ struct ProfileSettingsScreen: View {
                 ProfileHeader(kicker: "Профиль", title: "Настройки", backLabel: "Назад") { dismiss() }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(ProfileSettingsSection.allCases) { item in
+                        // A section that is off has no settings chip; «Общие → Разделы» turns it back on.
+                        ForEach(ProfileSettingsSection.allCases.filter { sections.isOn($0.tab) }) { item in
                             ProfileChip(title: item.chipTitle, color: item.color, selected: item == section) {
                                 section = item
                             }
@@ -104,6 +117,17 @@ struct ProfileSettingsScreen: View {
     // MARK: Sections
 
     private var general: some View {
+        VStack(alignment: .leading, spacing: 20) {
+        ProfileGroup("Разделы") {
+            ForEach(SectionSettings.optional, id: \.self) { tab in
+                ProfileToggleRow(
+                    name: tab.title,
+                    note: sections.isOn(tab) ? nil : "Скрыт, данные сохранены",
+                    isOn: Binding(get: { sections.isOn(tab) }, set: { sections.set(tab, on: $0) })
+                )
+                .accessibilityIdentifier("profile-section-\(SectionSettings.name(of: tab))")
+            }
+        }
         ProfileGroup("Общие") {
             Button {
                 closeProfile()
@@ -118,6 +142,7 @@ struct ProfileSettingsScreen: View {
             .buttonStyle(ProfileRowButtonStyle())
             .accessibilityIdentifier("profile-short-tour")
             ProfileRow("Версия ARNA") { ProfileValue(appVersion) }
+        }
         }
     }
 

@@ -6,8 +6,9 @@ struct NotesScreen: View {
     @ObservedObject var store: NotesStore
     @ObservedObject var vault: VaultKeySession
     @Binding var showSettings: Bool
-    let onMakePlan: (String) -> Void
-    let onMakeExpense: (String) -> Void
+    /// nil while «Планы» / «Деньги» is turned off: the action is not offered.
+    let onMakePlan: ((String) -> Void)?
+    let onMakeExpense: ((String) -> Void)?
     /// Opens the shared «+» composer (voice or text).
     let onCapture: () -> Void
 

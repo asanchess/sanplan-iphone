@@ -28,7 +28,8 @@ enum MascotReminders {
     }
 
     /// Every line that holds now, the current section's first; a tap shows the next one.
-    static func lines(_ input: MascotReminderInput, focus: MainTab) -> [String] {
+    /// A section that is off (`hidden`) has no line.
+    static func lines(_ input: MascotReminderInput, focus: MainTab, hidden: Set<MainTab> = []) -> [String] {
         var plans: [String] = []
         let open = max(input.plansTotal - input.plansDone, 0)
         if input.plansTotal == 0 {
@@ -57,7 +58,7 @@ enum MascotReminders {
 
         var order: [MainTab] = [.today, .plans, .workout, .money, .notes]
         if let index = order.firstIndex(of: focus) { order.insert(order.remove(at: index), at: 0) }
-        return order.flatMap { tab -> [String] in
+        return order.filter { !hidden.contains($0) }.flatMap { tab -> [String] in
             switch tab {
             case .today: return []
             case .plans: return plans

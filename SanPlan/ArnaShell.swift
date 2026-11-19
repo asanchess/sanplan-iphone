@@ -26,9 +26,6 @@ extension MainTab {
         case .workout: return "dumbbell"
         }
     }
-
-    /// «Сегодня» is always shown; the others can be hidden in «Профиль».
-    var visibilityKey: String { "section.visible.\(rawValue)" }
 }
 
 // MARK: - Bottom bar

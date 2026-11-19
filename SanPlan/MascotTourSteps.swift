@@ -9,11 +9,11 @@ public enum TourPlan {
 
     static let today: [TourStep] = [
         TourStep("today.intro", .today, target: "header.title",
-                 "«Сегодня» собирает день из всех разделов: планы, привычки, деньги и тренировку."),
+                 "«Сегодня» собирает день из всех ваших разделов."),
         TourStep("today.hero", .today, target: "today.hero", key: true,
                  "Главное на сейчас: ближайший план или тренировка дня. Нажмите — откроется нужное место."),
         TourStep("today.rings", .today, target: "today.rings",
-                 "Три круга: планы, привычки и сколько можно потратить. Нажмите круг — откроется раздел."),
+                 "Круги дня по разделам. Нажмите круг — откроется раздел."),
         TourStep("today.next", .today, target: "today.next",
                  "Дальше сегодня — планы по времени. «Все планы» открывает весь список."),
         TourStep("today.habits", .today, target: "today.habits",
@@ -80,7 +80,7 @@ public enum TourPlan {
 
     static let general: [TourStep] = [
         TourStep("general.capture", .general, target: "shell.capture", key: true,
-                 "«+» — быстрая запись: заметка, план или трата, текстом или голосом."),
+                 "«+» — быстрая запись текстом или голосом."),
         TourStep("general.progress", .general, target: "header.progress",
                  "Прогресс за неделю и месяц — по этой кнопке."),
         TourStep("general.profile", .general, target: "header.profile",

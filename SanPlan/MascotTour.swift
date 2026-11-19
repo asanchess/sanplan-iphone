@@ -237,7 +237,9 @@ final class TourCenter: ObservableObject {
     var step: TourStep? { run?.step }
 
     func start(_ kind: TourKind) {
-        let steps = TourPlan.steps(kind)
+        // A section that is off has no tab to show: its steps are left out.
+        let sections = SectionSettings.shared
+        let steps = TourPlan.steps(kind).filter { sections.isOn($0.section.tab) }
         guard !steps.isEmpty else { return }
         run = TourRun(kind: kind, steps: steps)
         TourFrames.shared.live = true
@@ -283,7 +285,7 @@ final class TourCenter: ObservableObject {
         settle?.cancel()
         guard let step = run?.step else { return }
         // A note left open in «Заметки» would hide the list the steps point at.
-        if step.section == .notes, previous?.section != .notes { DeepLinks.shared.open(.notes) }
+        if step.section == .notes, previous?.section != .notes, SectionSettings.shared.isOn(.notes) { DeepLinks.shared.open(.notes) }
         guard let target = step.target else { return }
         let stepID = step.id
         settle = Task { @MainActor [weak self] in

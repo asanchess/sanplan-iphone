@@ -84,8 +84,11 @@ struct CaptureSheet: View {
     @ObservedObject var inputs: InputDrafts
     @ObservedObject var dictation: SpeechDictation
     @ObservedObject var notes: NotesStore
-    let onMakePlan: (String) -> Void
-    let onMakeExpense: (String) -> Void
+    /// nil while «Планы» / «Деньги» is turned off: that hand-off is not offered.
+    let onMakePlan: ((String) -> Void)?
+    let onMakeExpense: ((String) -> Void)?
+    /// False while «Заметки» is turned off: the record goes to a plan or a spending instead of a note.
+    var notesOn: Bool = true
     let onSaved: () -> Void
     /// Answers questions typed into «+» from the other sections' data (nil: no answers offered).
     var askData: (() -> AskData)? = nil
@@ -102,11 +105,11 @@ struct CaptureSheet: View {
                 DS.Colors.canvas.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                     ComposerField(
-                        placeholder: "Мысль, список, план или трата",
+                        placeholder: placeholder,
                         text: Binding(get: { inputs.notes }, set: { inputs.edit($0, for: .notes) }),
                         isListening: dictation.isListening(to: .notes),
                         level: dictation.level,
-                        parseTitle: "Сохранить заметку",
+                        parseTitle: primaryTitle,
                         onMic: {
                             if dictation.isListening(to: .notes) { dictation.stop() }
                             else { Task { await dictation.start(into: .notes) } }
@@ -122,8 +125,8 @@ struct CaptureSheet: View {
                     if let error = dictation.errorMessage {
                         Text(error).font(.footnote).foregroundColor(DS.Colors.destructive)
                     }
-                    if !notes.isAvailable {
-                        Text("Заметки откроются после входа в аккаунт. Запись можно сделать планом или тратой.")
+                    if notesOn, !notes.isAvailable, onMakePlan != nil || onMakeExpense != nil {
+                        Text("Заметки откроются после входа в аккаунт. Запись можно отправить в другой раздел.")
                             .font(.footnote)
                             .foregroundColor(DS.Colors.textSecondary)
                     }
@@ -156,20 +159,47 @@ struct CaptureSheet: View {
             let hints = NoteText.hints(text)
             VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
                 if let askData { AskOffer(text: text, data: askData) }
-                if hints.looksLikePlan || hints.looksLikeExpense {
+                if (hints.looksLikePlan && offersPlan) || (hints.looksLikeExpense && offersExpense) {
                     Text("Похоже на").font(.footnote).foregroundColor(DS.Colors.textSecondary)
                 }
                 HStack(spacing: DS.Metrics.spacing8) {
-                    HeaderTextButton("Сделать планом", icon: "calendar.badge.plus") { handOff(onMakePlan) }
-                        .opacity(hints.looksLikePlan ? 1 : 0.7)
-                    HeaderTextButton("Записать трату", icon: "creditcard") { handOff(onMakeExpense) }
-                        .opacity(hints.looksLikeExpense ? 1 : 0.7)
+                    if offersPlan, let onMakePlan {
+                        HeaderTextButton("Сделать планом", icon: "calendar.badge.plus") { handOff(onMakePlan) }
+                            .opacity(hints.looksLikePlan ? 1 : 0.7)
+                    }
+                    if offersExpense, let onMakeExpense {
+                        HeaderTextButton("Записать трату", icon: "creditcard") { handOff(onMakeExpense) }
+                            .opacity(hints.looksLikeExpense ? 1 : 0.7)
+                    }
                 }
             }
         }
     }
 
+    // Without «Заметки» the main button sends the record to «Планы» (else «Деньги»), and the offer below
+    // keeps only the other section, so no button repeats the main one.
+    private var primaryIsPlan: Bool { !notesOn && onMakePlan != nil }
+    private var primaryIsExpense: Bool { !notesOn && onMakePlan == nil && onMakeExpense != nil }
+    private var offersPlan: Bool { onMakePlan != nil && !primaryIsPlan }
+    private var offersExpense: Bool { onMakeExpense != nil && !primaryIsExpense }
+
+    private var primaryTitle: String {
+        primaryIsPlan ? "Сделать планом" : primaryIsExpense ? "Записать трату" : "Сохранить заметку"
+    }
+
+    private var placeholder: String {
+        var kinds: [String] = []
+        if notesOn { kinds.append("Мысль, список") }
+        if onMakePlan != nil { kinds.append("план") }
+        if onMakeExpense != nil { kinds.append("трата") }
+        guard let last = kinds.last else { return "Запись" }
+        let line = kinds.count == 1 ? last : kinds.dropLast().joined(separator: ", ") + " или " + last
+        return line.prefix(1).uppercased() + line.dropFirst()
+    }
+
     private func save() {
+        if primaryIsPlan, let onMakePlan { handOff(onMakePlan); return }
+        if primaryIsExpense, let onMakeExpense { handOff(onMakeExpense); return }
         guard notes.isAvailable else { return }
         if dictation.isListening(to: .notes) { dictation.stop() }
         let value = inputs.take(.notes)
