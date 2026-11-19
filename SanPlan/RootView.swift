@@ -274,6 +274,10 @@ public struct RootView: View {
             if !keyboardVisible {
                 ArnaTabBar(selection: $selectedTab, tabs: MainTab.ordered)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
+                    // The tour picks the tab itself; a stray tap must not take the person away from it.
+                    .allowsHitTesting(!tour.isActive)
+                    .opacity(tour.isActive ? 0.4 : 1)
+                    .animation(.easeInOut(duration: 0.3), value: tour.isActive)
             }
         }
         .onChange(of: selectedTab, initial: true) { _, tab in mounted.insert(tab) }

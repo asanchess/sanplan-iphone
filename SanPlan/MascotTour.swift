@@ -271,23 +271,14 @@ final class TourCenter: ObservableObject {
         TourFrames.shared.live = false
     }
 
-    private func passMissing() {
-        guard var current = run else { return }
-        let previous = current.step
-        if current.passMissing() {
-            run = current
-            stepChanged(from: previous)
-        } else {
-            end()
-        }
-    }
-
     private func requestScroll(_ id: String) {
         token += 1
         scrollRequest = TourScrollRequest(id: id, token: token)
     }
 
-    /// After the tab has switched: scroll the target into view if it is not, and pass a step whose target is not there.
+    /// After the tab has switched: scroll the target into view if it is not.
+    /// The tour never moves on by itself: only the person's «Дальше» does. A step whose target is not on screen
+    /// stays, with the card in the middle and nothing lit.
     private func stepChanged(from previous: TourStep?) {
         settle?.cancel()
         guard let step = run?.step else { return }
@@ -299,12 +290,57 @@ final class TourCenter: ObservableObject {
             try? await Task.sleep(for: .milliseconds(450))
             guard let self, !Task.isCancelled, self.run?.step?.id == stepID else { return }
             if !TourFrames.shared.isFullyVisible(target) { self.requestScroll(target) }
-            try? await Task.sleep(for: .milliseconds(900))
-            guard !Task.isCancelled, self.run?.step?.id == stepID else { return }
-            if TourFrames.shared.frame(target) == nil, self.run?.passesMissingTargets == true {
-                self.passMissing()
-            }
         }
+    }
+}
+
+// MARK: - Placement
+
+/// Where the card stands next to the lit element, and which way the mascot points at it.
+/// The card goes into the larger free space beside the element, so the text and the element are read together.
+public struct TourPlacement: Equatable {
+    public enum Side: Equatable {
+        /// The card is right above the element: the mascot points down.
+        case above
+        /// The card is right under the element: the mascot points up.
+        case below
+        /// No room beside the element, or nothing is lit: the card sits at the screen edge away from it.
+        case edge(top: Bool)
+    }
+
+    public enum Pointer: String, Equatable {
+        case up, down, upLeft, upRight, forward
+    }
+
+    public let side: Side
+    /// The mascot stands on the card's leading side (true) or trailing side, whichever is nearer the element.
+    public let mascotLeading: Bool
+    public let pointer: Pointer
+
+    /// The mascot's width plus the card's outer padding: where its hand is, horizontally.
+    static let mascotReach: CGFloat = 52
+
+    public static func decide(hole: CGRect?, area: CGSize, topInset: CGFloat, minSpace: CGFloat = 200) -> TourPlacement {
+        guard let hole, hole.width > 0, hole.height > 0 else {
+            return TourPlacement(side: .edge(top: false), mascotLeading: true, pointer: .forward)
+        }
+        let leading = hole.midX <= area.width / 2
+        let handX = leading ? mascotReach : area.width - mascotReach
+        let dx = hole.midX - handX
+        let straight = abs(dx) < area.width * 0.22
+        let upward: Pointer = straight ? .up : (dx < 0 ? .upLeft : .upRight)
+
+        let spaceAbove = hole.minY - topInset
+        let spaceBelow = area.height - hole.maxY
+        if max(spaceAbove, spaceBelow) < minSpace {
+            // The element fills the screen: the card covers the far end of it.
+            let top = hole.midY > area.height / 2
+            return TourPlacement(side: .edge(top: top), mascotLeading: leading, pointer: top ? .down : upward)
+        }
+        if spaceBelow >= spaceAbove {
+            return TourPlacement(side: .below, mascotLeading: leading, pointer: upward)
+        }
+        return TourPlacement(side: .above, mascotLeading: leading, pointer: .down)
     }
 }
 
@@ -419,7 +455,9 @@ private struct TourDimShape: Shape {
     }
 }
 
-/// Drawn over the tabs (not over the tab bar). Only the card takes touches: the screen still scrolls under the dim.
+/// Drawn over the tabs; RootView switches the tab bar off while it runs.
+/// Nothing under the dim takes touches, the lit element included: only the card's buttons work,
+/// and only «Дальше» moves the tour on.
 @MainActor
 struct MascotTourOverlay: View {
     @ObservedObject private var center = TourCenter.shared
@@ -435,7 +473,14 @@ struct MascotTourOverlay: View {
                     let hole = frames.frame(step.target).map { $0.offsetBy(dx: -area.minX, dy: -area.minY).insetBy(dx: -8, dy: -8) }
                     let holeKey = "\(step.id)|\(hole != nil)"
                     let accent = step.section.tab.accent
-                    let atTop = (hole?.midY ?? 0) > proxy.size.height * 0.5
+                    let place = TourPlacement.decide(hole: hole, area: proxy.size, topInset: proxy.safeAreaInsets.top)
+
+                    // Swallows every touch, so nothing is pressed or scrolled by accident during the tour.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0))
+                        .accessibilityHidden(true)
+
                     Group {
                         if reduceMotion {
                             spotlight(hole, accent: accent, size: proxy.size)
@@ -448,13 +493,12 @@ struct MascotTourOverlay: View {
                     .animation(reduceMotion ? .easeInOut(duration: 0.4) : .spring(duration: 0.6, bounce: 0.1), value: holeKey)
                     .transition(.opacity)
 
-                    card(run, step, accent: accent)
-                        .padding(.top, atTop ? proxy.safeAreaInsets.top + 8 : 0)
-                        .padding(.bottom, atTop ? 0 : 10)
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: atTop ? .top : .bottom)
-                        .id(reduceMotion ? "card-\(atTop)" : "card")
+                    card(run, step, accent: accent, place: place)
+                        .modifier(TourCardPosition(place: place, hole: hole, size: proxy.size, topInset: proxy.safeAreaInsets.top))
+                        .id(reduceMotion ? "card-\(step.id)" : "card")
                         .transition(.opacity)
-                        .animation(reduceMotion ? .easeInOut(duration: 0.4) : .spring(duration: 0.65, bounce: 0.12), value: atTop)
+                        // The mascot walks with the card to the next element.
+                        .animation(reduceMotion ? .easeInOut(duration: 0.4) : .spring(duration: 0.7, bounce: 0.18), value: holeKey)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
@@ -486,16 +530,37 @@ struct MascotTourOverlay: View {
         .accessibilityHidden(true)
     }
 
-    private func card(_ run: TourRun, _ step: TourStep, accent: Color) -> some View {
+    private func mascot(_ place: TourPlacement) -> some View {
+        let art = TourPointerArt.image(place.pointer)
+        return Image(art.name)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(x: art.mirrored ? -1 : 1, y: 1)
+            .frame(width: 74, height: 100, alignment: place.side == .above ? .bottom : .top)
+            .shadow(color: .black.opacity(0.45), radius: 4, y: 4)
+            .id(art.name + (art.mirrored ? "-m" : ""))
+            .transition(.opacity)
+            .accessibilityHidden(true)
+    }
+
+    private func card(_ run: TourRun, _ step: TourStep, accent: Color, place: TourPlacement) -> some View {
         let ink = DS.Colors.hex(0x1B1430)
-        return HStack(alignment: .bottom, spacing: 6) {
-            Image(MascotWardrobe.shared.heroImage(.point))
-                .resizable()
-                .scaledToFit()
-                .frame(width: 56, height: 74, alignment: .bottom)
-                .shadow(color: .black.opacity(0.45), radius: 4, y: 4)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 10) {
+        return HStack(alignment: place.side == .above ? .bottom : .top, spacing: 4) {
+            if place.mascotLeading { mascot(place) }
+            bubble(run, step, accent: accent, ink: ink)
+            if !place.mascotLeading { mascot(place) }
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: 520)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("tour-card")
+        .onChange(of: step.id, initial: true) { _, _ in
+            UIAccessibility.post(notification: .announcement, argument: step.text)
+        }
+    }
+
+    private func bubble(_ run: TourRun, _ step: TourStep, accent: Color, ink: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
                 Text("\(step.section.title) · \(run.position)".uppercased())
                     .font(DS.Fonts.text(11, .heavy, relativeTo: .caption))
                     .tracking(0.6)
@@ -544,13 +609,49 @@ struct MascotTourOverlay: View {
             .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.Colors.ink, lineWidth: 2))
             .shadow(color: .black.opacity(0.4), radius: 10, y: 8)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: step.id)
+    }
+}
+
+/// Puts the card right above or right under the lit element, or at a screen edge when there is no room.
+private struct TourCardPosition: ViewModifier {
+    let place: TourPlacement
+    let hole: CGRect?
+    let size: CGSize
+    let topInset: CGFloat
+
+    func body(content: Content) -> some View {
+        switch place.side {
+        case .below:
+            content
+                .padding(.top, (hole?.maxY ?? 0) + 6)
+                .frame(width: size.width, height: size.height, alignment: .top)
+        case .above:
+            content
+                .frame(width: size.width, height: max((hole?.minY ?? size.height) - 6, 0), alignment: .bottom)
+                .frame(width: size.width, height: size.height, alignment: .top)
+        case .edge(let top):
+            content
+                .padding(.top, top ? topInset + 8 : 0)
+                .padding(.bottom, top ? 0 : 10)
+                .frame(width: size.width, height: size.height, alignment: top ? .top : .bottom)
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: 520)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("tour-card")
-        .onChange(of: step.id, initial: true) { _, _ in
-            UIAccessibility.post(notification: .announcement, argument: step.text)
+    }
+}
+
+/// The mascot's pointing picture for a direction. Only the base look has them; other looks point forward.
+@MainActor
+enum TourPointerArt {
+    static func image(_ pointer: TourPlacement.Pointer) -> (name: String, mirrored: Bool) {
+        let fallback = MascotWardrobe.shared.heroImage(.point)
+        guard MascotWardrobe.shared.skinID == MascotArcs.baseSkin else { return (fallback, false) }
+        let choice: (String, Bool)
+        switch pointer {
+        case .up: choice = ("PetPointUp", false)
+        case .down: choice = ("PetPointDown", false)
+        case .upLeft: choice = ("PetPointUpLeft", false)
+        case .upRight: choice = ("PetPointUpLeft", true)
+        case .forward: return (fallback, false)
         }
+        return MascotAssets.exists(choice.0) ? (choice.0, choice.1) : (fallback, false)
     }
 }

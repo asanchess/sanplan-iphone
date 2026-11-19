@@ -2,6 +2,41 @@ import XCTest
 @testable import SanPlan
 
 final class MascotTourTests: XCTestCase {
+    // MARK: Card placement
+
+    private let phone = CGSize(width: 390, height: 760)
+
+    func testCardGoesUnderAnElementNearTheTopAndTheMascotPointsUp() {
+        let place = TourPlacement.decide(hole: CGRect(x: 20, y: 80, width: 120, height: 60), area: phone, topInset: 50)
+        XCTAssertEqual(place.side, .below)
+        XCTAssertTrue(place.mascotLeading)
+        XCTAssertEqual(place.pointer, .up)
+    }
+
+    func testCardGoesAboveAnElementNearTheBottomAndTheMascotPointsDown() {
+        let place = TourPlacement.decide(hole: CGRect(x: 250, y: 600, width: 120, height: 60), area: phone, topInset: 50)
+        XCTAssertEqual(place.side, .above)
+        XCTAssertFalse(place.mascotLeading)
+        XCTAssertEqual(place.pointer, .down)
+    }
+
+    func testMascotPointsDiagonallyAtAnElementFarFromItsHand() {
+        // A wide element in the middle-left: the hand is at the leading edge, the element's centre is to its right.
+        let place = TourPlacement.decide(hole: CGRect(x: 40, y: 90, width: 300, height: 50), area: phone, topInset: 50)
+        XCTAssertEqual(place.pointer, .upRight)
+    }
+
+    func testAnElementThatFillsTheScreenPutsTheCardAtTheEdge() {
+        let place = TourPlacement.decide(hole: CGRect(x: 10, y: 100, width: 370, height: 540), area: phone, topInset: 50)
+        XCTAssertEqual(place.side, .edge(top: false))
+    }
+
+    func testNothingLitPutsTheCardAtTheBottomPointingForward() {
+        let place = TourPlacement.decide(hole: nil, area: phone, topInset: 50)
+        XCTAssertEqual(place.side, .edge(top: false))
+        XCTAssertEqual(place.pointer, .forward)
+    }
+
     // MARK: Step lists
 
     func testEverySectionHasFourToEightStepsInTheFullTour() {
