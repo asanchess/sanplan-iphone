@@ -66,10 +66,20 @@ enum MoneyDemo {
         records.append(net)
 
         // Envelopes with history.
-        records.append(FinanceRecord(id: "demo-goal-cushion", kind: "goal", title: "Подушка", amountMinor: tenge(300_000), savedMinor: tenge(120_000)))
-        records.append(FinanceRecord(id: "demo-goal-trip", kind: "goal", title: "Отпуск", amountMinor: tenge(200_000), savedMinor: tenge(45_000)))
-        records.append(FinanceRecord(id: "demo-goal-tech", kind: "goal", title: "Техника", amountMinor: tenge(150_000), savedMinor: tenge(17_400)))
+        // «Отпуск» is behind its date, «Техника» is on track, «Подушка» has no date and grows for months.
+        records.append(FinanceRecord(id: "demo-goal-cushion", kind: "goal", title: "Подушка", amountMinor: tenge(300_000), savedMinor: tenge(180_000)))
+        var trip = FinanceRecord(id: "demo-goal-trip", kind: "goal", title: "Отпуск", amountMinor: tenge(200_000), savedMinor: tenge(45_000))
+        trip.date = day(150)
+        trip.dueDate = day(-120)
+        records.append(trip)
+        var tech = FinanceRecord(id: "demo-goal-tech", kind: "goal", title: "Техника", amountMinor: tenge(150_000), savedMinor: tenge(17_400))
+        tech.date = day(40)
+        tech.dueDate = day(-400)
+        records.append(tech)
         let log = [
+            EnvelopeLogEntry(id: "demo-log-old-1", goalId: "demo-goal-cushion", amountMinor: tenge(20_000), date: day(150)),
+            EnvelopeLogEntry(id: "demo-log-old-2", goalId: "demo-goal-cushion", amountMinor: tenge(15_000), date: day(120)),
+            EnvelopeLogEntry(id: "demo-log-old-3", goalId: "demo-goal-cushion", amountMinor: tenge(25_000), date: day(85)),
             EnvelopeLogEntry(id: "demo-log-1", goalId: "demo-goal-cushion", amountMinor: tenge(80_000), date: day(26)),
             EnvelopeLogEntry(id: "demo-log-2", goalId: "demo-goal-trip", amountMinor: tenge(45_000), date: day(20)),
             EnvelopeLogEntry(id: "demo-log-3", goalId: "demo-goal-tech", amountMinor: tenge(25_000), date: day(16)),

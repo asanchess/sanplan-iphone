@@ -36,6 +36,12 @@ enum MoneyDays {
         return ymd.string(from: moved)
     }
 
+    /// Whole days from `start` to `end` (negative when `end` is earlier); 0 for a bad date.
+    static func days(from start: String, to end: String) -> Int {
+        guard let a = ymd.date(from: start), let b = ymd.date(from: end) else { return 0 }
+        return calendar.dateComponents([.day], from: a, to: b).day ?? 0
+    }
+
     /// Monday to Sunday of the week that holds `day`.
     static func week(of day: String) -> [String] {
         guard let date = ymd.date(from: day) else { return [] }
@@ -573,92 +579,5 @@ struct MoneyCategoryList: View {
             .sorted { $0.tenge != $1.tenge ? $0.tenge > $1.tenge : $0.name < $1.name }
         guard sorted.count > 5 else { return sorted }
         return Array(sorted.prefix(4)) + [Row(name: "Остальное", tenge: sorted.dropFirst(4).reduce(0) { $0 + $1.tenge })]
-    }
-}
-
-// MARK: - План: envelope cards
-
-/// One envelope in the horizontal row: name, what it holds, the target, and its latest move.
-struct MoneyEnvelopeCard: View {
-    let goal: FinanceRecord
-    let lastMove: EnvelopeLogEntry?
-    let receivesIncome: Bool
-    let onTap: () -> Void
-    @Environment(\.sectionAccent) private var accent
-
-    private var note: String {
-        let saved = goal.savedMinor ?? 0
-        let target = goal.amountMinor ?? 0
-        if target > 0 && saved >= target { return "цель собрана" }
-        return "цель " + FinanceText.money(target)
-    }
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(goal.title)
-                    .font(DS.Fonts.text(15, .bold))
-                    .foregroundColor(DS.Colors.textSecondary)
-                    .lineLimit(1)
-                Text(FinanceText.money(goal.savedMinor ?? 0))
-                    .font(DS.Fonts.text(21, .heavy, relativeTo: .title3))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(note)
-                    .font(DS.Fonts.text(13, .semibold, relativeTo: .caption))
-                    .foregroundColor(accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if let lastMove {
-                    Text("\(lastMove.amountMinor > 0 ? "+" : "−")\(FinanceText.money(abs(lastMove.amountMinor))) · \(FinanceText.dayMonth(lastMove.date))")
-                        .font(DS.Fonts.text(12, .medium, relativeTo: .caption2))
-                        .foregroundColor(DS.Colors.textMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                } else if receivesIncome {
-                    Text("сюда с дохода")
-                        .font(DS.Fonts.text(12, .medium, relativeTo: .caption2))
-                        .foregroundColor(DS.Colors.textMuted)
-                }
-            }
-            .frame(width: 118, alignment: .leading)
-            .padding(16)
-            .frame(minHeight: 118, alignment: .topLeading)
-            .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .buttonStyle(PressScaleStyle())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Открыть конверт: история, отложить, забрать")
-    }
-}
-
-/// The last card of the row: a dashed outline that creates an envelope.
-struct MoneyNewEnvelopeCard: View {
-    let onTap: () -> Void
-    @Environment(\.sectionAccent) private var accent
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 10) {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(accent)
-                Text("Новый конверт")
-                    .font(DS.Fonts.text(15, .bold))
-                    .foregroundColor(DS.Colors.textPrimary)
-            }
-            .frame(width: 118, alignment: .leading)
-            .padding(16)
-            .frame(minHeight: 118, alignment: .topLeading)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(DS.Colors.hairline, style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .buttonStyle(PressScaleStyle())
-        .accessibilityLabel("Новый конверт")
     }
 }

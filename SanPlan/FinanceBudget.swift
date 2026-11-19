@@ -878,8 +878,9 @@ public enum FinanceBudgeting {
         return out
     }
 
-    /// How many months the envelopes cover the plan's payments (or, with no payments, the usual spending).
-    static func runwayHint(_ state: FinanceState, today: String) -> FinanceHint? {
+    /// What a month of living costs: the plan's payments, or with none, the average spending of whole months.
+    /// The basis names which one, in the genitive («обязательных трат»). Nil when neither is known.
+    static func monthlyLivingCost(_ state: FinanceState, today: String) -> (minor: Int64, basis: String)? {
         var base: Int64 = 0
         for r in state.records where r.kind == "obligation" {
             let amount = r.amountMinor ?? 0
@@ -894,7 +895,13 @@ public enum FinanceBudgeting {
             base = spent / Int64(months.count)
             basis = "обычных расходов"
         }
-        guard base > 0 else { return nil }
+        return base > 0 ? (base, basis) : nil
+    }
+
+    /// How many months the envelopes cover the plan's payments (or, with no payments, the usual spending).
+    static func runwayHint(_ state: FinanceState, today: String) -> FinanceHint? {
+        guard let cost = monthlyLivingCost(state, today: today) else { return nil }
+        let base = cost.minor, basis = cost.basis
         // All of it, on the accounts or not: the cushion is what there is to live on.
         let reserved = state.records.filter { $0.kind == "goal" }.reduce(Int64(0)) { $0 + ($1.savedMinor ?? 0) }
         let tenths = reserved * 10 / base
