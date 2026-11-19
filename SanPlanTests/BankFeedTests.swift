@@ -194,7 +194,7 @@ final class BankFeedTests: XCTestCase {
         ])
         state = try importing(StatementImportTests.kaspiText, id: "k", into: state)
         let kept = state.records.filter { BankFeed.isFeed($0.importId) }
-        XCTAssertEqual(kept.map(\.amountMinor).sorted(), [2_000_000, 3_000_000])
+        XCTAssertEqual(kept.compactMap(\.amountMinor).sorted(), [2_000_000, 3_000_000])
         XCTAssertTrue(kept.allSatisfy { $0.note == BankFeed.missingNote })
         XCTAssertNil(state.records.first { $0.id == "k-5" }?.note)
     }
