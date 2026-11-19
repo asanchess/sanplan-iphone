@@ -242,6 +242,8 @@ public struct SettingsView: View {
 struct WorkoutDefaultsSection: View {
     @ObservedObject var store: WorkoutStore
     @ObservedObject private var sounds = AlertSoundSettings.shared
+    @ObservedObject private var reminder = WorkoutReminderSettings.shared
+    @EnvironmentObject private var alarms: AlarmCoordinator
     @Environment(\.sectionAccent) private var accent
 
     private var defaults: WorkoutDefaults { WorkoutProgram.defaults(of: store.program) }
@@ -303,6 +305,31 @@ struct WorkoutDefaultsSection: View {
                     ProfileRow("Сейчас — по числу тренировочных дней в плане.")
                 }
             }
+            ProfileGroup("Напоминание") {
+                ProfileToggleRow(
+                    name: "Будильник в дни тренировок",
+                    note: reminderNote,
+                    isOn: Binding(get: { reminder.isOn }, set: { on in
+                        reminder.setOn(on)
+                        // The first time, iOS asks for alarm access; the sync runs again once it is given.
+                        guard on, !alarms.isAuthorized else { return }
+                        Task {
+                            await alarms.requestAuthorization()
+                            reminder.onChange()
+                        }
+                    })
+                )
+                .accessibilityIdentifier("workout-reminder-toggle")
+                if reminder.isOn {
+                    DatePicker("Время", selection: reminderTime, displayedComponents: .hourAndMinute)
+                        .font(DS.Fonts.text(16, .semibold))
+                        .foregroundColor(DS.Colors.textPrimary)
+                        .environment(\.locale, Locale(identifier: "ru_RU"))
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 56)
+                        .accessibilityIdentifier("workout-reminder-time")
+                }
+            }
             ProfileGroup("Звук") {
                 AlertSoundRow(title: "Звук конца отдыха", choice: sounds.rest, onSelect: sounds.setRest, volume: sounds.restVolume, onVolume: sounds.setRestVolume)
             }
@@ -315,6 +342,24 @@ struct WorkoutDefaultsSection: View {
             .padding(.vertical, 8)
             .frame(minHeight: 64)
             .overlay(alignment: .bottom) { ProfileDivider() }
+    }
+
+    /// «Пн, Ср, Пт», or why there is nothing to ring for.
+    private var reminderNote: String {
+        let names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        let days = reminder.days.filter { (1...7).contains($0) }
+        guard !days.isEmpty else { return "В плане пока нет дней тренировок" }
+        return days.map { names[$0 - 1] }.joined(separator: ", ")
+    }
+
+    private var reminderTime: Binding<Date> {
+        Binding(
+            get: { Calendar.current.date(bySettingHour: reminder.minutes / 60, minute: reminder.minutes % 60, second: 0, of: Date()) ?? Date() },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                reminder.setMinutes((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
+            }
+        )
     }
 
     private func change(_ edit: (inout WorkoutDefaults) -> Void) {

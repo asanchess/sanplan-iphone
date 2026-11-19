@@ -292,7 +292,9 @@ public final class AlarmCoordinator: ObservableObject {
         isSyncing = true
         defer { finishOperation() }
 
-        let planResult = NativePlanPlanner.planAlarms(plans: plans, referenceDate: Date(), maxCap: 50)
+        // The workout reminder (Settings → Тренировка) rides along as plan-like entries of its own.
+        let now = Date()
+        let planResult = NativePlanPlanner.planAlarms(plans: plans + WorkoutReminder.plans(defaults: userDefaults, now: now), referenceDate: now, maxCap: 50)
         let desiredAlarms = planResult.scheduledAlarms
         var currentWarnings = planResult.warnings
         var currentErrors: [String] = []

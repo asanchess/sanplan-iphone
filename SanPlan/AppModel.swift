@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Owns the feature stores above the tabs, so recordings, drafts and a running workout survive tab switches.
@@ -28,6 +29,7 @@ public final class AppModel: ObservableObject {
     /// Polls the server's change counters while the app is in front, so another device's edits arrive within seconds.
     public let liveSync: VaultLiveSync
     private var planSoundWatcher: PlanSoundWatcher?
+    private var workoutDaysWatcher: AnyCancellable?
 
     public init() {
         let auth = AuthService(client: APIClient())
@@ -137,6 +139,12 @@ public final class AppModel: ObservableObject {
         let planStore = self.plans
         let resync = PlanAlarmResync(alarms: alarms, plansLoaded: { planStore.hasLoadedPlans }, plans: { planStore.plans.map { $0.toNativePlan() } })
         planSoundWatcher = PlanSoundWatcher { Task { await resync.soundChanged() } }
+        // The workout reminder follows the program's training days and re-syncs the alarms on any change.
+        WorkoutReminderSettings.shared.onChange = { Task { await resync.soundChanged() } }
+        workoutDaysWatcher = workouts.$training
+            .map { ($0 ?? WorkoutProgram.empty()).days.map(\.weekday) }
+            .removeDuplicates()
+            .sink { days in MainActor.assumeIsolated { WorkoutReminderSettings.shared.setDays(days) } }
         // Midnight, a new time zone or a clock change: «сегодня» moves on even if the app never left the screen.
         for name in [UIApplication.significantTimeChangeNotification, Notification.Name.NSCalendarDayChanged] {
             _ = NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
