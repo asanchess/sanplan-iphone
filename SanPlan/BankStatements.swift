@@ -302,7 +302,8 @@ public enum BankStatementParser {
     // lines, «2026-11-» and «06»), «Расход» or «Доход», product, card «400000******0001» or account «KZ*0002», the bank's
     // category, MCC or «-», name, signed whole-tenge amount with «₸», description. No balance and no bank name.
 
-    static let halykReportTitles = ["аналитический отчет по операциям клиента", "аналитический отчёт по операциям клиента"]
+    static let halykReportTitles = ["аналитический отчет по операциям клиента", "аналитический отчёт по операциям клиента",
+                                    "analytical report on the transactions of customer"]
 
     /// `text` is normalised but not flattened: when the cells of a row come out line by line rather than cell by
     /// cell, the day of the date starts a line of its own.
@@ -310,8 +311,7 @@ public enum BankStatementParser {
         let flatText = flat(text)
         let starts = regex(#"(\d{4})-(\d{2})-"#).matches(in: text, range: NSRange(text.startIndex..., in: text))
         let account = regex(#"(?:\d{4,6}\*{2,}|KZ\*+|\*{2,})(\d{4})(?!\d)"#)
-        let signedAmount = regex(#"([+\-]) ?(\d+(?: \d{3})*(?:[.,]\d{1,2})?) ?(?:₸|KZT|тг)(?![\p{L}])"#)
-        let kind = regex(#"(?<![\p{L}])(Расход|Доход)(?![\p{L}])"#)
+        let kind = regex(#"(?<![\p{L}])(Расход|Доход|Expense|Income)(?![\p{L}])"#)
         let cells = regex(#"^(.+?) (\d{4}|-) (.+)$"#)
         var transactions: [ParsedStatement.Transaction] = []
         for (n, start) in starts.enumerated() {
@@ -320,18 +320,18 @@ public enum BankStatementParser {
             let rawRow = String(text[range.upperBound..<end])
             let row = flat(rawRow)
             let yearMonth = groups(start, text)
-            guard let money = match(signedAmount, row), let amount = wholeOrMinor(money[2]), amount > 0,
+            guard let money = reportAmount(row), let amount = wholeOrMinor(money.number), amount > 0,
                   let day = reportDay(rawRow, row: row) else { continue }
             let date = yearMonth[1] + "-" + yearMonth[2] + "-" + String(format: "%02d", day)
             guard isValidDateString(date) else { continue }
             let type = match(kind, row)?[1].lowercased()
-            let incoming = type.map { $0 == "доход" } ?? (money[1] == "+")
+            let incoming = type.map { $0 == "доход" || $0 == "income" } ?? (money.sign == "+")
             // Category, MCC and name sit between the account and the amount when the cells come out in order.
             var bankCategory = ""
             var name = ""
             if let acc = account.firstMatch(in: row, range: NSRange(row.startIndex..., in: row)),
-               let accRange = Range(acc.range, in: row), let moneyRange = row.range(of: money[0]), accRange.upperBound <= moneyRange.lowerBound {
-                let between = row[accRange.upperBound..<moneyRange.lowerBound].trimmingCharacters(in: .whitespaces)
+               let accRange = Range(acc.range, in: row), accRange.upperBound <= money.range.lowerBound {
+                let between = row[accRange.upperBound..<money.range.lowerBound].trimmingCharacters(in: .whitespaces)
                 if let c = match(cells, between) {
                     bankCategory = c[1]
                     name = c[3]
@@ -346,7 +346,7 @@ public enum BankStatementParser {
                                       account: suffix, bankCategory: bankCategory.isEmpty ? nil : bankCategory))
         }
         let period = match(regex(#"(?:период|period)\D{0,30}(\d{2}\.\d{2}\.\d{4})\D{1,8}(\d{2}\.\d{2}\.\d{4})"#), flatText)
-        let owner = match(regex(#"по операциям клиента (\p{L}+) (\p{L}+)"#), flatText)
+        let owner = match(regex(#"(?:по операциям клиента|transactions of customer) (\p{L}+) (\p{L}+)"#), flatText)
         return ParsedStatement(
             bank: .halyk,
             periodStart: period.flatMap { isoDate($0[1]) },
@@ -357,6 +357,27 @@ public enum BankStatementParser {
             ownerFirstName: owner?[2],
             ownerSurname: owner?[1]
         )
+    }
+
+    /// A row's amount: «-1 895 ₸» in the Russian report, «-1 895» in the English one, where transfers between
+    /// own cards carry neither sign nor currency: then the bare number right before a description that repeats the name.
+    private static func reportAmount(_ row: String) -> (sign: String, number: String, range: Range<String.Index>)? {
+        let signed = [#"([+\-]) ?(\d+(?: \d{3})*(?:[.,]\d{1,2})?) ?(?:₸|KZT|тг)(?![\p{L}])"#,
+                      #"(?<![\p{L}\d*])([+\-])(\d{1,3}(?: \d{3})*(?:[.,]\d{1,2})?)(?!\d)"#]
+        for pattern in signed {
+            if let m = regex(pattern).firstMatch(in: row, range: NSRange(row.startIndex..., in: row)), let whole = Range(m.range, in: row) {
+                let g = groups(m, row)
+                return (g[1], g[2], whole)
+            }
+        }
+        for m in regex(#"(?<![\d*])(\d{1,3}(?: \d{3})*(?:[.,]\d{1,2})?)(?!\d)"#).matches(in: row, range: NSRange(row.startIndex..., in: row)) {
+            guard let r = Range(m.range, in: row) else { continue }
+            let after = row[r.upperBound...].trimmingCharacters(in: .whitespaces)
+            if !after.isEmpty, row[..<r.lowerBound].trimmingCharacters(in: .whitespaces).hasSuffix(after) {
+                return ("", String(row[r]), r)
+            }
+        }
+        return nil
     }
 
     /// The day right after «2026-11-», or else the first line of the row that starts with a day.
@@ -373,18 +394,21 @@ public enum BankStatementParser {
     private static func reportOperation(category: String, name: String, incoming: Bool) -> (String, String) {
         let lower = category.lowercased()
         var details = name
-        for prefix in ["Поступление на счет", "Поступление на счёт"] where details.hasPrefix(prefix) {
+        for prefix in ["Поступление на счет", "Поступление на счёт", "Credit to account"] where details.hasPrefix(prefix) {
             details = String(details.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet(charactersIn: " :"))
         }
         if details.isEmpty { details = name.isEmpty ? category : name }
         let operation: String
         // Without the category (cells line by line), the name still tells a transfer.
-        let transferName = name.hasPrefix("Поступление на сч") || name.hasPrefix("Исходящий перевод")
-        if lower.contains("перевод") || transferName { operation = "Перевод" }
-        else if lower.contains("зарплат") { operation = "Зарплата" }
-        else if lower.contains("налич") { operation = "Снятие наличных" }
-        else if lower.contains("пополн") { operation = "Пополнение" }
-        else if lower.contains("возврат") { operation = "Возврат" }
+        // The English report («Transfers between own accounts», «Credit to account») reads the same way.
+        let transferName = ["Поступление на сч", "Исходящий перевод", "Credit to account", "Transfer between own", "Outgoing transfer"]
+            .contains { name.hasPrefix($0) }
+        let has = { (words: [String]) in words.contains { lower.contains($0) } }
+        if has(["перевод", "transfer"]) || transferName { operation = "Перевод" }
+        else if has(["зарплат", "salary"]) { operation = "Зарплата" }
+        else if has(["налич", "cash"]) { operation = "Снятие наличных" }
+        else if has(["пополн", "top-up", "top up", "replenish"]) { operation = "Пополнение" }
+        else if has(["возврат", "refund"]) { operation = "Возврат" }
         else { operation = incoming ? "Зачисление" : "Покупка" }
         return (operation, details)
     }
@@ -910,17 +934,18 @@ public enum MerchantCategories {
 
     /// Words of the bank's own purchase categories («Супермаркеты», «Здоровье и уход»…) and the category they mean here.
     private static let bankWords: [(String, [String])] = [
-        ("Продукты", ["супермаркет", "продукт"]),
-        ("Доставка еды", ["доставк"]),
-        ("Кафе и рестораны", ["кафе", "ресторан", "фастфуд", "фаст-фуд", "кофейн"]),
-        ("Здоровье", ["здоров", "аптек", "медиц", "красот"]),
-        ("Транспорт", ["такси", "транспорт", "азс", "топлив", "авто", "парков"]),
-        ("Связь и интернет", ["связь", "интернет", "мобильн", "телеком"]),
-        ("Коммунальные", ["коммунал"]),
-        ("Развлечения", ["развлеч", "кино", "отдых", "игры"]),
-        ("Учёба", ["образован", "обучен"]),
-        ("Подписки", ["подписк", "цифров"]),
-        ("Покупки", ["одежд", "обув", "электроник", "маркетплейс", "товары", "дом и ремонт", "покупк"]),
+        // Russian and English report (Halyk gives the report in the app's language).
+        ("Продукты", ["супермаркет", "продукт", "supermarket", "grocer"]),
+        ("Доставка еды", ["доставк", "delivery"]),
+        ("Кафе и рестораны", ["кафе", "ресторан", "фастфуд", "фаст-фуд", "кофейн", "cafe", "restaurant", "fast food", "coffee"]),
+        ("Здоровье", ["здоров", "аптек", "медиц", "красот", "health", "pharmac", "medic", "beauty"]),
+        ("Транспорт", ["такси", "транспорт", "азс", "топлив", "авто", "парков", "taxi", "transport", "fuel", "gas station", "parking"]),
+        ("Связь и интернет", ["связь", "интернет", "мобильн", "телеком", "internet", "mobile", "telecom"]),
+        ("Коммунальные", ["коммунал", "utilit"]),
+        ("Развлечения", ["развлеч", "кино", "отдых", "игры", "entertain", "cinema", "games"]),
+        ("Учёба", ["образован", "обучен", "education"]),
+        ("Подписки", ["подписк", "цифров", "subscription", "digital"]),
+        ("Покупки", ["одежд", "обув", "электроник", "маркетплейс", "товары", "дом и ремонт", "покупк", "clothing", "shoes", "electronics", "marketplace", "home"]),
     ]
 
     /// The bank's category of a purchase as one of ours; nil for money in, transfers and cash, which the operation
