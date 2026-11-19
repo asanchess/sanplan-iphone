@@ -288,7 +288,8 @@ public enum BankFeed {
         if let index = statementHolding(record, bank: bankName, in: next) {
             // Kept with the statement like a replaced payment: counted there, given back if the statement is deleted.
             record.importId = nil
-            next.imports?[index].mergedManual = (next.imports?[index].mergedManual ?? []) + [record]
+            let merged = next.imports?[index].mergedManual ?? []
+            next.imports?[index].mergedManual = merged + [record]
             let clean = try validateFinance(next)
             return (clean, .inStatement(recordId: id))
         }
