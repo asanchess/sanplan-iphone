@@ -243,6 +243,8 @@ struct WorkoutDefaultsSection: View {
     @ObservedObject var store: WorkoutStore
     @ObservedObject private var sounds = AlertSoundSettings.shared
     @ObservedObject private var reminder = WorkoutReminderSettings.shared
+    @AppStorage(SectionPrefs.Key.lockScreenCard) private var lockScreenCard = true
+    @AppStorage(SectionPrefs.Key.raiseWeight) private var raiseWeight = true
     @EnvironmentObject private var alarms: AlarmCoordinator
     @Environment(\.sectionAccent) private var accent
 
@@ -329,6 +331,12 @@ struct WorkoutDefaultsSection: View {
                         .frame(minHeight: 56)
                         .accessibilityIdentifier("workout-reminder-time")
                 }
+            }
+            ProfileGroup("Во время тренировки") {
+                ProfileToggleRow(name: "Карточка на экране блокировки", note: "Подход и отдых видны без разблокировки",
+                                 isOn: $lockScreenCard)
+                ProfileToggleRow(name: "Прибавлять вес", note: "Все подходы сделаны — в следующий раз чуть тяжелее",
+                                 isOn: $raiseWeight)
             }
             ProfileGroup("Звук") {
                 AlertSoundRow(title: "Звук конца отдыха", choice: sounds.rest, onSelect: sounds.setRest, volume: sounds.restVolume, onVolume: sounds.setRestVolume)

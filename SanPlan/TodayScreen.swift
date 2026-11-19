@@ -35,6 +35,10 @@ public struct TodayScreen: View {
     @Environment(\.dayKey) private var dayKey
     @State private var summaryOpen = false
     @State private var summaryMode: SummaryScreen.Mode = .day
+    /// «Настройки → Общие → Сегодня»: cards the owner switched off.
+    @AppStorage(SectionPrefs.Key.todayHidden) private var hiddenCards = ""
+
+    private func show(_ card: SectionPrefs.TodayCard) -> Bool { !SectionPrefs.hiddenCards(hiddenCards).contains(card.rawValue) }
 
     public var body: some View {
         NavigationStack {
@@ -44,23 +48,32 @@ public struct TodayScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         ScreenHeader("Сегодня", kicker: Self.dateLine(Date())) {}
-                        if sections.isOn(.plans) || sections.isOn(.workout) { heroCard }
-                        if sections.isOn(.plans) || sections.isOn(.money) {
+                        // Dashboard order (owner 19.11, D-A): rings first, then «Сейчас», then the day line.
+                        if show(.rings), sections.isOn(.plans) || sections.isOn(.money) {
                             ringsRow
                                 .tourTarget("today.rings")
                         }
+                        if show(.now), sections.isOn(.plans) || sections.isOn(.workout) { heroCard }
                         if sections.isOn(.plans) {
-                            nextSection
-                                .tourTarget("today.next")
-                            habitsSection
-                                .tourTarget("today.habits")
-                            goalsSection
+                            if show(.next) {
+                                nextSection
+                                    .tourTarget("today.next")
+                            }
+                            if show(.habits) {
+                                habitsSection
+                                    .tourTarget("today.habits")
+                            }
+                            if show(.goals) { goalsSection }
                         }
-                        if sections.isOn(.notes) { pinnedNotesSection }
-                        progressCard
-                            .tourTarget("today.progress")
-                        reviewButton
-                            .tourTarget("today.review")
+                        if show(.notes), sections.isOn(.notes) { pinnedNotesSection }
+                        if show(.progress) {
+                            progressCard
+                                .tourTarget("today.progress")
+                        }
+                        if show(.review) {
+                            reviewButton
+                                .tourTarget("today.review")
+                        }
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, 18)
@@ -133,6 +146,13 @@ public struct TodayScreen: View {
     private func open(_ link: DeepLink) { DeepLinks.shared.open(link) }
 
     private var reviewDay: String { PlanDomain.today(timeZone: plans.timeZone) }
+
+    private static func minuteNow(in zone: TimeZone) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let parts = calendar.dateComponents([.hour, .minute], from: Date())
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
 
     // MARK: Главное сейчас
 
@@ -228,7 +248,7 @@ public struct TodayScreen: View {
                 action: { open(.habits) }
             )
             }
-            if sections.isOn(.money) { moneyRing }
+            if sections.isOn(.money), show(.moneyRing) { moneyRing }
         }
     }
 
@@ -275,9 +295,12 @@ public struct TodayScreen: View {
 
     private var nextSection: some View {
         let items = todayItems
-        let shown = Array(items.prefix(4))
+        let shown = Array(items.prefix(3))
         let later = items.isEmpty ? Array(plans.upcomingAgenda.filter { $0.displayDate != reviewDay }.prefix(3)) : []
         let saved = Set(plans.plans.map(\.id))
+        let zone = TimeZone(identifier: plans.timeZone) ?? .current
+        let marks = DayTimeline.marks(agenda: items, day: reviewDay,
+                                      workouts: sections.isOn(.workout) ? workouts.records : [], timeZone: zone)
         return VStack(alignment: .leading, spacing: 10) {
             TodaySectionTitle(
                 title: items.isEmpty && !later.isEmpty ? "Дальше" : "Дальше сегодня",
@@ -285,6 +308,9 @@ public struct TodayScreen: View {
                 linkAction: { open(.plansAll) },
                 icon: (name: "alarm", label: "Будильники", action: { open(.alarms) })
             )
+            if !marks.isEmpty {
+                DayTimelineView(marks: marks, nowMinute: Self.minuteNow(in: zone)) { open(.plansAll) }
+            }
             ForEach(shown) { agenda in
                 let checkable = agenda.item.kind == "task" && saved.contains(agenda.id)
                 let done = agenda.item.completed == true

@@ -127,6 +127,164 @@ public final class FinanceStore: ObservableObject {
             state = clean
             refreshSummary(today: FinanceText.today())
         }
+        takeInBankFeed(today: FinanceText.today())
+        Task { await takeInStatements(today: FinanceText.today()) }
+    }
+
+    // MARK: - Payments from Wallet
+
+    /// Where the Shortcuts action leaves Apple Pay payments (BankFeed.swift); the same folder as `BankFeedInbox.standard()`.
+    var bankFeedInbox: BankFeedInbox {
+        BankFeedInbox(folder: arnaDir.appendingPathComponent("bank-feed-inbox", isDirectory: true), fileManager: fileManager)
+    }
+
+    /// Takes waiting Apple Pay payments into money. Only once the account's money lives in its encrypted collection
+    /// (or in the test file), so a payment is never written to a phone file that a later move would replace.
+    /// In the cloud, only after the collection's first sync, so a statement loaded on another device is seen first.
+    /// Returns how many were added; repeats are dropped and payments a statement already has are kept with it.
+    @discardableResult
+    public func takeInBankFeed(today: String) -> Int {
+        let ready = storage == .cloud ? collection?.hasSynced == true : owner == .device
+        guard owner != .none, !isUnavailable, ready else { return 0 }
+        let waiting = bankFeedInbox.pending()
+        guard !waiting.isEmpty else { return 0 }
+        var next = state
+        var added = 0
+        var changed = false
+        var handled: [URL] = []
+        for item in waiting {
+            do {
+                let result = try BankFeed.ingest(item.tap, into: next, today: today)
+                next = result.state
+                switch result.outcome {
+                case .added: added += 1; changed = true
+                case .inStatement: changed = true
+                case .duplicate: break
+                }
+                handled.append(item.url)
+            } catch is BankFeed.TapError {
+                // A payment the action could not read never becomes readable.
+                handled.append(item.url)
+            } catch {
+                return 0
+            }
+        }
+        do {
+            if changed { try updateState(next, today: today) }
+        } catch {
+            return 0
+        }
+        bankFeedInbox.remove(handled)
+        return added
+    }
+
+    /// Signing out on purpose leaves no payment waiting for the next account. An expired session keeps them.
+    public func discardBankFeed() {
+        bankFeedInbox.clear()
+        bankStatementInbox.clear()
+    }
+
+    // MARK: - Statements shared to A-san
+
+    /// Where shared PDF statements wait (BankStatementInbox.swift); the same folder as `BankStatementInbox.standard()`.
+    var bankStatementInbox: BankStatementInbox {
+        BankStatementInbox(folder: arnaDir.appendingPathComponent("bank-statement-inbox", isDirectory: true), fileManager: fileManager)
+    }
+
+    /// The last statement that came through «Поделиться» and could not be loaded, for the «Деньги» screen to show.
+    @Published public private(set) var sharedStatementProblem: String?
+    private var takingStatements = false
+    /// A statement arrived while others were being read: read again at the end.
+    private var moreStatements = false
+
+    /// Loads statements shared to A-san, the same way as the import in «Деньги» but without the preview: operations an
+    /// earlier statement already has are left out, and Apple Pay payments and notifications give way to the lines.
+    /// Each load can be undone. Ready under the same rule as `takeInBankFeed`. Returns how many statements were loaded.
+    @discardableResult
+    public func takeInStatements(today: String) async -> Int {
+        if takingStatements {
+            moreStatements = true
+            return 0
+        }
+        takingStatements = true
+        defer { takingStatements = false }
+        var loaded: [String] = []
+        repeat {
+            moreStatements = false
+            guard let more = await takeInStatementsOnce(today: today) else { break }
+            loaded += more
+        } while moreStatements
+        if !loaded.isEmpty {
+            let ids = loaded
+            let message = ids.count == 1 ? "Выписка загружена" : "Загружено выписок: \(ids.count)"
+            UndoCenter.shared.show(message) { [weak self] in
+                guard let self else { return }
+                var next = self.state
+                for id in ids { next = (try? StatementImport.deleteImport(id, from: next)) ?? next }
+                try? self.replaceState(with: next, today: today)
+            }
+        }
+        return loaded.count
+    }
+
+    private var statementsReady: Bool {
+        let ready = storage == .cloud ? collection?.hasSynced == true : owner == .device
+        return owner != .none && !isUnavailable && ready
+    }
+
+    /// One pass over the inbox: the ids of the statements loaded, or nil when money cannot take them now.
+    private func takeInStatementsOnce(today: String) async -> [String]? {
+        guard statementsReady else { return nil }
+        let files = bankStatementInbox.pending()
+        guard !files.isEmpty else { return [] }
+        let rules = state.merchantCategories
+        let startedFor = owner
+        let read: [SharedStatement] = await Task.detached(priority: .userInitiated) {
+            files.map { url -> SharedStatement in
+                let importId = "imp-" + String(UUID().uuidString.prefix(8)).lowercased()
+                do {
+                    let statement = try BankStatementParser.parse(try BankStatementParser.text(ofPDFAt: url))
+                    let preview = StatementImport.preview(statement, importId: importId, rules: rules)
+                    return SharedStatement(url: url, importId: importId, outcome: .success(preview))
+                } catch {
+                    return SharedStatement(url: url, importId: importId, outcome: .failure(error))
+                }
+            }
+        }.value
+        // The account may have changed while the files were read: they wait for the next look.
+        guard owner == startedFor, statementsReady else { return nil }
+        var loaded: [String] = []
+        for item in read {
+            switch item.outcome {
+            case .success(let preview):
+                let next: FinanceState
+                do {
+                    next = try StatementImport.apply(preview, to: state, importId: item.importId,
+                                                     fileName: BankStatementInbox.originalName(item.url), today: today)
+                } catch StatementError.alreadyImported {
+                    // Shared twice: nothing new, nothing to say.
+                    bankStatementInbox.remove(item.url)
+                    continue
+                } catch {
+                    // It never fits (too many records, say): say why and let the next statement through.
+                    sharedStatementProblem = error.localizedDescription
+                    bankStatementInbox.remove(item.url)
+                    continue
+                }
+                do {
+                    try updateState(next, today: today)
+                } catch {
+                    // Money could not be saved now: the statement waits for the next time.
+                    return loaded
+                }
+                loaded.append(item.importId)
+                sharedStatementProblem = nil
+            case .failure(let error):
+                sharedStatementProblem = error.localizedDescription
+            }
+            bankStatementInbox.remove(item.url)
+        }
+        return loaded
     }
 
     /// Steps of the move: upload (idempotent), wait for the server, compare, and only then delete the file.
@@ -378,3 +536,10 @@ extension FinanceStore {
     }
 }
 #endif
+
+/// A statement shared to A-san, read off the main thread (FinanceStore.takeInStatements).
+private struct SharedStatement {
+    let url: URL
+    let importId: String
+    let outcome: Result<StatementImport.Preview, Error>
+}

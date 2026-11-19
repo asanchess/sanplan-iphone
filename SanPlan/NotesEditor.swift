@@ -61,7 +61,11 @@ struct NoteEditorView: View {
             keyboardBar?.tools = tools
             // A new, empty note opens ready to type; a written one opens for reading and ticking.
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editor.focus() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    editor.focus()
+                    // «Настройки → Заметки → Новая заметка — список».
+                    if SectionPrefs.noteStartsAsList() { editor.apply(.check) }
+                }
             }
         }
         .onChange(of: text) { _, value in

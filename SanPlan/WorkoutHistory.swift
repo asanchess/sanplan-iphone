@@ -237,12 +237,14 @@ public enum WorkoutHistory {
         planWeightKg: Double?,
         bodyweight: Bool,
         stepKg: Double?,
-        last: WorkoutRecordExercise?
+        last: WorkoutRecordExercise?,
+        raise: Bool = true
     ) -> (weightKg: Double?, reps: Int, progressed: Bool) {
         guard let last else { return (planWeightKg, planReps, false) }
         let done = last.doneSets
         let goalReps = last.targetReps ?? planReps
-        let allDone = done.count >= max(planSets, last.sets.count) && done.allSatisfy { ($0.reps ?? 0) >= goalReps }
+        // «Настройки → Тренировка → Прибавлять вес» off: last time's weight and reps, never raised.
+        let allDone = raise && done.count >= max(planSets, last.sets.count) && done.allSatisfy { ($0.reps ?? 0) >= goalReps }
         let lastWeight = done.compactMap { $0.weightKg }.max()
         let step = stepKg ?? WorkoutSessionEdit.defaultStepKg
 
@@ -261,8 +263,10 @@ public enum WorkoutHistory {
     }
 
     /// Fills «в прошлый раз» and today's targets for a workout about to start.
-    public static func prepared(_ exercises: [SessionExercise], history records: [WorkoutRecord]) -> [SessionExercise] {
-        exercises.map { exercise in
+    public static func prepared(_ exercises: [SessionExercise], history records: [WorkoutRecord],
+                                raise: Bool? = nil) -> [SessionExercise] {
+        let raise = raise ?? SectionPrefs.raiseWeight()
+        return exercises.map { exercise in
             var next = exercise
             let last = lastPerformance(records, exerciseId: exercise.exerciseId, name: exercise.baseName)
             next.lastTime = last.map { $0.sets.map { SetLog(done: $0.done, weightKg: $0.weightKg, reps: $0.reps) } }
@@ -273,7 +277,8 @@ public enum WorkoutHistory {
                 planWeightKg: exercise.planWeightKg ?? exercise.weightKg,
                 bodyweight: exercise.bodyweight ?? false,
                 stepKg: exercise.weightStepKg,
-                last: last
+                last: last,
+                raise: raise
             )
             next.weightKg = goal.weightKg
             next.reps = goal.reps

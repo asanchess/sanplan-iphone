@@ -244,7 +244,8 @@ protocol RecentlyDeletedSource: AnyObject {
 @MainActor
 final class RecentlyDeleted: ObservableObject {
     static let shared = RecentlyDeleted()
-    static let keepDays = 30
+    /// «Настройки → Заметки → Хранить удалённое»: 7, 30 or 90 days; 30 when not set.
+    nonisolated static var keepDays: Int { SectionPrefs.keepDays() }
     private var sources: [ObjectIdentifier: RecentlyDeletedSource] = [:]
 
     func register(_ source: RecentlyDeletedSource) {

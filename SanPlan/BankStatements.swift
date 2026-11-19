@@ -15,14 +15,24 @@ public struct ParsedStatement: Equatable {
         /// The bank's operation type, e.g. «Покупка» or «Перевод».
         public var operation: String
         public var details: String
+        /// Statements of several accounts in one file (Halyk «Аналитический отчет»): the last four digits of the card
+        /// or account this line belongs to. Nil when the whole statement is one account.
+        public var account: String? = nil
+        /// The bank's own category, e.g. «Супермаркеты», when the statement gives one.
+        public var bankCategory: String? = nil
 
-        public init(date: String, amountMinor: Int64, operation: String, details: String) {
+        public init(date: String, amountMinor: Int64, operation: String, details: String, account: String? = nil, bankCategory: String? = nil) {
             self.date = date
             self.amountMinor = amountMinor
             self.operation = operation
             self.details = details
+            self.account = account
+            self.bankCategory = bankCategory
         }
     }
+
+    /// `account` of a statement that covers every account of the owner at the bank, each line naming its own.
+    public static let allAccounts = "все"
 
     public var bank: Bank
     public var periodStart: String?
@@ -34,6 +44,9 @@ public struct ParsedStatement: Equatable {
     /// The owner's first name from the header; the bank shows transfers from the owner's other accounts with it.
     /// Kept in memory for the import only, never saved.
     public var ownerFirstName: String? = nil
+    /// The owner's surname, where the header gives it; with the first name it tells the owner's own transfers apart.
+    /// In memory only, like the first name.
+    public var ownerSurname: String? = nil
 
     public static func == (lhs: ParsedStatement, rhs: ParsedStatement) -> Bool {
         lhs.bank == rhs.bank && lhs.periodStart == rhs.periodStart && lhs.periodEnd == rhs.periodEnd
@@ -114,7 +127,8 @@ public enum BankStatementParser {
     }
 
     public static func parse(_ raw: String) throws -> ParsedStatement {
-        let text = flat(normalise(raw))
+        let clean = normalise(raw)
+        let text = flat(clean)
         // The bank named first is the header; later mentions are counterparties, e.g. a Halyk transfer to a Kaspi card.
         let lower = text.lowercased()
         func firstIndex(_ words: [String]) -> String.Index? {
@@ -123,11 +137,16 @@ public enum BankStatementParser {
         let kaspi = firstIndex(["kaspi"])
         let halyk = firstIndex(["halyk", "народный банк"])
         let statement: ParsedStatement
-        switch (kaspi, halyk) {
-        case let (k?, h?): statement = k < h ? parseKaspi(text) : parseHalyk(text)
-        case (_?, nil): statement = parseKaspi(text)
-        case (nil, _?): statement = parseHalyk(text)
-        case (nil, nil): throw StatementError.unknownBank
+        // Halyk's report over all accounts names no bank at all, only its title.
+        if let report = firstIndex(halykReportTitles), report < min(kaspi ?? lower.endIndex, halyk ?? lower.endIndex) {
+            statement = parseHalykReport(clean)
+        } else {
+            switch (kaspi, halyk) {
+            case let (k?, h?): statement = k < h ? parseKaspi(text) : parseHalyk(text)
+            case (_?, nil): statement = parseKaspi(text)
+            case (nil, _?): statement = parseHalyk(text)
+            case (nil, nil): throw StatementError.unknownBank
+            }
         }
         guard !statement.transactions.isEmpty else { throw StatementError.noTransactions }
         return statement
@@ -243,7 +262,7 @@ public enum BankStatementParser {
     }
 
     /// Details Halyk gives to transfers between cards, which carry no counterparty.
-    public static let halykTransferDetails: Set<String> = ["Входящий перевод", "Перевод на другую карту", "Перевод со счёта"]
+    public static let halykTransferDetails: Set<String> = ["Входящий перевод", "Перевод на другую карту", "Перевод со счёта", "Исходящий перевод"]
 
     /// Prefix, operation, details when the bank gives none, and whether money comes in (used only without columns).
     private static let halykOperations: [(String, String, String, Bool)] = [
@@ -276,6 +295,112 @@ public enum BankStatementParser {
             return (op, useful.isEmpty ? fallback : useful, incoming)
         }
         return ("Операция", text, false)
+    }
+
+    // MARK: - Halyk report over all accounts
+    // «Аналитический отчет по операциям клиента <ФИО> за период с 18.10.2026 по 18.11.2026». A row: date (split over two
+    // lines, «2026-11-» and «06»), «Расход» or «Доход», product, card «400000******0001» or account «KZ*0002», the bank's
+    // category, MCC or «-», name, signed whole-tenge amount with «₸», description. No balance and no bank name.
+
+    static let halykReportTitles = ["аналитический отчет по операциям клиента", "аналитический отчёт по операциям клиента"]
+
+    /// `text` is normalised but not flattened: when the cells of a row come out line by line rather than cell by
+    /// cell, the day of the date starts a line of its own.
+    static func parseHalykReport(_ text: String) -> ParsedStatement {
+        let flatText = flat(text)
+        let starts = regex(#"(\d{4})-(\d{2})-"#).matches(in: text, range: NSRange(text.startIndex..., in: text))
+        let account = regex(#"(?:\d{4,6}\*{2,}|KZ\*+|\*{2,})(\d{4})(?!\d)"#)
+        let signedAmount = regex(#"([+\-]) ?(\d+(?: \d{3})*(?:[.,]\d{1,2})?) ?(?:₸|KZT|тг)(?![\p{L}])"#)
+        let kind = regex(#"(?<![\p{L}])(Расход|Доход)(?![\p{L}])"#)
+        let cells = regex(#"^(.+?) (\d{4}|-) (.+)$"#)
+        var transactions: [ParsedStatement.Transaction] = []
+        for (n, start) in starts.enumerated() {
+            guard let range = Range(start.range, in: text) else { continue }
+            let end = n + 1 < starts.count ? Range(starts[n + 1].range, in: text)?.lowerBound ?? text.endIndex : text.endIndex
+            let rawRow = String(text[range.upperBound..<end])
+            let row = flat(rawRow)
+            let yearMonth = groups(start, text)
+            guard let money = match(signedAmount, row), let amount = wholeOrMinor(money[2]), amount > 0,
+                  let day = reportDay(rawRow, row: row) else { continue }
+            let date = yearMonth[1] + "-" + yearMonth[2] + "-" + String(format: "%02d", day)
+            guard isValidDateString(date) else { continue }
+            let type = match(kind, row)?[1].lowercased()
+            let incoming = type.map { $0 == "доход" } ?? (money[1] == "+")
+            // Category, MCC and name sit between the account and the amount when the cells come out in order.
+            var bankCategory = ""
+            var name = ""
+            if let acc = account.firstMatch(in: row, range: NSRange(row.startIndex..., in: row)),
+               let accRange = Range(acc.range, in: row), let moneyRange = row.range(of: money[0]), accRange.upperBound <= moneyRange.lowerBound {
+                let between = row[accRange.upperBound..<moneyRange.lowerBound].trimmingCharacters(in: .whitespaces)
+                if let c = match(cells, between) {
+                    bankCategory = c[1]
+                    name = c[3]
+                } else {
+                    // Cells line by line: the lone MCC dash of a transfer may lead what is left of the name.
+                    name = between.hasPrefix("- ") ? String(between.dropFirst(2)) : between
+                }
+            }
+            let suffix = match(account, row)?[1]
+            let (operation, details) = reportOperation(category: bankCategory, name: name, incoming: incoming)
+            transactions.append(.init(date: date, amountMinor: incoming ? amount : -amount, operation: operation, details: details,
+                                      account: suffix, bankCategory: bankCategory.isEmpty ? nil : bankCategory))
+        }
+        let period = match(regex(#"(?:период|period)\D{0,30}(\d{2}\.\d{2}\.\d{4})\D{1,8}(\d{2}\.\d{2}\.\d{4})"#), flatText)
+        let owner = match(regex(#"по операциям клиента (\p{L}+) (\p{L}+)"#), flatText)
+        return ParsedStatement(
+            bank: .halyk,
+            periodStart: period.flatMap { isoDate($0[1]) },
+            periodEnd: period.flatMap { isoDate($0[2]) },
+            closingBalance: nil,
+            transactions: transactions,
+            account: ParsedStatement.allAccounts,
+            ownerFirstName: owner?[2],
+            ownerSurname: owner?[1]
+        )
+    }
+
+    /// The day right after «2026-11-», or else the first line of the row that starts with a day.
+    private static func reportDay(_ rawRow: String, row: String) -> Int? {
+        if let m = match(regex(#"^ ?(\d{2})(?!\d)"#), row), let day = Int(m[1]), (1...31).contains(day) { return day }
+        for line in rawRow.split(whereSeparator: \.isNewline) {
+            let words = line.split(separator: " ")
+            if let first = words.first, first.count == 2, let day = Int(first), (1...31).contains(day) { return day }
+        }
+        return nil
+    }
+
+    /// The bank's category into the operation the rest of the import understands, and the name the owner sees.
+    private static func reportOperation(category: String, name: String, incoming: Bool) -> (String, String) {
+        let lower = category.lowercased()
+        var details = name
+        for prefix in ["Поступление на счет", "Поступление на счёт"] where details.hasPrefix(prefix) {
+            details = String(details.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet(charactersIn: " :"))
+        }
+        if details.isEmpty { details = name.isEmpty ? category : name }
+        let operation: String
+        // Without the category (cells line by line), the name still tells a transfer.
+        let transferName = name.hasPrefix("Поступление на сч") || name.hasPrefix("Исходящий перевод")
+        if lower.contains("перевод") || transferName { operation = "Перевод" }
+        else if lower.contains("зарплат") { operation = "Зарплата" }
+        else if lower.contains("налич") { operation = "Снятие наличных" }
+        else if lower.contains("пополн") { operation = "Пополнение" }
+        else if lower.contains("возврат") { operation = "Возврат" }
+        else { operation = incoming ? "Зачисление" : "Покупка" }
+        return (operation, details)
+    }
+
+    /// «-500», «20 200», «1 234,5» → minor units; whole tenge when there are no kopecks.
+    static func wholeOrMinor(_ raw: String) -> Int64? {
+        let digits = raw.filter { $0.isNumber || $0 == "," || $0 == "." }.replacingOccurrences(of: ",", with: ".")
+        let parts = digits.split(separator: ".", omittingEmptySubsequences: false)
+        guard let whole = Int64(parts[0]), parts.count <= 2 else { return nil }
+        var cents: Int64 = 0
+        if parts.count == 2 {
+            guard (1...2).contains(parts[1].count), let c = Int64(parts[1]) else { return nil }
+            cents = parts[1].count == 1 ? c * 10 : c
+        }
+        let value = whole * 100 + cents
+        return value <= FinanceConstants.maxAmountMinor ? value : nil
     }
 
     // MARK: - Helpers
@@ -375,26 +500,60 @@ public enum StatementImport {
         return lower.hasPrefix(name + " ") && lower.contains(",")
     }
 
+    /// «Арман Тестов» or «Арман Т.» sending money, when the header says the owner is Тестов Арман: money from the
+    /// owner's account at another bank. Needs both names, so a stranger who shares the first name stays a stranger.
+    static func isOwnerByName(_ details: String, _ statement: ParsedStatement) -> Bool {
+        guard let first = statement.ownerFirstName?.lowercased(), first.count > 1,
+              let surname = statement.ownerSurname?.lowercased(), let initial = surname.first else { return false }
+        let words = details.lowercased().split(whereSeparator: { $0.isWhitespace || $0 == "," })
+        guard words.count >= 2, words[0] == first[...] else { return false }
+        let second = words[1].trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return second == surname || (second.count == 1 && second.first == initial)
+    }
+
+    /// The account a statement line belongs to: the statement's own, or for a statement over all accounts the one
+    /// its id carries. For the «Деньги» screens, to show which card or account an operation went through.
+    public static func account(of record: FinanceRecord, in state: FinanceState) -> String? {
+        guard let importId = record.importId, let source = state.imports?.first(where: { $0.id == importId }) else { return nil }
+        guard source.account == ParsedStatement.allAccounts else { return source.account }
+        return reportAccount(record)
+    }
+
+    /// «<import>-3-0001» → «0001».
+    static func reportAccount(_ record: FinanceRecord) -> String? {
+        guard let importId = record.importId, record.id.hasPrefix(importId + "-") else { return nil }
+        let parts = record.id.dropFirst(importId.count + 1).split(separator: "-")
+        return parts.count == 2 && parts[1].count == 4 ? String(parts[1]) : nil
+    }
+
     /// Records for a statement. Own-account transfers come in excluded from totals.
     public static func preview(_ statement: ParsedStatement, importId: String, rules: [String: String]?) -> Preview {
         var records: [FinanceRecord] = []
         var excluded = 0
         for (index, t) in statement.transactions.enumerated() where t.amountMinor != 0 {
             let merchant = t.details.isEmpty ? t.operation : t.details
+            let incoming = t.amountMinor > 0
+            // The owner's rule for the merchant first, then the bank's own category, then the merchant's name.
+            let category = rules?[MerchantCategories.key(merchant)]
+                ?? t.bankCategory.flatMap { MerchantCategories.fromBank($0, operation: t.operation, incoming: incoming) }
+                ?? MerchantCategories.category(operation: t.operation, merchant: merchant, incoming: incoming, rules: rules)
             var record = FinanceRecord(
-                id: "\(importId)-\(index)",
-                kind: t.amountMinor > 0 ? "income" : "expense",
+                // A line of a statement over several accounts keeps its account in the id (`account(of:in:)`).
+                id: t.account.map { "\(importId)-\(index)-\($0)" } ?? "\(importId)-\(index)",
+                kind: incoming ? "income" : "expense",
                 title: String(merchant.prefix(FinanceConstants.maxTitleLen)),
                 amountMinor: abs(t.amountMinor),
                 date: t.date,
-                category: MerchantCategories.category(operation: t.operation, merchant: merchant, incoming: t.amountMinor > 0, rules: rules)
+                category: category
             )
             record.importId = importId
             record.merchant = String(merchant.prefix(FinanceConstants.maxTitleLen))
-            if isOwnTransfer(t, ownerFirstName: statement.ownerFirstName) {
+            let fromOwner = isFromOwnOtherBank(t.details, ownerFirstName: statement.ownerFirstName)
+                || (incoming && t.operation == "Перевод" && isOwnerByName(t.details, statement))
+            if isOwnTransfer(t, ownerFirstName: statement.ownerFirstName) || fromOwner {
                 record.excluded = true
                 excluded += 1
-                if isFromOwnOtherBank(t.details, ownerFirstName: statement.ownerFirstName) {
+                if fromOwner {
                     record.note = ownTransferNote
                 }
             }
@@ -424,6 +583,9 @@ public enum StatementImport {
             account: preview.statement.account
         ))
         next.imports = imports
+        takeOverReportLines(&next, importId: importId)
+        // Apple Pay payments already taken in one by one give way to the statement's lines (BankFeed.swift).
+        BankFeed.reconcile(&next, statementImportId: importId)
         pairTransfersBetweenStatements(&next, importId: importId)
         rebuildBalance(&next)
         return try validateFinance(next)
@@ -434,17 +596,83 @@ public enum StatementImport {
     static func newRecords(_ preview: Preview, in state: FinanceState) -> [FinanceRecord] {
         let bank = preview.statement.bank.rawValue
         let account = preview.statement.account
-        let sameAccount = Set((state.imports ?? []).filter { $0.bank == bank && $0.account == account }.map(\.id))
+        // Apple Pay payments are not the statement's own lines: BankFeed.reconcile replaces them after this.
+        let statements = (state.imports ?? []).filter { $0.bank == bank && !BankFeed.isFeed($0.id) }
+        let sameAccount = Set(statements.filter { $0.account == account }.map(\.id))
         var seen: [String: Int] = [:]
         for record in state.records where record.importId.map({ sameAccount.contains($0) }) == true {
             seen[duplicateKey(record), default: 0] += 1
         }
-        return preview.records.filter { record in
+        let fresh = preview.records.filter { record in
             let key = duplicateKey(record)
             guard let count = seen[key], count > 0 else { return true }
             seen[key] = count - 1
             return false
         }
+        // A report over all accounts after statements of single accounts: the two write a line differently (and a
+        // card number is not the account number), so only kind, amount and day are compared.
+        guard account == ParsedStatement.allAccounts else { return fresh }
+        let perAccount = Set(statements.filter { $0.account != ParsedStatement.allAccounts }.map(\.id))
+        let pool = state.records.filter { $0.importId.map { perAccount.contains($0) } == true && ["income", "expense"].contains($0.kind) }
+        let known = Set(sameOperations(fresh, pool).map { $0.0 })
+        return fresh.indices.filter { !known.contains($0) }.map { fresh[$0] }
+    }
+
+    /// The same operations written by two kinds of statement: the same kind and amount on the same day first, then
+    /// a day apart (one counts the day of the purchase, the other the day the bank booked it). Each side once.
+    static func sameOperations(_ lines: [FinanceRecord], _ pool: [FinanceRecord]) -> [(Int, Int)] {
+        var usedLine = Set<Int>(), usedPool = Set<Int>(), pairs: [(Int, Int)] = []
+        for tolerance in 0...1 {
+            for (i, line) in lines.enumerated() where !usedLine.contains(i) {
+                guard let lineDay = dayNumber(line.date) else { continue }
+                let j = pool.indices.first { j in
+                    guard !usedPool.contains(j), pool[j].kind == line.kind, pool[j].amountMinor == line.amountMinor,
+                          let poolDay = dayNumber(pool[j].date) else { return false }
+                    return abs(poolDay - lineDay) <= tolerance
+                }
+                if let j {
+                    usedLine.insert(i)
+                    usedPool.insert(j)
+                    pairs.append((i, j))
+                }
+            }
+        }
+        return pairs
+    }
+
+    static func dayNumber(_ ymd: String?) -> Int? {
+        guard let ymd, let (y, m, d) = parseYmd(ymd) else { return nil }
+        return daysSinceEpoch(year: y, month: m, day: d)
+    }
+
+    /// A statement of one account after a report over all accounts: its lines take the place of the report's lines
+    /// for the same operations, so the account's closing balance and its operations stay together. What the owner
+    /// set on the report's line (category, note, left out of totals) and its transfer partner move over.
+    static func takeOverReportLines(_ state: inout FinanceState, importId: String) {
+        let imports = state.imports ?? []
+        guard let source = imports.first(where: { $0.id == importId }), source.account != ParsedStatement.allAccounts else { return }
+        let reports = Set(imports.filter { $0.bank == source.bank && $0.account == ParsedStatement.allAccounts }.map(\.id))
+        guard !reports.isEmpty else { return }
+        let lineIndices = state.records.indices.filter { state.records[$0].importId == importId }
+        let poolIndices = state.records.indices.filter {
+            state.records[$0].importId.map { reports.contains($0) } == true && ["income", "expense"].contains(state.records[$0].kind)
+        }
+        let pairs = sameOperations(lineIndices.map { state.records[$0] }, poolIndices.map { state.records[$0] })
+        var replaced = Set<String>()
+        for (a, b) in pairs {
+            let i = lineIndices[a]
+            let old = state.records[poolIndices[b]]
+            let newId = state.records[i].id
+            state.records[i].category = old.category ?? state.records[i].category
+            state.records[i].note = old.note ?? state.records[i].note
+            if old.excluded == true { state.records[i].excluded = true }
+            state.records[i].pairedWith = old.pairedWith ?? state.records[i].pairedWith
+            for k in state.records.indices where state.records[k].pairedWith == old.id {
+                state.records[k].pairedWith = newId
+            }
+            replaced.insert(old.id)
+        }
+        state.records.removeAll { replaced.contains($0.id) }
     }
 
     private static func duplicateKey(_ r: FinanceRecord) -> String {
@@ -461,9 +689,11 @@ public enum StatementImport {
             guard ["income", "expense"].contains(r.kind) else { return false }
             return BankStatementParser.halykTransferDetails.contains(r.merchant ?? "") || r.note == ownTransferNote
         }
-        func day(_ ymd: String?) -> Int? {
-            guard let ymd, let (y, m, d) = parseYmd(ymd) else { return nil }
-            return daysSinceEpoch(year: y, month: m, day: d)
+        let day = dayNumber
+        // A report over all accounts holds both sides itself, each on its own account.
+        func otherAccount(_ a: FinanceRecord, _ b: FinanceRecord) -> Bool {
+            guard let first = reportAccount(a), let second = reportAccount(b) else { return false }
+            return first != second
         }
         var taken = Set(state.records.compactMap(\.pairedWith))
         taken.formUnion(state.records.filter { $0.pairedWith != nil }.map(\.id))
@@ -472,7 +702,8 @@ public enum StatementImport {
             guard !taken.contains(record.id), candidate(record), let recordDay = day(record.date) else { continue }
             let match = state.records.indices.first { j in
                 let other = state.records[j]
-                guard !taken.contains(other.id), let otherImport = other.importId, otherImport != importId,
+                guard !taken.contains(other.id), let otherImport = other.importId,
+                      otherImport != importId || otherAccount(record, other),
                       other.kind != record.kind, candidate(other),
                       other.amountMinor == record.amountMinor, let otherDay = day(other.date) else { return false }
                 return abs(otherDay - recordDay) <= 1
@@ -675,6 +906,29 @@ public enum MerchantCategories {
 
     public static func key(_ merchant: String) -> String {
         merchant.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// Words of the bank's own purchase categories («Супермаркеты», «Здоровье и уход»…) and the category they mean here.
+    private static let bankWords: [(String, [String])] = [
+        ("Продукты", ["супермаркет", "продукт"]),
+        ("Доставка еды", ["доставк"]),
+        ("Кафе и рестораны", ["кафе", "ресторан", "фастфуд", "фаст-фуд", "кофейн"]),
+        ("Здоровье", ["здоров", "аптек", "медиц", "красот"]),
+        ("Транспорт", ["такси", "транспорт", "азс", "топлив", "авто", "парков"]),
+        ("Связь и интернет", ["связь", "интернет", "мобильн", "телеком"]),
+        ("Коммунальные", ["коммунал"]),
+        ("Развлечения", ["развлеч", "кино", "отдых", "игры"]),
+        ("Учёба", ["образован", "обучен"]),
+        ("Подписки", ["подписк", "цифров"]),
+        ("Покупки", ["одежд", "обув", "электроник", "маркетплейс", "товары", "дом и ремонт", "покупк"]),
+    ]
+
+    /// The bank's category of a purchase as one of ours; nil for money in, transfers and cash, which the operation
+    /// already tells, and for a category this list does not know.
+    public static func fromBank(_ bankCategory: String, operation: String, incoming: Bool) -> String? {
+        guard !incoming, ["Покупка", "Оплата"].contains(operation) else { return nil }
+        let lower = bankCategory.lowercased()
+        return bankWords.first { $0.1.contains(where: { lower.contains($0) }) }?.0
     }
 
     public static func category(operation: String, merchant: String, incoming: Bool, rules: [String: String]?) -> String {

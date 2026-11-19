@@ -279,6 +279,8 @@ public final class AppModel: ObservableObject {
         checkDay()
         finance.reloadIfUnavailable()
         finance.retryMoveIfNeeded()
+        finance.takeInBankFeed(today: FinanceText.today())
+        Task { await finance.takeInStatements(today: FinanceText.today()) }
         workouts.reloadIfUnavailable()
         workouts.reconcileClock()
         if case .signedIn = auth.phase {

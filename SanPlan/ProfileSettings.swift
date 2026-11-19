@@ -66,6 +66,10 @@ struct ProfileSettingsScreen: View {
     @ObservedObject private var sounds = AlertSoundSettings.shared
     @State private var alarmEditor: AlarmEditorTarget?
     @ObservedObject private var sections = SectionSettings.shared
+    @AppStorage(SectionPrefs.Key.todayHidden) private var hiddenCards = ""
+    @AppStorage(SectionPrefs.Key.planReminders) private var planReminders = ""
+    @AppStorage(SectionPrefs.Key.noteStartsAsList) private var noteStartsAsList = false
+    @AppStorage(SectionPrefs.Key.deletedKeepDays) private var keepDays = 30
 
     @State private var section: ProfileSettingsSection
     /// Closes the whole profile sheet (the tour and the deep links need the tabs).
@@ -130,6 +134,12 @@ struct ProfileSettingsScreen: View {
                 .accessibilityIdentifier("profile-section-\(SectionSettings.name(of: tab))")
             }
         }
+        ProfileGroup("Сегодня") {
+            ForEach(SectionPrefs.TodayCard.allCases.filter { $0.tab.map(sections.isOn) ?? true }) { card in
+                ProfileToggleRow(name: card.title, isOn: cardBinding(card))
+                    .accessibilityIdentifier("profile-today-\(card.rawValue)")
+            }
+        }
         ProfileGroup("Общие") {
             Button {
                 closeProfile()
@@ -178,6 +188,16 @@ struct ProfileSettingsScreen: View {
                 }
                 AlertSoundRow(title: "Звук напоминаний", choice: sounds.plan, onSelect: sounds.setPlan, volume: sounds.planVolume, onVolume: sounds.setPlanVolume)
             }
+            ProfileGroup("Новый план") {
+                ProfileRow("Напоминать") {
+                    Picker("Напоминать", selection: reminderBinding) {
+                        ForEach(SectionPrefs.reminderChoices) { Text($0.title).tag($0.id) }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(DS.Colors.plans)
+                }
+                .accessibilityIdentifier("profile-plan-reminders")
+            }
             // The alarms themselves, edited here: no trip to «Планы» (owner, 19.11 G).
             ProfileGroup("Сигналы") {
                 let rows = AlarmRows.build(plans: planStore.plans, nowMs: Int64(Date().timeIntervalSince1970 * 1000), showAll: false)
@@ -209,20 +229,56 @@ struct ProfileSettingsScreen: View {
     }
 
     private var notes: some View {
-        ProfileGroup("Заметки") {
-            ProfileRow("Шифрование", note: "Заметки хранятся зашифрованными ключом данных аккаунта.")
-            ProfileNavRow(name: "Все заметки", note: "Открыть «Заметки»") { open(.notes) }
+        VStack(alignment: .leading, spacing: 20) {
+            ProfileGroup("Новая заметка") {
+                ProfileToggleRow(name: "Сразу списком с галочками", isOn: $noteStartsAsList)
+            }
+            ProfileGroup("Заметки") {
+                ProfileToggleRow(name: "Закреплённые на «Сегодня»", isOn: cardBinding(.notes))
+                ProfileRow("Хранить удалённое") {
+                    Picker("Хранить удалённое", selection: $keepDays) {
+                        ForEach(SectionPrefs.keepDayChoices, id: \.self) { Text("\($0) дней").tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(DS.Colors.notes)
+                }
+                ProfileRow("Шифрование", note: "Заметки хранятся зашифрованными ключом данных аккаунта.")
+                ProfileNavRow(name: "Все заметки", note: "Открыть «Заметки»") { open(.notes) }
+            }
         }
     }
 
     private var money: some View {
-        ProfileGroup("Деньги") {
-            ProfileNavRow(name: "План бюджета", note: "Лимиты и обязательные платежи") { open(.moneyPlan) }
-            ProfileNavRow(name: "Операции", note: "Все траты и доходы, импорт выписки") { open(.moneyOperations) }
+        VStack(alignment: .leading, spacing: 20) {
+            ProfileGroup("На «Сегодня»") {
+                ProfileToggleRow(name: "Кольцо «Можно сегодня»", isOn: cardBinding(.moneyRing))
+            }
+            ProfileGroup("Деньги") {
+                ProfileNavRow(name: "План бюджета", note: "Лимиты и обязательные платежи") { open(.moneyPlan) }
+                ProfileNavRow(name: "Операции", note: "Все траты и доходы, импорт выписки") { open(.moneyOperations) }
+            }
         }
     }
 
     // MARK: Helpers
+
+    private func cardBinding(_ card: SectionPrefs.TodayCard) -> Binding<Bool> {
+        Binding(
+            get: { !SectionPrefs.hiddenCards(hiddenCards).contains(card.rawValue) },
+            set: { on in
+                var hidden = SectionPrefs.hiddenCards(hiddenCards)
+                if on { hidden.remove(card.rawValue) } else { hidden.insert(card.rawValue) }
+                hiddenCards = SectionPrefs.encode(hidden: hidden)
+            }
+        )
+    }
+
+    private var reminderBinding: Binding<String> {
+        Binding(
+            get: { SectionPrefs.encode(offsets: SectionPrefs.decodeOffsets(planReminders) ?? PlanDomain.defaultReminderOffsets) },
+            set: { planReminders = $0 }
+        )
+    }
 
     /// RootView closes the profile sheet and switches the tab on a deep link.
     private func open(_ link: DeepLink) {

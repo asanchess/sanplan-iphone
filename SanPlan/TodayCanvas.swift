@@ -174,20 +174,21 @@ struct TodayRing: View {
         Button(action: action) {
             VStack(spacing: 8) {
                 ZStack {
-                    Circle().stroke(TodayPalette.ringTrack, lineWidth: 8)
+                    // Dashboard rings (owner 19.11, D-A): the first thing on «Сегодня», so larger.
+                    Circle().stroke(TodayPalette.ringTrack, lineWidth: 11)
                     Circle()
                         .trim(from: 0, to: min(max(fraction, 0), 1))
-                        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .butt))
+                        .stroke(color, style: StrokeStyle(lineWidth: 11, lineCap: .butt))
                         .rotationEffect(.degrees(-90))
                     Text(value)
-                        .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
+                        .font(DS.Fonts.text(19, .heavy, relativeTo: .headline))
                         .monospacedDigit()
                         .foregroundColor(DS.Colors.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                        .frame(width: 44)
+                        .frame(width: 56)
                 }
-                .frame(width: 58, height: 58)
+                .frame(width: 80, height: 80)
                 .padding(4)
                 Text(name)
                     .font(DS.Fonts.text(13, .bold, relativeTo: .caption))

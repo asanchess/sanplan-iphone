@@ -89,7 +89,7 @@ public final class WorkoutLiveActivityController {
             for extra in running.dropFirst() {
                 Task { await extra.end(nil, dismissalPolicy: .immediate) }
             }
-        } else if ActivityAuthorizationInfo().areActivitiesEnabled {
+        } else if ActivityAuthorizationInfo().areActivitiesEnabled, SectionPrefs.lockScreenCard() {
             _ = try? Activity.request(attributes: WorkoutActivityAttributes(), content: content, pushType: nil)
         }
     }

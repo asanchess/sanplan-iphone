@@ -116,6 +116,11 @@ struct AccountDataSection: View {
         // A session that merely expired keeps its alarms: a missed alarm is the worse failure.
         if authService.phase == .signedOut {
             await alarmCoordinator.deleteAllOwnAlarms()
+            // Apple Pay payments, notifications and shared statements not yet taken in must not go to the next
+            // account; an expired session keeps them.
+            BankFeedInbox.standard().clear()
+            BankNotificationReview.standard().clear()
+            BankStatementInbox.standard().clear()
         }
         onSignedOut()
     }
@@ -139,6 +144,10 @@ struct AccountDataSection: View {
         do {
             try await AccountDataAPI.delete(client: authService.client)
             await alarmCoordinator.deleteAllOwnAlarms()
+            // Payments, notifications and statements waiting on the phone belonged to the deleted account.
+            BankFeedInbox.standard().clear()
+            BankNotificationReview.standard().clear()
+            BankStatementInbox.standard().clear()
             authService.signedOutLocally()
             onDeleted()
         } catch {

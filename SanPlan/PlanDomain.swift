@@ -268,9 +268,11 @@ public enum PlanDomain {
         if (try? getReminderOffsets(plan: plan)) != nil {
             return plan
         }
+        // «Настройки → Планы → Напоминать о новом плане»; unset gives the old 1 day, 1 hour, on time.
+        let offsets = SectionPrefs.newPlanOffsets()
         var updated = plan
-        updated.reminderOffsets = defaultReminderOffsets
-        updated.reminderMinutes = 1440
+        updated.reminderOffsets = offsets
+        updated.reminderMinutes = offsets.max() ?? -1
         return updated
     }
 
