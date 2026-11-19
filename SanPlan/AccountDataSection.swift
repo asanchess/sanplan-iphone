@@ -101,17 +101,12 @@ struct AccountDataSection: View {
             }
             Button("Отмена", role: .cancel) {}
         }
-        .alert("Удалить аккаунт?", isPresented: $askDelete) {
-            TextField("Введите \(AccountDataAPI.confirmWord)", text: $word)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-            Button("Удалить", role: .destructive) {
+        .sheet(isPresented: $askDelete) {
+            DeleteAccountSheet(word: $word) {
+                askDelete = false
                 Task { await delete() }
             }
-            .disabled(word.trimmingCharacters(in: .whitespaces) != AccountDataAPI.confirmWord)
-            Button("Отмена", role: .cancel) {}
-        } message: {
-            Text("Сервер сотрёт планы, ключ и все записи аккаунта, отзовёт доступ Google и завершит вход. Это необратимо.")
+            .presentationDetents([.medium, .large])
         }
     }
 
@@ -148,6 +143,66 @@ struct AccountDataSection: View {
             onDeleted()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+/// «Удалить аккаунт»: a warning, the confirm word, and a «Удалить» that wakes up only after 5 seconds.
+struct DeleteAccountSheet: View {
+    @Binding var word: String
+    let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var secondsLeft = 5
+
+    private var wordOK: Bool { word.trimmingCharacters(in: .whitespaces) == AccountDataAPI.confirmWord }
+    private var canDelete: Bool { wordOK && secondsLeft == 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 34, weight: .bold))
+                .foregroundColor(DS.Colors.destructive)
+                .accessibilityHidden(true)
+            Text("Удалить аккаунт навсегда?")
+                .font(DS.Fonts.text(24, .heavy, relativeTo: .title2))
+                .foregroundColor(DS.Colors.textPrimary)
+            Text("Сотрутся планы, заметки, деньги, тренировки и ключ аккаунта. Вернуть их будет нельзя.")
+                .font(DS.Fonts.text(16, .medium, relativeTo: .body))
+                .foregroundColor(DS.Colors.textMuted)
+            TextField("Введите \(AccountDataAPI.confirmWord)", text: $word)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 14).fill(DS.Colors.surface))
+                .accessibilityIdentifier("delete-account-word")
+            HStack(spacing: 12) {
+                Button("Отмена") { dismiss() }
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(DS.Colors.surface))
+                    .foregroundColor(DS.Colors.textPrimary)
+                Button {
+                    onDelete()
+                } label: {
+                    Text(secondsLeft > 0 ? "Удалить (\(secondsLeft))" : "Удалить")
+                        .font(DS.Fonts.text(17, .heavy, relativeTo: .body))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(DS.Colors.destructive.opacity(canDelete ? 1 : 0.35)))
+                        .foregroundColor(DS.Colors.ink)
+                }
+                .disabled(!canDelete)
+                .accessibilityIdentifier("delete-account-confirm")
+            }
+        }
+        .padding(24)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(DS.Colors.canvas.ignoresSafeArea())
+        .task {
+            secondsLeft = 5
+            while secondsLeft > 0 {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                secondsLeft -= 1
+            }
         }
     }
 }

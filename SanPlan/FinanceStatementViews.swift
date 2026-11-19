@@ -66,7 +66,7 @@ struct StatementsSection: View {
     /// then the past imports folded behind «История загрузок · N».
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            MoneyOutlineButton("Выписки из банка", icon: "doc.text.magnifyingglass", isLoading: isReading) {
+            MoneyOutlineButton("Загрузить выписку", icon: "doc.text.magnifyingglass", isLoading: isReading) {
                 onPick()
             }
             .accessibilityIdentifier("statement-import")

@@ -9,6 +9,8 @@ public struct WorkoutLiveIntent: LiveActivityIntent {
 
     public static var title: LocalizedStringResource = "Команда тренировки"
     public static var isDiscoverable: Bool = false
+    /// Lock-screen buttons work without Face ID (owner 19.11): rest, +30 s, next set.
+    public static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
     @Parameter(title: "Действие")
     public var action: String

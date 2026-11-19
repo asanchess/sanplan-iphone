@@ -110,7 +110,8 @@ public struct SettingsView: View {
                     .transition(.opacity)
             }
         }
-        .frame(minHeight: 112)
+        // A fixed box: the two poses differ in width, and the card's text must not move when the hero changes.
+        .frame(width: 104, height: 130)
         .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.8), value: petVisible)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(petVisible ? "Герой" : "Герой отдыхает")

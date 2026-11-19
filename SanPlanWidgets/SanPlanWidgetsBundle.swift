@@ -44,7 +44,9 @@ struct WorkoutLiveActivityWidget: Widget {
                         Text(state.exerciseName)
                             .font(WidgetType.text(16, .bold))
                             .foregroundStyle(WidgetPalette.text)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -85,10 +87,13 @@ struct WorkoutLockScreenView: View {
                         .tracking(0.78)
                         .foregroundStyle(WidgetPalette.coral)
                         .lineLimit(1)
+                    // The whole name, on two lines if it needs them (owner 19.11: a cut name is no use).
                     Text(state.exerciseName)
                         .font(WidgetType.text(18, .bold))
                         .foregroundStyle(WidgetPalette.text)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(state.hint)
                         .font(WidgetType.text(14, .medium))
                         .foregroundStyle(WidgetPalette.muted)
