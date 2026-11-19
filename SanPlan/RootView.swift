@@ -304,7 +304,9 @@ public struct RootView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
                     // The tour picks the tab itself; a stray tap must not take the person away from it.
                     .allowsHitTesting(!tour.isActive)
-                    .opacity(tour.isActive ? 0.4 : 1)
+                    // Dimmed, not see-through: with opacity the list under the bar showed through the labels.
+                    .brightness(tour.isActive ? -0.35 : 0)
+                    .saturation(tour.isActive ? 0.3 : 1)
                     .animation(.easeInOut(duration: 0.3), value: tour.isActive)
             }
         }

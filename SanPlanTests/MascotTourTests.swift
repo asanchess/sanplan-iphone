@@ -39,11 +39,13 @@ final class MascotTourTests: XCTestCase {
 
     // MARK: Step lists
 
-    func testEverySectionHasFourToEightStepsInTheFullTour() {
+    func testEverySectionHasThreeOrFourStepsAndTheWholeTourIsShort() {
+        XCTAssertLessThanOrEqual(TourPlan.all.count, 22, "the full tour stays short")
         for section in TourSection.allCases {
             let steps = TourPlan.steps(for: section)
             XCTAssertFalse(steps.isEmpty, "\(section) has no steps")
-            XCTAssertTrue((4...8).contains(steps.count), "\(section): \(steps.count) steps")
+            XCTAssertTrue((3...4).contains(steps.count), "\(section): \(steps.count) steps")
+            XCTAssertTrue(steps.allSatisfy { $0.text.count <= 80 }, "\(section): one short sentence per step")
             XCTAssertTrue(steps.allSatisfy { $0.section == section })
             XCTAssertTrue(steps.allSatisfy { !$0.text.isEmpty })
         }
@@ -100,6 +102,28 @@ final class MascotTourTests: XCTestCase {
         run.back()
         run.back()
         XCTAssertEqual(run.step?.id, "s0")
+    }
+
+    func testCountIsInsideTheSectionAndDotsFollowTheSections() {
+        let steps = [
+            TourStep("a0", .today, target: "x", "a"), TourStep("a1", .today, target: "x", "a"),
+            TourStep("b0", .plans, target: "x", "b"), TourStep("b1", .plans, target: "x", "b"),
+            TourStep("b2", .plans, target: "x", "b")
+        ]
+        var run = TourRun(kind: .full, steps: steps)
+        XCTAssertEqual(run.position, "1 из 2")
+        XCTAssertEqual(run.sections, [.today, .plans])
+        XCTAssertEqual(run.sectionIndex, 0)
+        _ = run.next()
+        _ = run.next()
+        XCTAssertEqual(run.position, "1 из 3", "a new section starts its own count")
+        XCTAssertEqual(run.sectionIndex, 1)
+        _ = run.next()
+        _ = run.next()
+        XCTAssertEqual(run.position, "3 из 3")
+
+        let short = TourRun(kind: .short, steps: [steps[0], steps[2]])
+        XCTAssertEqual(short.position, "1 из 2", "the short tour counts across sections")
     }
 
     func testMissingTargetIsPassedInTheDirectionOfTravel() {

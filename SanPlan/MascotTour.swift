@@ -88,7 +88,24 @@ public struct TourRun: Equatable {
     public var step: TourStep? { steps.indices.contains(index) ? steps[index] : nil }
     public var isFirst: Bool { index == 0 }
     public var isLast: Bool { index >= steps.count - 1 }
-    public var position: String { "\(index + 1) из \(steps.count)" }
+    /// The count inside the current section: «2 из 4».
+    public var position: String {
+        guard let section = step?.section else { return "" }
+        if kind == .short { return "\(index + 1) из \(steps.count)" }
+        let mine = steps.indices.filter { steps[$0].section == section }
+        let place = (mine.firstIndex(of: index) ?? 0) + 1
+        return "\(place) из \(mine.count)"
+    }
+
+    /// The sections of this run in order, and which one is on screen: the dots on the card.
+    public var sections: [TourSection] {
+        steps.map(\.section).reduce(into: [TourSection]()) { if $0.last != $1 { $0.append($1) } }
+    }
+
+    public var sectionIndex: Int {
+        guard let section = step?.section else { return 0 }
+        return sections.firstIndex(of: section) ?? 0
+    }
 
     /// False when there is no next step: the run is over.
     public mutating func next() -> Bool {
@@ -561,12 +578,34 @@ struct MascotTourOverlay: View {
         }
     }
 
+    /// One dot per section of the run: passed ones dim, the current one long and in the section's colour.
+    private func sectionDots(_ run: TourRun, accent: Color, ink: Color) -> some View {
+        let current = run.sectionIndex
+        return HStack(spacing: 4) {
+            ForEach(Array(run.sections.enumerated()), id: \.offset) { offset, _ in
+                Capsule()
+                    .fill(offset == current ? accent : ink.opacity(offset < current ? 0.45 : 0.18))
+                    .overlay(Capsule().stroke(ink.opacity(offset == current ? 1 : 0), lineWidth: 1))
+                    .frame(width: offset == current ? 16 : 6, height: 6)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: current)
+        .accessibilityElement()
+        .accessibilityLabel("Раздел \(current + 1) из \(run.sections.count)")
+    }
+
     private func bubble(_ run: TourRun, _ step: TourStep, accent: Color, ink: Color) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-                Text("\(step.section.title) · \(run.position)".uppercased())
-                    .font(DS.Fonts.text(11, .heavy, relativeTo: .caption))
-                    .tracking(0.6)
-                    .foregroundColor(ink.opacity(0.6))
+                HStack(spacing: 8) {
+                    Text("\(step.section.title) · \(run.position)".uppercased())
+                        .font(DS.Fonts.text(11, .heavy, relativeTo: .caption))
+                        .tracking(0.6)
+                        .foregroundColor(ink.opacity(0.6))
+                    Spacer(minLength: 0)
+                    if run.sections.count > 1 {
+                        sectionDots(run, accent: accent, ink: ink)
+                    }
+                }
                 Text(step.text)
                     .font(DS.Fonts.text(15, .semibold, relativeTo: .subheadline))
                     .lineSpacing(2)

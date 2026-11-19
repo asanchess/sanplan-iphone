@@ -7,49 +7,38 @@ import Foundation
 public enum TourPlan {
     public static let all: [TourStep] = today + plans + notes + money + workout + general
 
+    // Section by section: the first step names the section, then two or three steps on what is used every day.
+    // One idea per step, one short sentence where possible.
+
     static let today: [TourStep] = [
         TourStep("today.intro", .today, target: "header.title",
-                 "«Сегодня» собирает день из всех ваших разделов."),
+                 "«Сегодня» — ваш день из всех разделов на одном экране."),
         TourStep("today.hero", .today, target: "today.hero", key: true,
-                 "Главное на сейчас: ближайший план или тренировка дня. Нажмите — откроется нужное место."),
+                 "Главное сейчас. Нажмите — откроется нужное место."),
         TourStep("today.rings", .today, target: "today.rings",
-                 "Круги дня по разделам. Нажмите круг — откроется раздел."),
-        TourStep("today.next", .today, target: "today.next",
-                 "Дальше сегодня — планы по времени. «Все планы» открывает весь список."),
-        TourStep("today.habits", .today, target: "today.habits",
-                 "Привычки на сегодня. Нажмите строку — привычка отмечена, «Отменить» внизу вернёт как было."),
-        TourStep("today.progress", .today, target: "today.progress",
-                 "Неделя коротко. Нажмите — откроется весь прогресс."),
+                 "Круги дня. Нажмите круг — откроется раздел."),
         TourStep("today.review", .today, target: "today.review",
-                 "Вечером откройте «Итоги дня»: что сделано и что перенести на завтра.")
+                 "Вечером — «Итоги дня»: что сделано и что перенести.")
     ]
 
     static let plans: [TourStep] = [
         TourStep("plans.intro", .plans, target: "header.title",
-                 "«Планы» — дела, привычки и цели в одном разделе."),
-        TourStep("plans.sections", .plans, target: "plans.sections",
-                 "Здесь переключаются планы, привычки и цели."),
-        TourStep("plans.modes", .plans, target: "plans.modes",
-                 "Планы можно смотреть на сегодня, на неделю, все ближайшие или уже готовые."),
+                 "«Планы» — дела, привычки и цели."),
         TourStep("plans.days", .plans, target: "plans.days",
-                 "Дни недели. Нажмите число — покажу планы этого дня."),
+                 "Нажмите день — покажу его планы."),
         TourStep("plans.composer", .plans, target: "plans.composer", key: true,
-                 "Пишите словами: «завтра в 9 стоматолог». Дату и время разберу сам, сохраните после проверки."),
+                 "Пишите словами: «завтра в 9 стоматолог». Дату и время разберу сам."),
         TourStep("plans.alarms", .plans, target: "plans.alarms",
-                 "Все будильники — за этой кнопкой.")
+                 "Все будильники — здесь.")
     ]
 
     static let notes: [TourStep] = [
         TourStep("notes.intro", .notes, target: "header.title",
-                 "Заметки хранятся зашифрованными ключом вашего аккаунта."),
-        TourStep("notes.search", .notes, target: "notes.search",
-                 "Поиск идёт по всем заметкам сразу."),
-        TourStep("notes.pinned", .notes, target: "notes.pinned",
-                 "Закреплённая заметка всегда сверху и видна на «Сегодня»."),
+                 "«Заметки» зашифрованы — читаете их только вы."),
         TourStep("notes.grid", .notes, target: "notes.grid",
-                 "Нажмите заметку, чтобы открыть. Долгое нажатие — закрепить, поделиться или удалить."),
+                 "Нажмите заметку — откроется. Долгое нажатие — закрепить или удалить."),
         TourStep("notes.capture", .notes, target: "notes.capture", key: true,
-                 "«+» — новая запись текстом или голосом. Из неё можно сделать план или трату.")
+                 "«+» — новая заметка текстом или голосом.")
     ]
 
     static let money: [TourStep] = [
@@ -57,38 +46,28 @@ public enum TourPlan {
                  "«Деньги» — траты, доходы и бюджет месяца."),
         TourStep("money.canSpend", .money, target: "money.canSpend",
                  "Столько можно потратить сегодня, чтобы уложиться в месяц."),
-        TourStep("money.sections", .money, target: "money.sections",
-                 "Обзор, план бюджета и все операции — переключатель здесь."),
         TourStep("money.composer", .money, target: "money.composer", key: true,
-                 "Пишите как удобно: «кофе 1200». Категорию подберу сам, можно голосом."),
+                 "Пишите «кофе 1200» — категорию подберу сам."),
         TourStep("money.statements", .money, target: "money.statements",
-                 "Выписку банка в PDF можно загрузить — операции добавятся сами.")
+                 "Выписка банка в PDF — операции добавятся сами.")
     ]
 
     static let workout: [TourStep] = [
         TourStep("workout.intro", .workout, target: "header.title",
-                 "«Тренировка» — программа по дням, подходы с отдыхом и история."),
-        TourStep("workout.sections", .workout, target: "workout.sections",
-                 "Здесь переключаются тренировка и история."),
-        TourStep("workout.rhythm", .workout, target: "workout.rhythm",
-                 "Ритм недели: дни с тренировкой отмечены."),
+                 "«Тренировка» — программа по дням и история."),
         TourStep("workout.hero", .workout, target: "workout.hero", key: true,
-                 "Тренировка дня. «Начать тренировку» ведёт по подходам и считает отдых."),
+                 "«Начать тренировку» — поведу по подходам и посчитаю отдых."),
         TourStep("workout.plan", .workout, target: "workout.plan",
-                 "План дня. «Изменить» — упражнения, подходы и вес.")
+                 "«Изменить» — упражнения, подходы и вес.")
     ]
 
     static let general: [TourStep] = [
         TourStep("general.capture", .general, target: "shell.capture", key: true,
-                 "«+» — быстрая запись текстом или голосом."),
-        TourStep("general.progress", .general, target: "header.progress",
-                 "Прогресс за неделю и месяц — по этой кнопке."),
-        TourStep("general.profile", .general, target: "header.profile",
-                 "Профиль: настройки разделов, звуки, вид маскота и «Краткий тур»."),
+                 "«+» — быстрая запись из любого раздела."),
         TourStep("general.help", .general, target: "header.help",
-                 "«?» в шапке раздела покажет, как им пользоваться."),
-        TourStep("general.mascot", .general, target: nil,
-                 "Нажмите на меня — напомню, что осталось на сегодня. Спрятать меня можно в профиле.")
+                 "«?» — тур по разделу, где вы сейчас."),
+        TourStep("general.profile", .general, target: "header.profile",
+                 "Профиль: разделы, звуки, маскот и этот тур заново.")
     ]
 
     public static func steps(for section: TourSection) -> [TourStep] {
