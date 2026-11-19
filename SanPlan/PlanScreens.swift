@@ -130,6 +130,7 @@ public struct PlanScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing16) {
                         ArnaSegmented("Раздел планов", selection: $section, options: PlansSection.allCases.map { ($0, $0.rawValue) })
+                            .tourTarget("plans.sections")
 
                         if recorder.isRecordingOrPaused {
                             recorderSection
@@ -152,6 +153,7 @@ public struct PlanScreen: View {
                     .padding(.top, DS.Metrics.spacing16)
                     .padding(.bottom, DS.Metrics.spacing16)
                 }
+                .tourScrollHost()
                 .scrollDismissesKeyboard(.interactively)
                 .refreshable {
                     if !isDemo { await store.reload() }
@@ -271,6 +273,7 @@ public struct PlanScreen: View {
             CircleIconButton(icon: "alarm", accessibilityLabel: "Будильники") {
                 isShowingAlarms = true
             }
+            .tourTarget("plans.alarms")
         }
     }
 
@@ -286,6 +289,7 @@ public struct PlanScreen: View {
         }
 
         PlansFilterChips(selection: $viewMode, options: ViewMode.allCases.map { ($0, $0.rawValue) })
+            .tourTarget("plans.modes")
 
         switch viewMode {
         case .day:
@@ -301,7 +305,7 @@ public struct PlanScreen: View {
                     spoken: { formatLongDate($0) },
                     onPick: { store.selectedDate = $0 }
                 )
-                .petTip("День выбирается здесь. Нажмите на число — покажу его планы.")
+                .tourTarget("plans.days")
             }
             agendaTimeline(
                 store.dayAgenda,

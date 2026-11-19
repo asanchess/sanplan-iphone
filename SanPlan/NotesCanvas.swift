@@ -269,6 +269,7 @@ private struct NotesCaptureButton: ViewModifier {
                             .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
                     }
                     .buttonStyle(PressScaleStyle())
+                    .tourTarget("notes.capture")
                     .keyboardShortcut("n", modifiers: .command)
                     .accessibilityLabel("Записать")
                     .accessibilityHint("Заметка, план или трата")

@@ -81,14 +81,14 @@ struct NotesListView: View {
                     ScreenHeader("Заметки", kicker: "\(ReviewFormat.plural(all.count, "заметка", "заметки", "заметок")) · зашифрованы") {
                     }
                     NotesSearchField(query: $query)
-                        .petTip("Поиск идёт по всем заметкам сразу.")
+                        .tourTarget("notes.search")
                     syncLine
                     if visible.isEmpty {
                         emptyState(searching: !all.isEmpty)
                     }
                     ForEach(Array(pinned.enumerated()), id: \.element.id) { index, note in
                         if index == 0 {
-                            pinnedCard(note).petTip("Закреплённая заметка всегда сверху и видна на «Сегодня».")
+                            pinnedCard(note).tourTarget("notes.pinned")
                         } else {
                             pinnedCard(note)
                         }
@@ -98,6 +98,7 @@ struct NotesListView: View {
                             NoteGridCard(note: note) { store.togglePin(note.id) }
                                 .contextMenu { menu(for: note) }
                         }
+                        .tourTarget("notes.grid")
                     }
                 }
                 .padding(.horizontal, DS.Metrics.screenGutter)
@@ -107,6 +108,7 @@ struct NotesListView: View {
                 .frame(maxWidth: 720)
                 .frame(maxWidth: .infinity)
             }
+            .tourScrollHost()
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await store.sync() }
         }

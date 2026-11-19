@@ -20,14 +20,14 @@ public struct Note: Codable, Identifiable, Equatable, Sendable {
 
     public static func newID() -> String { UUID().uuidString.lowercased() }
 
-    /// First non-empty line without checklist marks, for lists.
+    /// First non-empty line without list or heading marks, for lists.
     public var title: String {
-        lines.first.map(NoteText.displayLine) ?? ""
+        lines.first.map(NoteLists.plainLine) ?? ""
     }
 
     /// The line after the title, for one line of preview.
     public var preview: String {
-        lines.dropFirst().first.map(NoteText.displayLine) ?? ""
+        lines.dropFirst().first.map(NoteLists.plainLine) ?? ""
     }
 
     private var lines: [String] {

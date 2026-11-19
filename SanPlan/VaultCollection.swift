@@ -265,6 +265,8 @@ public final class VaultCollection<Payload: Codable & Equatable & Sendable>: Obs
 
     private func scheduleSync(after delay: Duration) {
         guard transport != nil else { return }
+        // Never cancel an upload in flight: the server may already have taken it (see NotesStore.scheduleSync).
+        if isSyncing { syncAgain = true; return }
         syncTask?.cancel()
         syncTask = Task { [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) }

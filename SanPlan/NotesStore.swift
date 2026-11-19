@@ -197,6 +197,9 @@ public final class NotesStore: ObservableObject {
 
     private func scheduleSync(after delay: Duration) {
         guard transport != nil else { return }
+        // Never cancel an upload in flight: the server may already have taken it while we forget it did,
+        // and the next upload then «conflicts» with ourselves and leaves a copy of the note (seen as twins).
+        if isSyncing { syncAgain = true; return }
         syncTask?.cancel()
         syncTask = Task { [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) }

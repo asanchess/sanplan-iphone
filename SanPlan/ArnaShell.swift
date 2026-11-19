@@ -107,7 +107,6 @@ struct TabStage<Content: View>: View {
             .offset(y: isActive || reduceMotion ? 0 : 10)
             .allowsHitTesting(isActive)
             .accessibilityHidden(!isActive)
-            .transformPreference(PetTipKey.self) { if !isActive { $0 = [] } }
             .environment(\.tabIsActive, isActive)
             .zIndex(isActive ? 1 : 0)
     }

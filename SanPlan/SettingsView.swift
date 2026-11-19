@@ -96,11 +96,11 @@ public struct SettingsView: View {
     private var arcMascot: some View {
         VStack(spacing: 4) {
             if petVisible {
-                MascotSkinImage(skin: wardrobe.skinID, pose: .shrug, height: 112)
+                MascotSkinImage(skin: wardrobe.skinID, pose: .shrug, height: 112, fallbackToBase: true)
                     .shadow(color: .black.opacity(0.4), radius: 4, y: 4)
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
             } else {
-                MascotSkinImage(skin: wardrobe.skinID, pose: .rest, height: 90)
+                MascotSkinImage(skin: wardrobe.skinID, pose: .rest, height: 90, fallbackToBase: true)
                     .saturation(0.3)
                     .opacity(0.75)
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))

@@ -64,7 +64,7 @@ public struct WorkoutScreen: View {
                     ArnaSegmented("Раздел тренировки", selection: $section, options: Part.allCases.map { ($0, $0.rawValue) })
                         .padding(.horizontal, DS.Metrics.screenGutter)
                         .padding(.vertical, DS.Metrics.spacing8)
-                        .petTip("Здесь план тренировки и история. Время считается от старта до финиша.")
+                        .tourTarget("workout.sections")
 
                     switch section {
                     case .history:
@@ -202,12 +202,15 @@ public struct WorkoutScreen: View {
                 }
 
                 TrainingRhythmRow(days: rhythmDays(training))
+                    .tourTarget("workout.rhythm")
 
                 if let featured {
                     heroCard(featured.day, label: featured.label)
+                        .tourTarget("workout.hero")
                 }
 
                 planSection(featured?.day)
+                    .tourTarget("workout.plan")
 
                 if !others.isEmpty {
                     VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
@@ -222,6 +225,7 @@ public struct WorkoutScreen: View {
             .padding(.top, 18)
             .padding(.bottom, 108)
         }
+        .tourScrollHost()
     }
 
     /// The canvas hero: the day in the workout colour, its folded plan and «Начать тренировку».

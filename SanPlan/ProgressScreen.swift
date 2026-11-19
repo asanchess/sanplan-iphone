@@ -65,9 +65,9 @@ struct ProgressScreen: View {
                 header
                 ArnaSegmented("Период", selection: $period, options: [(.week, "Неделя"), (.month, "Месяц")])
                 trendsBlock(snap)
-                    .petTip("Цифры из ваших данных \(snap.period.label). Нажмите — откроется ровно то, о чём цифра.")
+                    .tourTarget("progress.numbers")
                 arcCard(snap.arc)
-                    .petTip("Арка: \(ProgressArcs.rule)")
+                    .tourTarget("progress.arc")
                 goalsSection(snap.goals)
                 notesSection(snap.notes)
                 forgottenSection(snap)

@@ -333,7 +333,7 @@ struct MoneyComposerBar: View {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .stroke(isListening || focus.wrappedValue ? accent : .clear, lineWidth: 1.5)
             )
-            .petTip("Пишите как удобно: «кофе 1200» — категорию подберу сам.")
+            .tourTarget("money.composer")
 
             Button(action: onAdd) {
                 ZStack {

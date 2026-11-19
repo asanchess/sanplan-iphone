@@ -25,7 +25,7 @@ enum ProfileSettingsSection: String, CaseIterable, Identifiable, Hashable {
 
     var note: String {
         switch self {
-        case .general: return "Вводный тур, версия"
+        case .general: return "Краткий тур, версия"
         case .plans: return "Календарь, будильники, звук"
         case .notes: return "Как хранятся заметки"
         case .money: return "План бюджета, операции"
@@ -51,7 +51,6 @@ struct ProfileSettingsScreen: View {
     @EnvironmentObject private var authService: AuthService
     @EnvironmentObject private var alarmCoordinator: AlarmCoordinator
     @EnvironmentObject private var workouts: WorkoutStore
-    @EnvironmentObject private var onboarding: OnboardingModel
     @ObservedObject private var sounds = AlertSoundSettings.shared
 
     @State private var section: ProfileSettingsSection
@@ -107,16 +106,17 @@ struct ProfileSettingsScreen: View {
     private var general: some View {
         ProfileGroup("Общие") {
             Button {
-                let tour = onboarding
                 closeProfile()
                 Task { @MainActor in
+                    // The sheet closes first, so the tour starts on the tabs.
                     try? await Task.sleep(for: .milliseconds(500))
-                    tour.requestTour()
+                    TourCenter.shared.start(.short)
                 }
             } label: {
-                ProfileRow("Показать вводный тур", note: "Короткий показ разделов").contentShape(Rectangle())
+                ProfileRow("Краткий тур", note: "Главное в каждом разделе").contentShape(Rectangle())
             }
             .buttonStyle(ProfileRowButtonStyle())
+            .accessibilityIdentifier("profile-short-tour")
             ProfileRow("Версия ARNA") { ProfileValue(appVersion) }
         }
     }

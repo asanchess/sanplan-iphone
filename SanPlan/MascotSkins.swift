@@ -199,9 +199,16 @@ struct MascotSkinImage: View {
     let skin: String
     var pose: MascotPoseKey = .cheer
     var height: CGFloat
+    /// The worn skin on the profile: while it is not drawn, the base mascot stands in instead of the placeholder.
+    var fallbackToBase = false
+
+    private var imageName: String? {
+        MascotAssets.pose(pose, skin: skin)
+            ?? (fallbackToBase ? MascotAssets.pose(pose, skin: MascotArcs.baseSkin) : nil)
+    }
 
     var body: some View {
-        if let name = MascotAssets.pose(pose, skin: skin) {
+        if let name = imageName {
             Image(name)
                 .resizable()
                 .scaledToFit()

@@ -57,7 +57,7 @@ struct PlansComposerBar: View {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .strokeBorder(focused || isListening ? accent : Color.clear, lineWidth: 2)
             )
-            .petTip("Пишите словами: «завтра в 9 стоматолог» — разберу сам.")
+            .tourTarget("plans.composer")
 
             Button(action: onParse) {
                 ZStack {

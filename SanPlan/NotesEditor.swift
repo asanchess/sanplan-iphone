@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// One note, drawn in the canvas style of «Заметки». Notes with checklist lines open in reading mode,
-/// so boxes tick with one tap; «Изменить» opens the text. Edits save as you type (encrypted on the phone).
+/// One note, drawn in the canvas style of «Заметки». One live editor, like the iPhone: circles tick with a tap
+/// (no keyboard), the keyboard bar adds lists and a heading, its «Готово» saves and puts the keyboard away.
+/// Edits also save as you type (encrypted on the phone); «<» leaves the note.
 struct NoteEditorView: View {
     @ObservedObject var store: NotesStore
     let noteID: String
@@ -9,10 +10,13 @@ struct NoteEditorView: View {
     let onMakeExpense: (String) -> Void
 
     @State private var text = ""
-    @State private var isEditing = false
-    @FocusState private var focused: Bool
+    @State private var focused = false
+    @State private var loaded = false
+    @State private var barTools: KeyboardBarTools?
+    @StateObject private var editor = NoteRichController()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.sectionAccent) private var accent
+    @Environment(\.keyboardBarChannel) private var keyboardBar
 
     private var note: Note? { store.note(noteID) }
 
@@ -20,36 +24,72 @@ struct NoteEditorView: View {
         ZStack(alignment: .top) {
             DS.Colors.canvas.ignoresSafeArea()
             NotesBackdrop()
-            if isEditing { editing } else { reading }
+            VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
+                header
+                if let progress = note?.checklistProgress {
+                    NoteChecklistProgress(done: progress.done, total: progress.total)
+                }
+                if loaded {
+                    NoteRichEditor(text: $text, accent: accent, controller: editor) { focused = $0 }
+                        .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                .stroke(focused ? accent : Color.clear, lineWidth: 2)
+                        )
+                }
+            }
+            .padding(.horizontal, DS.Metrics.screenGutter)
+            .padding(.top, 8)
+            .padding(.bottom, DS.Metrics.spacing12)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if isEditing {
-                    Button { insertChecklistLine() } label: { Image(systemName: "checklist") }
-                        .accessibilityLabel("Добавить пункт списка")
-                    Button("Готово") { finishEditing() }.fontWeight(.semibold)
-                } else {
-                    Button("Изменить") { startEditing() }
-                }
-                actionsMenu
-            }
+            ToolbarItemGroup(placement: .topBarTrailing) { actionsMenu }
         }
         .tint(accent)
         .safeAreaInset(edge: .bottom) { suggestions }
         .onAppear {
             text = note?.text ?? ""
-            if note?.checklistProgress == nil { startEditing() }
+            loaded = true
+            let tools = barTools ?? makeBarTools()
+            barTools = tools
+            keyboardBar?.tools = tools
+            // A new, empty note opens ready to type; a written one opens for reading and ticking.
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editor.focus() }
+            }
         }
         .onChange(of: text) { _, value in
             // Emptied text deletes the note only on «Готово» or when leaving, not mid-edit.
-            guard isEditing, note != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            guard note != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             store.update(noteID, text: value)
         }
+        .onChange(of: note?.text) { _, value in
+            // Sync from another device while the note is open and not being typed in.
+            if let value, value != text, !focused { text = value }
+        }
         .onChange(of: note == nil) { _, gone in if gone { dismiss() } }
-        .onDisappear { if isEditing { store.update(noteID, text: text) } }
+        .onDisappear {
+            if let barTools, keyboardBar?.tools === barTools { keyboardBar?.tools = nil }
+            store.update(noteID, text: editor.currentText ?? text)
+        }
+    }
+
+    /// Lists and heading on the keyboard bar; «Готово» saves.
+    private func makeBarTools() -> KeyboardBarTools {
+        let editor = editor, store = store, noteID = noteID
+        return KeyboardBarTools(items: [
+            .init(id: "check", icon: "checklist", label: "Список с галочками") { editor.apply(.check) },
+            .init(id: "number", icon: "list.number", label: "Нумерованный список") { editor.apply(.number) },
+            .init(id: "bullet", icon: "list.bullet", label: "Список с точками") { editor.apply(.bullet) },
+            .init(id: "heading", icon: "textformat.size", label: "Заголовок") { editor.apply(.heading) }
+        ], onDone: {
+            if let text = editor.currentText { store.update(noteID, text: text) }
+        })
     }
 
     // MARK: Header
@@ -69,100 +109,6 @@ struct NoteEditorView: View {
         }
     }
 
-    // MARK: Reading
-
-    private var reading: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                header
-                    .padding(.bottom, 4)
-                if let progress = note?.checklistProgress {
-                    NoteChecklistProgress(done: progress.done, total: progress.total)
-                        .padding(.bottom, 4)
-                }
-                readingLines
-            }
-            .padding(.horizontal, DS.Metrics.screenGutter)
-            .padding(.top, 8)
-            .padding(.bottom, DS.Metrics.spacing24)
-            .frame(maxWidth: 720, alignment: .leading)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    @ViewBuilder
-    private var readingLines: some View {
-        let lines = (note?.text ?? "").components(separatedBy: "\n")
-        let titleIndex = lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-            if let done = NoteText.checkbox(line) {
-                Button {
-                    store.toggleChecklist(noteID, line: index)
-                    text = store.note(noteID)?.text ?? text
-                } label: {
-                    HStack(spacing: DS.Metrics.spacing12) {
-                        NoteCheckBox(done: done)
-                        Text(NoteText.displayLine(line))
-                            .font(DS.Fonts.text(17, .medium))
-                            .strikethrough(done, color: DS.Colors.textMuted)
-                            .foregroundColor(done ? DS.Colors.textSecondary : DS.Colors.textPrimary)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .frame(minHeight: 52)
-                    .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .buttonStyle(PressScaleStyle())
-                .accessibilityAddTraits(done ? .isSelected : [])
-            } else if index == titleIndex {
-                Text(line)
-                    .font(DS.Fonts.text(26, .heavy, relativeTo: .title2))
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, 2)
-            } else {
-                Text(line.isEmpty ? " " : line)
-                    .font(DS.Fonts.text(17, .medium))
-                    .lineSpacing(3)
-                    .foregroundColor(DS.Colors.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-        }
-    }
-
-    // MARK: Editing
-
-    private var editing: some View {
-        VStack(alignment: .leading, spacing: DS.Metrics.spacing12) {
-            header
-            TextEditor(text: $text)
-                .font(DS.Fonts.text(17, .medium))
-                .foregroundColor(DS.Colors.textPrimary)
-                .scrollContentBackground(.hidden)
-                .focused($focused)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(focused ? accent : Color.clear, lineWidth: 2)
-                )
-                .accessibilityLabel("Текст заметки")
-                .accessibilityIdentifier("note-text")
-        }
-        .padding(.horizontal, DS.Metrics.screenGutter)
-        .padding(.top, 8)
-        .padding(.bottom, DS.Metrics.spacing12)
-        .frame(maxWidth: 720)
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: Actions
 
     private var actionsMenu: some View {
@@ -176,7 +122,6 @@ struct NoteEditorView: View {
                 ShareLink(item: note.text) { Label("Поделиться", systemImage: "square.and.arrow.up") }
                 Divider()
                 Button(role: .destructive) {
-                    isEditing = false
                     NotesActions.delete(noteID, in: store)
                 } label: { Label("Удалить", systemImage: "trash") }
             }
@@ -188,7 +133,7 @@ struct NoteEditorView: View {
 
     @ViewBuilder
     private var suggestions: some View {
-        if !isEditing, let note {
+        if !focused, let note {
             let hints = NoteText.hints(note.text)
             if hints.looksLikePlan || hints.looksLikeExpense {
                 HStack(spacing: DS.Metrics.spacing8) {
@@ -205,22 +150,5 @@ struct NoteEditorView: View {
                 .padding(.bottom, DS.Metrics.spacing12)
             }
         }
-    }
-
-    private func startEditing() {
-        text = note?.text ?? text
-        isEditing = true
-        focused = true
-    }
-
-    private func finishEditing() {
-        store.update(noteID, text: text)
-        focused = false
-        if store.note(noteID)?.checklistProgress != nil { isEditing = false }
-    }
-
-    private func insertChecklistLine() {
-        let separator = text.isEmpty || text.hasSuffix("\n") ? "" : "\n"
-        text += separator + "- [ ] "
     }
 }

@@ -42,20 +42,23 @@ public struct TodayScreen: View {
                         ScreenHeader("Сегодня", kicker: Self.dateLine(Date())) {}
                         heroCard
                         ringsRow
-                            .petTip("Три круга: планы, привычки и сколько можно потратить.")
+                            .tourTarget("today.rings")
                         nextSection
+                            .tourTarget("today.next")
                         habitsSection
-                            .petTip("Нажмите строку — привычка отмечена. Ошиблись — «Отменить» внизу.")
+                            .tourTarget("today.habits")
                         goalsSection
                         pinnedNotesSection
                         progressCard
-                            .petTip("Неделя коротко. Нажмите — откроется весь прогресс.")
+                            .tourTarget("today.progress")
                         reviewButton
+                            .tourTarget("today.review")
                     }
                     .padding(.horizontal, DS.Metrics.screenGutter)
                     .padding(.top, 18)
                     .padding(.bottom, 24)
                 }
+                .tourScrollHost()
                 .refreshable { await plans.reload() }
             }
             .shellCaptureButton()
@@ -166,7 +169,7 @@ public struct TodayScreen: View {
     private var heroCard: some View {
         let hero = self.hero
         return TodayHeroCard(hero: hero, open: { heroOpen(hero) }, primary: { heroPrimary(hero) })
-            .petTip(hero.kind == .workout ? "Главное на сейчас. «Начать» сразу запускает тренировку." : "Главное на сейчас.")
+            .tourTarget("today.hero")
     }
 
     private func heroOpen(_ hero: TodayHero) {

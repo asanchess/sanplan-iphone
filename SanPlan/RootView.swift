@@ -39,7 +39,7 @@ public struct RootView: View {
     @State private var selectedTab: MainTab = .today
     @State private var goalsRequest = 0
     @State private var habitsRequest = 0
-    @StateObject private var onboarding = OnboardingModel()
+    @ObservedObject private var tour = TourCenter.shared
     @State private var showSettingsSheet: Bool = false
     @State private var fullAlarmText: String? = nil
     @State private var showCapture = false
@@ -84,7 +84,6 @@ public struct RootView: View {
                     LoginView()
                 case .signedIn:
                     mainTabsView
-                        .onboardingTour(model: onboarding, review: model.reviews)
                 }
             }
         }
@@ -93,7 +92,6 @@ public struct RootView: View {
                 showSettingsSheet = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showProgress = true }
             }, onClose: { showSettingsSheet = false }, plans: model.plans)
-                .environmentObject(onboarding)
         }
         .alert("Будильник", isPresented: Binding(
             get: { fullAlarmText != nil },
@@ -132,19 +130,12 @@ public struct RootView: View {
                 undoCenter.dismiss()
                 selectedTab = .today
                 model.clearAccountData()
-                onboarding.accountChanged(nil)
+                tour.end()
             case .signedIn(let email):
                 model.accountSignedIn(email: email)
-                onboarding.attach(settings: model.appSettings)
-                onboarding.accountChanged(email)
             case .checking:
                 break
             }
-        }
-        .onAppear { onboarding.attach(settings: model.appSettings) }
-        // The account's settings arrive after the first sync: the tour is decided then.
-        .onReceive(model.appSettings.objectWillChange.receive(on: DispatchQueue.main)) { _ in
-            onboarding.settingsChanged()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && !isScreenshotSignedInMode { model.becameActive() }
@@ -239,21 +230,45 @@ public struct RootView: View {
         }
         .environment(\.headerShortcuts, HeaderShortcuts(
             openProfile: { showSettingsSheet = true },
-            openProgress: { showProgress = true }
+            openProgress: { showProgress = true },
+            openHelp: { tour.start(.section(TourSection(tab: selectedTab))) }
         ))
-        .overlayPreferenceValue(PetTipKey.self) { tips in
+        .background(MascotEventWatcher(plans: model.plans, finance: model.finance, workouts: model.workouts))
+        .overlay {
             GeometryReader { proxy in
-                PetLayer(
-                    tips: tips.map { PetResolvedTip(text: $0.text, rect: proxy[$0.anchor]) },
-                    area: proxy.size,
-                    idleLine: "Это главное на экране «\(selectedTab.title)». Спрятать меня можно в профиле."
-                )
+                PetLayer(area: proxy.size, tab: selectedTab) {
+                    MascotReminders.lines(
+                        MascotReminders.input(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes),
+                        focus: selectedTab
+                    )
+                }
             }
         }
         .overlay(alignment: .bottom) {
             UndoToast(center: undoCenter)
                 .padding(.bottom, 80)
                 .animation(.easeOut(duration: 0.2), value: undoCenter.offer?.id)
+        }
+        .overlay { MascotTourOverlay() }
+        // The tour leads: its step picks the tab, and sheets and the keyboard step aside while it runs.
+        .onChange(of: tour.step?.section) { _, section in
+            if let section { selectedTab = section.tab }
+        }
+        .onChange(of: tour.isActive) { _, active in
+            guard active else { return }
+            showProgress = false
+            showSettingsSheet = false
+            showCapture = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        .task {
+            // First launch: once per device, never in UI tests or screenshots unless `--mascot-tour` asks.
+            let process = ProcessInfo.processInfo
+            guard let launch = TourLaunch.decide(arguments: process.arguments, environment: process.environment, defaults: .standard) else { return }
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled, !tour.isActive else { return }
+            if !launch.forced { TourLaunch.markDone(.standard) }
+            tour.start(launch.kind)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !keyboardVisible {
@@ -429,6 +444,7 @@ private struct CaptureButton: ViewModifier {
                             .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
                     }
                     .buttonStyle(PressScaleStyle())
+                    .tourTarget("shell.capture")
                     .keyboardShortcut("n", modifiers: .command)
                     .accessibilityLabel("Записать")
                     .accessibilityHint("Заметка, план или трата")

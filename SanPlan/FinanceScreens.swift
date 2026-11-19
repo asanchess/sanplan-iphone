@@ -153,8 +153,9 @@ public struct FinanceScreen: View {
                                     onBreakdown: { showBreakdown = true },
                                     onSetLimits: { tab = .plan }
                                 )
-                                .petTip("Столько можно потратить сегодня, чтобы уложиться в месяц.")
+                                .tourTarget("money.canSpend")
                                 ArnaSegmented("Раздел денег", selection: $tab, options: FinanceTab.allCases.map { ($0, $0.title) })
+                                    .tourTarget("money.sections")
                             }
                             messages
 
@@ -167,6 +168,7 @@ public struct FinanceScreen: View {
                                     emptyStateView
                                 }
                                 statementsSection
+                                    .tourTarget("money.statements")
                                 vaultActionsSection
                             } else {
                                 tabContent
@@ -176,6 +178,7 @@ public struct FinanceScreen: View {
                         .padding(.top, 18)
                         .padding(.bottom, 24)
                     }
+                    .tourScrollHost()
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: drafts.isEmpty) { _, isEmpty in
                         guard !isEmpty else { return }
@@ -369,6 +372,7 @@ public struct FinanceScreen: View {
         case .operations:
             // Top to bottom: «Выписки из банка» with the folded «История загрузок», then the folded «История операций».
             statementsSection
+                .tourTarget("money.statements")
             OperationsFeed(
                 store: store, filter: $ledgerFilter,
                 onEdit: { recordToEdit = $0 },

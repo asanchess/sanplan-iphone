@@ -277,11 +277,18 @@ public struct ScreenHeader<Actions: View>: View {
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
             }
+            .tourTarget("header.title")
             Spacer(minLength: 0)
             actions
             if let shortcuts {
+                if let help = shortcuts.openHelp {
+                    SectionHelpButton(action: help)
+                        .tourTarget("header.help")
+                }
                 CircleIconButton(icon: "chart.bar.xaxis", accessibilityLabel: "Прогресс", action: shortcuts.openProgress)
+                    .tourTarget("header.progress")
                 ProfileAvatarButton(accent: accent, action: shortcuts.openProfile)
+                    .tourTarget("header.profile")
             }
         }
     }
@@ -342,6 +349,8 @@ public struct ProfileAvatarButton: View {
 public struct HeaderShortcuts {
     public var openProfile: () -> Void
     public var openProgress: () -> Void
+    /// The «?» that runs this section's tour.
+    public var openHelp: (() -> Void)? = nil
 }
 
 private struct SectionAccentKey: EnvironmentKey { static let defaultValue: Color = DS.Colors.today }
@@ -471,29 +480,101 @@ public struct ErrorBanner: View {
     }
 }
 
+/// Extra buttons a screen puts on the left of the keyboard bar (the notes editor: lists and heading),
+/// plus what «Готово» should do besides hiding the keyboard. Compared by identity.
+public final class KeyboardBarTools: Equatable {
+    public struct Item: Identifiable {
+        public let id: String
+        public let icon: String
+        public let label: String
+        public let action: @MainActor () -> Void
+        public init(id: String, icon: String, label: String, action: @escaping @MainActor () -> Void) {
+            self.id = id; self.icon = icon; self.label = label; self.action = action
+        }
+    }
+    public let items: [Item]
+    public let onDone: @MainActor () -> Void
+    public init(items: [Item], onDone: @escaping @MainActor () -> Void = {}) {
+        self.items = items
+        self.onDone = onDone
+    }
+    public static func == (a: KeyboardBarTools, b: KeyboardBarTools) -> Bool { a === b }
+}
+
+/// The keyboard bar's mailbox, handed down the environment (it reaches pushed screens, unlike preferences).
+@MainActor
+public final class KeyboardBarChannel: ObservableObject {
+    @Published public var tools: KeyboardBarTools?
+    public init() {}
+}
+
+private struct KeyboardBarChannelKey: EnvironmentKey {
+    static let defaultValue: KeyboardBarChannel? = nil
+}
+
+public extension EnvironmentValues {
+    var keyboardBarChannel: KeyboardBarChannel? {
+        get { self[KeyboardBarChannelKey.self] }
+        set { self[KeyboardBarChannelKey.self] = newValue }
+    }
+}
+
 /// Gives any screen with text input a way to put the keyboard away: drag the content down,
 /// or tap «Готово» on the bar that rides above the keyboard. Multi-line fields treat Return as a new line,
-/// so without this the keyboard could not be closed.
+/// so without this the keyboard could not be closed. The bar takes the section's colour.
 public struct KeyboardDismissBar: ViewModifier {
     @State private var isKeyboardVisible = false
+    @StateObject private var channel = KeyboardBarChannel()
+    @Environment(\.sectionAccent) private var accent
+
+    private var tools: KeyboardBarTools? { channel.tools }
 
     public func body(content: Content) -> some View {
         content
+            .environment(\.keyboardBarChannel, channel)
             .scrollDismissesKeyboard(.interactively)
             .onAppear { KeyboardTapDismisser.shared.install() }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isKeyboardVisible {
-                    HStack {
+                    HStack(spacing: 2) {
+                        ForEach(tools?.items ?? []) { item in
+                            Button { item.action() } label: {
+                                Image(systemName: item.icon)
+                                    .font(.system(size: 19, weight: .semibold))
+                                    .foregroundColor(DS.Colors.textPrimary)
+                                    .frame(width: DS.Metrics.minHitTarget, height: DS.Metrics.minHitTarget)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressScaleStyle())
+                            .accessibilityLabel(item.label)
+                            .accessibilityIdentifier("kbd-\(item.id)")
+                        }
                         Spacer()
-                        Button("Готово") { hideKeyboard() }
-                            .font(.body.weight(.semibold))
-                            .foregroundColor(DS.Colors.accent)
-                            .padding(.horizontal, DS.Metrics.spacing16)
-                            .frame(minHeight: DS.Metrics.minHitTarget)
-                            .accessibilityLabel("Скрыть клавиатуру")
+                        Button {
+                            tools?.onDone()
+                            hideKeyboard()
+                        } label: {
+                            Text("Готово")
+                                .font(.body.weight(.bold))
+                                .foregroundColor(DS.Colors.ink)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(accent, in: Capsule())
+                        }
+                        .padding(.trailing, DS.Metrics.spacing12)
+                        .frame(minHeight: DS.Metrics.minHitTarget)
+                        .accessibilityLabel("Готово")
+                        .accessibilityHint("Сохраняет и прячет клавиатуру")
+                        .accessibilityIdentifier("kbd-done")
                     }
+                    .padding(.leading, 6)
                     .background(DS.Colors.surface)
                     .overlay(alignment: .top) { Rectangle().fill(DS.Colors.hairline).frame(height: 1) }
+                    // Taps on the bar must not count as «tap outside the text» and close the keyboard.
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        KeyboardTapDismisser.shared.keepRect = $0
+                    }
+                    .onDisappear { KeyboardTapDismisser.shared.keepRect = .null }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -511,6 +592,8 @@ public struct KeyboardDismissBar: ViewModifier {
 final class KeyboardTapDismisser: NSObject, UIGestureRecognizerDelegate {
     static let shared = KeyboardTapDismisser()
     private weak var installedWindow: UIWindow?
+    /// The keyboard bar's frame in window coordinates: taps there keep the keyboard.
+    var keepRect: CGRect = .null
 
     func install() {
         let window = UIApplication.shared.connectedScenes
@@ -529,6 +612,7 @@ final class KeyboardTapDismisser: NSObject, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if !keepRect.isNull, let window = installedWindow, keepRect.contains(touch.location(in: window)) { return false }
         var view = touch.view
         while let current = view {
             // Text inputs, and the edit menu (Вставить, Скопировать) that sits over them: a tap there must reach its action.
