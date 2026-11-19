@@ -571,7 +571,8 @@ final class ARNAUITests: XCTestCase {
 
     @MainActor
     private func hideKeyboardIfNeeded() {
-        let bar = exactButton(Labels.hideKeyboard)
+        // The keyboard bar's «Готово» (in the section's colour).
+        let bar = app.buttons["kbd-done"]
         if bar.exists && bar.isHittable {
             bar.tap()
         } else if app.keyboards.firstMatch.exists {
