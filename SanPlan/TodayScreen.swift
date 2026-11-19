@@ -172,7 +172,7 @@ public struct TodayScreen: View {
         let next = upcoming.first.map { (title: $0.item.title, time: $0.startMin.map(TodayFormat.clock) ?? "") }
         return TodayHeroSummary.make(
             workout: line, workoutDetail: detail,
-            workoutDoneToday: showWorkout ? workouts.daySummary(for: reviewDay).completed : 0,
+            workoutDoneToday: showWorkout && workouts.daySummary(for: reviewDay).completed,
             nextPlan: next, openPlans: upcoming.count
         )
     }
