@@ -87,6 +87,13 @@ jobs:
             sleep 4
             xcrun simctl io "$simulator" screenshot "artifacts/screens/workout-$phase.png"
           done
+          # The mascot tour: the first step of the full tour and of two section tours.
+          for route in full:0 plans:2 notes:4; do
+            kind="${route%%:*}"; tab="${route##*:}"
+            xcrun simctl launch --terminate-running-process "$simulator" com.sanplan.companion --screenshot-signed-in --screenshot-demo-data --screenshot-tab "$tab" --mascot-tour "$kind"
+            sleep 5
+            xcrun simctl io "$simulator" screenshot "artifacts/screens/tour-$kind.png"
+          done
       - name: Upload IPA and diagnostic logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

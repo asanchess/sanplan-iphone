@@ -264,11 +264,18 @@ public struct ScreenHeader<Actions: View>: View {
     }
 
     public var body: some View {
+        // The kicker gets the full width on its own line: next to the header buttons it was cut off.
+        VStack(alignment: .leading, spacing: 5) {
+            if let kicker, !kicker.isEmpty {
+                SkewTag(kicker, color: accent)
+            }
+            headerRow
+        }
+    }
+
+    private var headerRow: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
-                if let kicker, !kicker.isEmpty {
-                    SkewTag(kicker, color: accent)
-                }
                 Text(title)
                     .font(DS.Fonts.title)
                     .foregroundColor(DS.Colors.textPrimary)
