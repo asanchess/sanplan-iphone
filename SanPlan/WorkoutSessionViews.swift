@@ -429,9 +429,91 @@ struct ExerciseSetsCard: View {
     var startsExpanded: Bool = true
 
     @State private var expandedOverride: Bool? = nil
+    /// The set being dragged by its ≡ handle, how far, and the height of one row with the gap.
+    @State private var draggingSet: Int? = nil
+    @State private var dragY: CGFloat = 0
+    @State private var rowPitch: CGFloat = 48
     @Environment(\.sectionAccent) private var accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var exercise: SessionExercise { session.exercises[index] }
+
+    /// Where the dragged set would land now.
+    private var dropIndex: Int? {
+        guard let from = draggingSet, rowPitch > 0 else { return nil }
+        let steps = Int((dragY / rowPitch).rounded())
+        return min(max(from + steps, 0), exercise.rests.count - 1)
+    }
+
+    /// The dragged row follows the finger; the rows it passes step aside by one row.
+    private func shift(of set: Int) -> CGFloat {
+        guard let from = draggingSet, let to = dropIndex else { return 0 }
+        if set == from { return dragY }
+        if from < set && set <= to { return -rowPitch }
+        if to <= set && set < from { return rowPitch }
+        return 0
+    }
+
+    private func moveSet(from: Int, to: Int) {
+        guard from != to, exercise.rests.indices.contains(to) else { return }
+        store.editSession("Подход перемещён") { try WorkoutSessionEdit.moveSet($0, exercise: index, from: from, to: to) }
+    }
+
+    /// ≡: drag a set up or down. VoiceOver gets «Выше» and «Ниже» instead.
+    private func handle(_ set: Int) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.body.weight(.semibold))
+            .foregroundColor(draggingSet == set ? accent : DS.Colors.textSecondary.opacity(0.7))
+            .frame(width: 30, height: DS.Metrics.minHitTarget)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                    .onChanged { value in
+                        if draggingSet == nil {
+                            draggingSet = set
+                            UISelectionFeedbackGenerator().selectionChanged()
+                        }
+                        let before = dropIndex
+                        dragY = value.translation.height
+                        if dropIndex != before { UISelectionFeedbackGenerator().selectionChanged() }
+                    }
+                    .onEnded { _ in
+                        let from = draggingSet
+                        let to = dropIndex
+                        var still = Transaction()
+                        still.disablesAnimations = true
+                        withTransaction(still) {
+                            if let from, let to { moveSet(from: from, to: to) }
+                            draggingSet = nil
+                            dragY = 0
+                        }
+                    }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Переместить подход \(set + 1)")
+            .accessibilityAction(named: "Выше") { moveSet(from: set, to: set - 1) }
+            .accessibilityAction(named: "Ниже") { moveSet(from: set, to: set + 1) }
+    }
+
+    /// «…» of a set: only edit and delete.
+    private func setMenu(_ set: Int) -> some View {
+        Menu {
+            Button { onEditSet(set) } label: { Label("Редактировать", systemImage: "pencil") }
+            if exercise.rests.count > 1 {
+                Button(role: .destructive) {
+                    store.editSession("Подход удалён") { try WorkoutSessionEdit.removeSet($0, exercise: index, set: set) }
+                } label: { Label("Удалить подход", systemImage: "trash") }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(width: 36, height: DS.Metrics.minHitTarget)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Действия с подходом \(set + 1)")
+        .accessibilityIdentifier("set-menu-\(index)-\(set)")
+    }
     private var isRunning: Bool { session.phase != .complete }
     private var isExpanded: Bool { expandedOverride ?? startsExpanded }
 
@@ -483,7 +565,21 @@ struct ExerciseSetsCard: View {
             if isExpanded {
                 ForEach(exercise.rests.indices, id: \.self) { set in
                     setRow(set, isCurrent: isCurrent && set == session.setIndex)
+                        .offset(y: shift(of: set))
+                        .zIndex(draggingSet == set ? 1 : 0)
+                        .background {
+                            if draggingSet == set {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(DS.Colors.surfaceRaised)
+                                    .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                                    .offset(y: dragY)
+                            }
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                            if set == 0 { rowPitch = height + DS.Metrics.spacing4 }
+                        }
                 }
+                .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: dropIndex)
                 Button {
                     store.editSession("Подход добавлен") { try WorkoutSessionEdit.addSet($0, exercise: index) }
                 } label: {
@@ -561,7 +657,8 @@ struct ExerciseSetsCard: View {
             reps: entry.reps ?? suggested.reps,
             bodyweight: bodyweight
         )
-        return HStack(spacing: DS.Metrics.spacing8) {
+        return HStack(spacing: DS.Metrics.spacing4) {
+            if exercise.rests.count > 1 { handle(set) }
             Button {
                 let done = !entry.done
                 store.editSession(done ? "Подход отмечен" : "Отметка снята") {
@@ -591,15 +688,13 @@ struct ExerciseSetsCard: View {
                     Text(text)
                         .font(.subheadline.monospacedDigit())
                         .foregroundColor(entry.done ? DS.Colors.textPrimary : DS.Colors.textSecondary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(DS.Colors.textSecondary.opacity(0.6))
                 }
                 .frame(minHeight: DS.Metrics.minHitTarget)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Подход \(set + 1): \(text)\(isCurrent ? ", сейчас" : "")")
+            setMenu(set)
         }
     }
 }

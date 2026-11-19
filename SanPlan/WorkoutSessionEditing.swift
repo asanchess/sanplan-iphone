@@ -87,6 +87,30 @@ public enum WorkoutSessionEdit {
         return finish(next, from: state)
     }
 
+    /// Moves a set inside its exercise (the ≡ handle). Its weight, reps and tick go with it; the rests keep
+    /// their places, so the rest before the next exercise stays last. The set in progress stays current.
+    public static func moveSet(_ state: WorkoutSessionState, exercise: Int, from: Int, to: Int) throws -> WorkoutSessionState {
+        var next = try editable(state)
+        try check(next, exercise: exercise, set: from)
+        try check(next, exercise: exercise, set: to)
+        guard from != to else { return state }
+        var entries = next.exercises[exercise].sets
+        let moved = entries.remove(at: from)
+        entries.insert(moved, at: to)
+        next.exercises[exercise].log = entries
+        if next.exerciseIndex == exercise {
+            let current = next.setIndex
+            if current == from {
+                next.setIndex = to
+            } else if from < current && to >= current {
+                next.setIndex -= 1
+            } else if from > current && to <= current {
+                next.setIndex += 1
+            }
+        }
+        return finish(next, from: state)
+    }
+
     /// Adds an exercise after the others, or at `index`.
     public static func addExercise(_ state: WorkoutSessionState, _ exercise: SessionExercise, at index: Int? = nil) throws -> WorkoutSessionState {
         var next = try editable(state)

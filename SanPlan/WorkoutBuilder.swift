@@ -11,7 +11,14 @@ struct WorkoutBuilderView: View {
     @State private var renaming: RenameTarget?
     @State private var renameText = ""
     @State private var titleDraft = ""
+    /// Exercises start folded: number, name, one line of the target. A tap opens the steppers.
+    @State private var expanded: Set<String> = []
+    /// The exercise being dragged (by ≡ or a long press on its head), how far, and the cards' frames.
+    @State private var dragID: String?
+    @State private var dragY: CGFloat = 0
+    @State private var cardFrames: [String: CGRect] = [:]
     @Environment(\.sectionAccent) private var accent
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct RenameTarget: Identifiable {
         let id: String
@@ -36,11 +43,7 @@ struct WorkoutBuilderView: View {
 
                 if let day {
                     dayTitleField(day)
-                    ForEach(day.exercises, id: \.id) { exercise in
-                        if let id = exercise.id {
-                            exerciseCard(exercise, id: id, isFirst: exercise.id == day.exercises.first?.id, isLast: exercise.id == day.exercises.last?.id)
-                        }
-                    }
+                    exerciseList(day)
                 } else {
                     Card {
                         Text("\(Self.fullNames[weekday - 1]) — день отдыха")
@@ -65,10 +68,15 @@ struct WorkoutBuilderView: View {
         }
         .sensoryFeedback(.selection, trigger: weekday)
         .onAppear { titleDraft = day?.title ?? "" }
-        .onChange(of: weekday) { _, _ in titleDraft = day?.title ?? "" }
+        .onChange(of: weekday) { _, _ in
+            titleDraft = day?.title ?? ""
+            expanded = []
+        }
         .sheet(isPresented: $showLibrary) {
             ExerciseLibrarySheet { name in
                 store.updateProgram(label: "Упражнение добавлено") { try WorkoutProgram.addExercise($0, weekday: weekday, name: name) }
+                // The new one opens so its sets and weight can be set at once; the rest stay folded.
+                if let added = day?.exercises.last?.id { expanded.insert(added) }
             }
         }
         .alert("Название упражнения", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -132,13 +140,142 @@ struct WorkoutBuilderView: View {
         }
     }
 
-    private func exerciseCard(_ exercise: WorkoutExercisePlan, id: String, isFirst: Bool, isLast: Bool) -> some View {
-        Card {
-            HStack(alignment: .firstTextBaseline) {
-                Text(exercise.name)
-                    .font(.headline)
-                    .foregroundColor(DS.Colors.textPrimary)
+    // MARK: - Exercises: folded, numbered, dragged into place
+
+    private func exerciseList(_ day: WorkoutDayPlan) -> some View {
+        let ids = day.exercises.compactMap(\.id)
+        return VStack(spacing: DS.Metrics.spacing12) {
+            ForEach(Array(day.exercises.enumerated()), id: \.element.id) { offset, exercise in
+                if let id = exercise.id {
+                    exerciseCard(exercise, id: id, number: offset + 1, isFirst: offset == 0, isLast: offset == day.exercises.count - 1)
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                            // Frozen while dragging: the offsets below must not feed back into the targets.
+                            if dragID == nil { cardFrames[id] = frame }
+                        }
+                        .scaleEffect(dragID == id ? 1.03 : 1)
+                        .shadow(color: .black.opacity(dragID == id ? 0.45 : 0), radius: 14, y: 8)
+                        .offset(y: shift(of: id, ids: ids))
+                        // The card under the finger follows it exactly; only the others glide.
+                        .transaction(value: dragID == id ? dragY : 0) { $0.animation = nil }
+                        .zIndex(dragID == id ? 1 : 0)
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.78), value: dropIndex(ids))
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.7), value: dragID)
+    }
+
+    /// Where the dragged card would land: the number of other cards whose middle is above its middle now.
+    private func dropIndex(_ ids: [String]) -> Int? {
+        guard let dragID, let frame = cardFrames[dragID] else { return nil }
+        let center = frame.midY + dragY
+        return ids.filter { $0 != dragID && (cardFrames[$0]?.midY ?? .infinity) < center }.count
+    }
+
+    private func shift(of id: String, ids: [String]) -> CGFloat {
+        guard let dragID, let from = ids.firstIndex(of: dragID), let to = dropIndex(ids),
+              let index = ids.firstIndex(of: id) else { return 0 }
+        if id == dragID { return dragY }
+        let pitch = (cardFrames[dragID]?.height ?? 0) + DS.Metrics.spacing12
+        if from < index && index <= to { return -pitch }
+        if to <= index && index < from { return pitch }
+        return 0
+    }
+
+    private func dragChanged(_ id: String, _ translation: CGFloat, ids: [String]) {
+        if dragID == nil {
+            dragID = id
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+        let before = dropIndex(ids)
+        dragY = translation
+        if dropIndex(ids) != before { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+
+    private func dragEnded(ids: [String]) {
+        guard let id = dragID, let from = ids.firstIndex(of: id) else {
+            dragID = nil
+            dragY = 0
+            return
+        }
+        let to = dropIndex(ids) ?? from
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) {
+            if to != from {
+                store.updateProgram(label: "Упражнение перемещено") { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: to - from) }
+            }
+            dragID = nil
+            dragY = 0
+        }
+    }
+
+    private func exerciseCard(_ exercise: WorkoutExercisePlan, id: String, number: Int, isFirst: Bool, isLast: Bool) -> some View {
+        let ids = day?.exercises.compactMap(\.id) ?? []
+        let isOpen = expanded.contains(id)
+        let drag = DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .onChanged { dragChanged(id, $0.translation.height, ids: ids) }
+            .onEnded { _ in dragEnded(ids: ids) }
+        let longPressDrag = LongPressGesture(minimumDuration: 0.35)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+            .onChanged { value in
+                if case .second(true, let moved) = value {
+                    dragChanged(id, moved?.translation.height ?? 0, ids: ids)
+                }
+            }
+            .onEnded { _ in dragEnded(ids: ids) }
+        return Card {
+            HStack(alignment: .center, spacing: DS.Metrics.spacing8) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(dragID == id ? accent : DS.Colors.textSecondary.opacity(0.7))
+                    .frame(width: 28, height: DS.Metrics.minHitTarget)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(drag)
+                    .accessibilityElement()
+                    .accessibilityLabel("Переместить: \(exercise.name)")
+                    .accessibilityAction(named: "Выше") {
+                        store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: -1) }
+                    }
+                    .accessibilityAction(named: "Ниже") {
+                        store.updateProgram { try WorkoutProgram.moveExercise($0, weekday: weekday, id: id, by: 1) }
+                    }
+                Text("\(number)")
+                    .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
+                    .monospacedDigit()
+                    .foregroundColor(accent)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(TrainingPalette.badge))
+                    .contentTransition(.numericText())
+                    .accessibilityHidden(true)
+                HStack(spacing: DS.Metrics.spacing8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(exercise.name)
+                            .font(.headline)
+                            .foregroundColor(DS.Colors.textPrimary)
+                            .multilineTextAlignment(.leading)
+                        if !isOpen {
+                            Text(WorkoutFormat.exerciseSummary(exercise))
+                                .font(.footnote.monospacedDigit())
+                                .foregroundColor(DS.Colors.textSecondary)
+                                .transition(.opacity)
+                        }
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.bold))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .rotationEffect(.degrees(isOpen ? 180 : 0))
+                }
+                .frame(minHeight: DS.Metrics.minHitTarget)
+                .contentShape(Rectangle())
+                .onTapGesture { toggle(id) }
+                .gesture(longPressDrag)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("\(number). \(exercise.name)")
+                .accessibilityValue(isOpen ? "раскрыто" : WorkoutFormat.exerciseSummary(exercise))
+                .accessibilityHint(isOpen ? "Свернуть" : "Показать подходы, повторы и вес")
                 Menu {
                     Button { renameText = exercise.name; renaming = RenameTarget(id: id, name: exercise.name) } label: {
                         Label("Переименовать", systemImage: "pencil")
@@ -171,6 +308,22 @@ struct WorkoutBuilderView: View {
                 .accessibilityLabel("Действия с упражнением")
             }
 
+            if isOpen {
+                exerciseDetails(exercise, id: id)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        guard dragID == nil else { return }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.82)) {
+            if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) }
+        }
+    }
+
+    @ViewBuilder
+    private func exerciseDetails(_ exercise: WorkoutExercisePlan, id: String) -> some View {
             ValueStepperRow(
                 title: "Подходы",
                 value: "\(exercise.sets)",
@@ -219,7 +372,6 @@ struct WorkoutBuilderView: View {
             .foregroundColor(DS.Colors.textPrimary)
             .tint(DS.Colors.workout)
             weightRows(exercise, id: id)
-        }
     }
 
     /// Working weight (added load for a bodyweight exercise) and the step the progression hint adds.

@@ -92,6 +92,30 @@ final class WorkoutHistoryTests: XCTestCase {
         XCTAssertThrowsError(try WorkoutSessionEdit.removeSet(state, exercise: 0, set: 0))
     }
 
+    func testMovingASetCarriesItsValuesAndKeepsTheCurrentSet() throws {
+        var state = try workingSession()
+        state = try WorkoutSessionEdit.setValues(state, exercise: 0, set: 0, weightKg: 50)
+        state = try WorkoutSessionEdit.setValues(state, exercise: 0, set: 2, weightKg: 70)
+        XCTAssertEqual(state.setIndex, 0)
+
+        // The set in progress moves down to the end and stays the one in progress.
+        state = try WorkoutSessionEdit.moveSet(state, exercise: 0, from: 0, to: 2)
+        XCTAssertEqual(state.exercises[0].sets[1].weightKg, 70)
+        XCTAssertEqual(state.exercises[0].sets[2].weightKg, 50)
+        XCTAssertEqual(state.setIndex, 2)
+        // Rests belong to the places, not to the sets: the one before the next exercise stays last.
+        XCTAssertEqual(state.exercises[0].rests, [60, 60, 90])
+
+        // A set moved from above the current one shifts it up by one.
+        state = try WorkoutSessionEdit.moveSet(state, exercise: 0, from: 0, to: 2)
+        XCTAssertEqual(state.setIndex, 1)
+
+        let same = try WorkoutSessionEdit.moveSet(state, exercise: 0, from: 1, to: 1)
+        XCTAssertEqual(same, state)
+        XCTAssertThrowsError(try WorkoutSessionEdit.moveSet(state, exercise: 0, from: 0, to: 3))
+        XCTAssertThrowsError(try WorkoutSessionEdit.moveSet(state, exercise: 4, from: 0, to: 1))
+    }
+
     func testRemovingTheExerciseInProgressHandsOverToTheNextOne() throws {
         var state = try workingSession()
         XCTAssertThrowsError(try WorkoutSessionEdit.removeExercise(state, index: 5, now: t0))
