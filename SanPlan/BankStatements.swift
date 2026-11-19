@@ -509,7 +509,7 @@ public enum StatementImport {
     static let ownTransferMarkers = [
         "между своими счетами", "со своего счета", "со своего счёта", "на свой счет", "на свой счёт",
         "на свою карту", "со своей карты", "с kaspi депозита", "на kaspi депозит", "с депозита", "на депозит",
-        "собственных средств", "своих средств", "own account", "между своими картами", "с kaspi gold", "на kaspi gold",
+        "собственных средств", "своих средств", "own account", "between own", "между своими картами", "с kaspi gold", "на kaspi gold",
     ]
 
     public static func isOwnTransfer(_ t: ParsedStatement.Transaction, ownerFirstName: String? = nil) -> Bool {
