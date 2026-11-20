@@ -82,6 +82,8 @@ public struct TodayScreen: View {
                 .tourScrollHost()
                 .refreshable { await plans.reload() }
             }
+            // «ДОН!» when the last task of the day is ticked.
+            .donStamp(on: AnimeWin.allDone(todayItems.filter { $0.item.kind == "task" && $0.item.date == reviewDay }.map { $0.item.completed == true }))
             .shellCaptureButton()
             .toolbar(.hidden, for: .navigationBar)
         }

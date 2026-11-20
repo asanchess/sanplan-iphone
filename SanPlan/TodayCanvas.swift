@@ -256,6 +256,7 @@ struct TodayCheckRow: View {
         .buttonStyle(PressScaleStyle())
         .disabled(busy)
         .sensoryFeedback(.selection, trigger: done)
+        .speedLines(on: done)
         .accessibilityLabel([title, trailing, caption].filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityValue(checkable ? (done ? "выполнено" : "не выполнено") : "")
         .accessibilityHint(checkable ? "Отметить" : "Открыть")

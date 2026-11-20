@@ -70,6 +70,7 @@ struct ProfileSettingsScreen: View {
     @AppStorage(SectionPrefs.Key.planReminders) private var planReminders = ""
     @AppStorage(SectionPrefs.Key.noteStartsAsList) private var noteStartsAsList = false
     @AppStorage(SectionPrefs.Key.deletedKeepDays) private var keepDays = 30
+    @AppStorage(SectionPrefs.Key.mascotLines) private var mascotLines = true
 
     @State private var section: ProfileSettingsSection
     /// Closes the whole profile sheet (the tour and the deep links need the tabs).
@@ -153,6 +154,8 @@ struct ProfileSettingsScreen: View {
             }
             .buttonStyle(ProfileRowButtonStyle())
             .accessibilityIdentifier("profile-short-tour")
+            ProfileToggleRow(name: "Реплики маскота", note: "Короткие фразы, когда что-то сделано", isOn: $mascotLines)
+                .accessibilityIdentifier("profile-mascot-lines")
             ProfileRow("Версия ARNA") { ProfileValue(appVersion) }
         }
         }

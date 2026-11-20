@@ -37,6 +37,7 @@ public struct RootView: View {
     @EnvironmentObject private var authService: AuthService
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .today
+    @State private var starterSuggestions: [SectionStarter.Suggestion] = []
     @State private var goalsRequest = 0
     @State private var habitsRequest = 0
     @ObservedObject private var tour = TourCenter.shared
@@ -267,9 +268,30 @@ public struct RootView: View {
         .overlay {
             if sections.needsChoice {
                 SectionChoiceScreen { keep in
-                    withAnimation(.easeOut(duration: 0.25)) { sections.choose(keep: keep) }
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        sections.choose(keep: keep)
+                        let starter = SectionStarter.suggestions(keep: keep)
+                        if !starter.isEmpty, !UserDefaults.standard.bool(forKey: SectionStarter.shownKey) {
+                            UserDefaults.standard.set(true, forKey: SectionStarter.shownKey)
+                            starterSuggestions = starter
+                        }
+                    }
                 }
                 .transition(.opacity)
+            }
+        }
+        // Right after «Что ведём?»: a first step per kept section; the tour waits until it is closed.
+        .overlay(alignment: .bottom) {
+            if !starterSuggestions.isEmpty {
+                SectionStarterCard(suggestions: starterSuggestions) { pick in
+                    // The person chose where to go: the first-launch tour must not pull them away (help stays in «?»).
+                    TourLaunch.markDone(.standard)
+                    starterSuggestions = []
+                    if let link = pick.link { DeepLinks.shared.open(link) } else { selectedTab = pick.tab }
+                } onSkip: {
+                    starterSuggestions = []
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         // A section turned off takes its tab away: the person lands on «Сегодня», nothing of it stays mounted.
@@ -288,14 +310,14 @@ public struct RootView: View {
             showCapture = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .task(id: sections.needsChoice) {
+        .task(id: sections.needsChoice || !starterSuggestions.isEmpty) {
             // First launch: once per device, never in UI tests or screenshots unless `--mascot-tour` asks;
             // and only after «Что ведём?», so the tour shows just the sections the person keeps.
-            guard !sections.needsChoice else { return }
+            guard !sections.needsChoice, starterSuggestions.isEmpty else { return }
             let process = ProcessInfo.processInfo
             guard let launch = TourLaunch.decide(arguments: process.arguments, environment: process.environment, defaults: .standard) else { return }
             try? await Task.sleep(for: .seconds(1.2))
-            guard !Task.isCancelled, !tour.isActive, !sections.needsChoice else { return }
+            guard !Task.isCancelled, !tour.isActive, !sections.needsChoice, starterSuggestions.isEmpty else { return }
             if !launch.forced { TourLaunch.markDone(.standard) }
             tour.start(launch.kind)
         }
@@ -435,6 +457,7 @@ private struct WorkoutTab: View {
             .keyboardDismissBar()
             // A running workout owns the screen: no stray tap opens a composer over the timer.
             .environment(\.shellCapture, ShellCapture(isEnabled: captureAvailable && store.activeSession == nil, action: onCapture))
+            .donStamp(on: store.activeSession?.phase == .complete)
     }
 }
 

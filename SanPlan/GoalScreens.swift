@@ -263,6 +263,7 @@ struct GoalRowView: View {
         .background(DS.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
         .overlay(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius).stroke(DS.Colors.hairline, lineWidth: 1))
+        .donStamp(on: progress.achieved)
     }
 
     private func subtitle(_ progress: GoalProgress) -> String {

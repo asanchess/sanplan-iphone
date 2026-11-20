@@ -587,9 +587,7 @@ struct ReviewHistorySheet: View {
                 ForEach(review.reviewedDays.reversed(), id: \.self) { day in
                     if let entry = review.day(day) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(Self.title(day))
-                                .font(DS.Fonts.text(17, .semibold))
-                                .foregroundColor(DS.Colors.textPrimary)
+                            MangaCaption(Self.title(day))
                             if let mood = entry.mood {
                                 Text("Оценка: \(mood) из 5")
                                     .font(DS.Fonts.text(15, .medium, relativeTo: .subheadline))
@@ -603,7 +601,9 @@ struct ReviewHistorySheet: View {
                             }
                         }
                         .frame(minHeight: DS.Metrics.minHitTarget, alignment: .leading)
-                        .listRowBackground(DS.Colors.surface)
+                        .mangaPanel()
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 removed = entry

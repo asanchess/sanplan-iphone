@@ -11,6 +11,7 @@ enum SectionPrefs {
         static let deletedKeepDays = "deleted.keepDays"
         static let lockScreenCard = "workout.lockScreenCard"
         static let raiseWeight = "workout.raiseWeight"
+        static let mascotLines = "mascot.lines"
     }
 
     static var defaults: UserDefaults { .standard }
@@ -113,5 +114,12 @@ enum SectionPrefs {
     /// Off: a workout starts with last time's weight, not raised by the step.
     static func raiseWeight(in defaults: UserDefaults = defaults) -> Bool {
         defaults.object(forKey: Key.raiseWeight) as? Bool ?? true
+    }
+
+    // MARK: Маскот
+
+    /// Off: the mascot says nothing after plans, sets, workouts and the day limit; tap reminders stay.
+    static func mascotLines(in defaults: UserDefaults = defaults) -> Bool {
+        defaults.object(forKey: Key.mascotLines) as? Bool ?? true
     }
 }

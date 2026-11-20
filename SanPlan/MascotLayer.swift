@@ -56,7 +56,7 @@ struct PetLayer: View {
     /// UI tests tap buttons near the bottom: the walking hero would be in the way there.
     private static let offForTests = ProcessInfo.processInfo.arguments.contains("--no-pet")
 
-    @State private var spot = CGPoint(x: 14, y: 0)
+    @State private var spot = CGPoint(x: -32, y: 0)
     @State private var onLane = true
     @State private var move: PetMove?
     @State private var pose: MascotPoseKey = .think
@@ -99,6 +99,9 @@ struct PetLayer: View {
     private var laneY: CGFloat { max(floorY - size.height - 8, topY) }
 
     private func laneX(_ x: CGFloat) -> CGFloat { min(max(x, 8), max(width - size.width - 8, 8)) }
+
+    /// At rest the hero peeks from behind the left edge, so it does not cover content.
+    private var peekX: CGFloat { -size.width / 2 }
 
     /// The tour has its own mascot in the card, so the walking one steps aside while it runs.
     private var heroShown: Bool { visible && !Self.offForTests && !keyboardUp && !tour.isActive && area.height > 200 }
@@ -326,7 +329,8 @@ struct PetLayer: View {
 
     /// Stops where it stands, says the line, holds it long enough to read, then goes back to the lane.
     private func say(_ text: String, pose newPose: MascotPoseKey) {
-        let here = position(at: Date())
+        var here = position(at: Date())
+        if here.x < 8 { here.x = 8 }  // steps out from behind the edge to speak
         generation += 1
         move = nil
         spot = here
@@ -343,7 +347,7 @@ struct PetLayer: View {
 
     private func returnToLane() {
         let from = position(at: Date())
-        go(to: CGPoint(x: laneX(from.x), y: laneY), duration: 0.8, walking: false, lane: true) {
+        go(to: CGPoint(x: peekX, y: laneY), duration: 0.8, walking: true, lane: true) {
             pose = .think
         }
     }
@@ -355,26 +359,18 @@ struct PetLayer: View {
         guard heroShown, move == nil, grab == nil, hiddenSide == 0, bubble == nil else { return }
         if !onLane { returnToLane(); return }
         idleStep += 1
-        if idleStep % 2 == 1 {
-            // The right end of the lane stays free for the «+».
-            let maxX = max(8, width - size.width - 8 - 72)
-            let x = CGFloat.random(in: 8...maxX)
-            let from = position(at: Date())
-            pose = .think
-            go(to: CGPoint(x: x, y: laneY), duration: max(0.9, Double(abs(x - from.x)) * 0.016), walking: true, lane: true)
-        } else {
-            pose = [MascotPoseKey.think, .yawn, .shrug][idleStep % 3]
-        }
+        // No strolling over content: it stays peeking and only changes pose.
+        if abs(position(at: Date()).x - peekX) > 1 { returnToLane(); return }
+        pose = [MascotPoseKey.think, .yawn, .shrug][idleStep % 3]
     }
 
     private func reset() {
-        let now = position(at: Date())
         generation += 1
         move = nil
         grab = nil
         bubble = nil
         if hiddenSide == 0 {
-            spot = CGPoint(x: laneX(now.x), y: laneY)
+            spot = CGPoint(x: peekX, y: laneY)
             onLane = true
             pose = .think
         }

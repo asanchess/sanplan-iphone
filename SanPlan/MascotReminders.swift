@@ -93,39 +93,65 @@ enum MascotReminders {
     }
 }
 
-/// One short line after something the person just did. Each returns nil when the change is not that event
-/// (a reload, a sync, a new day), so the mascot reacts only once and only to a real action.
-enum MascotReactions {
-    static func plan(old: PlanDaySummary, new: PlanDaySummary) -> String? {
-        guard new.total == old.total, new.done == old.done + 1 else { return nil }
-        let left = new.total - new.done
-        let tail = left == 0 ? "На сегодня всё." : "Осталось \(MascotReminders.plansLeft(left))."
-        if let closed = old.open.first(where: { item in !new.open.contains { $0.id == item.id } }) {
-            return "Готово: «\(MascotReminders.short(closed.title))». \(tail)"
+/// The events the mascot answers with a short line (owner 20.11, K-2). Nothing else makes it talk on its own.
+enum MascotEvent: CaseIterable {
+    case planDone, setDone, workoutDone, limitKept
+
+    var lines: [String] {
+        switch self {
+        case .planDone: return ["Квест выполнен!", "Галочка стоит. Красота", "Минус один пункт. Сугой!",
+                                "План пал. Следующий!", "Ачивка получена", "Вот это скорость, нян"]
+        case .setDone: return ["Подход засчитан!", "Ещё один, сэмпай", "Железо трепещет",
+                               "Сила +1", "Подход в копилку", "Мышцы это запомнят"]
+        case .workoutDone: return ["Тренировка закрыта. GG", "Финал арки! Можно выдохнуть", "Режим героя выключен. Отдых",
+                                   "Записано в историю. Мощь", "Босс тренировки повержен"]
+        case .limitKept: return ["Вчера лимит устоял. Сугой!", "Вчера без перерасхода. GG", "Кошелёк цел: вчера в лимите",
+                                 "Вчерашний лимит выдержан", "Вчера деньги под контролем"]
         }
-        return "План выполнен. \(tail)"
-    }
-
-    static func workout(old: WorkoutPhase?, new: WorkoutPhase?) -> String? {
-        guard new == .complete, let old, old != .complete else { return nil }
-        return "Тренировка завершена и записана в историю."
-    }
-
-    static func expense(old: [FinanceRecord], new: [FinanceRecord]) -> String? {
-        guard new.count == old.count + 1 else { return nil }
-        let known = Set(old.map(\.id))
-        guard let added = new.first(where: { !known.contains($0.id) }),
-              added.kind == "expense", added.importId == nil else { return nil }
-        let amount = added.amountMinor.map { ", \(FinanceText.money($0))" } ?? ""
-        return "Трата записана: «\(MascotReminders.short(added.title))»\(amount)."
     }
 }
 
-/// Watches the stores for the three events the mascot reacts to. Invisible; lives behind the tabs.
+/// Spots the events in store changes. Each returns nil when the change is not that event
+/// (a reload, a sync, a restored session), so the mascot reacts only once and only to a real action.
+enum MascotReactions {
+    static func plan(old: PlanDaySummary, new: PlanDaySummary) -> MascotEvent? {
+        new.total == old.total && new.done == old.done + 1 ? .planDone : nil
+    }
+
+    static func workout(old: WorkoutPhase?, new: WorkoutPhase?) -> MascotEvent? {
+        guard new == .complete, let old, old != .complete else { return nil }
+        return .workoutDone
+    }
+
+    /// Done sets of the running workout: exactly one more within the same session.
+    static func sets(old: Int?, new: Int?) -> MascotEvent? {
+        guard let old, let new, new == old + 1 else { return nil }
+        return .setDone
+    }
+
+    /// Yesterday's spending stayed within its day limit. nil without limits or after an overspend.
+    static func limitKept(_ state: FinanceState, yesterday: String) -> MascotEvent? {
+        guard let day = FinanceSummaries.canSpendToday(state, on: yesterday),
+              let limit = day.dayLimit, limit > 0, day.spentToday <= limit else { return nil }
+        return .limitKept
+    }
+
+    /// A line for the event, never the same as the last one; nil when the lines are switched off.
+    static func line(for event: MascotEvent, after last: String?, enabled: Bool = SectionPrefs.mascotLines()) -> String? {
+        guard enabled else { return nil }
+        let pool = event.lines.filter { $0 != last }
+        return pool.randomElement()
+    }
+}
+
+/// Watches the stores for the events the mascot reacts to. Invisible; lives behind the tabs.
 struct MascotEventWatcher: View {
     @ObservedObject var plans: PlanStore
     @ObservedObject var finance: FinanceStore
     @ObservedObject var workouts: WorkoutStore
+    @State private var lastLine: String?
+    /// The day whose «yesterday kept the limit» line was already decided, so it is said once a day.
+    @AppStorage("mascot.limitKeptDay") private var limitCheckedDay = ""
 
     var body: some View {
         let day = PlanDomain.today(timeZone: plans.timeZone)
@@ -133,13 +159,27 @@ struct MascotEventWatcher: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .onChange(of: plans.daySummary(for: day)) { old, new in
-                if let line = MascotReactions.plan(old: old, new: new) { MascotCenter.shared.react(line, cheerful: true) }
+                say(MascotReactions.plan(old: old, new: new))
             }
             .onChange(of: workouts.activeSession?.phase) { old, new in
-                if let line = MascotReactions.workout(old: old, new: new) { MascotCenter.shared.react(line, cheerful: true) }
+                say(MascotReactions.workout(old: old, new: new))
             }
-            .onChange(of: finance.state.records) { old, new in
-                if let line = MascotReactions.expense(old: old, new: new) { MascotCenter.shared.react(line, cheerful: false) }
+            .onChange(of: workouts.activeSession?.exercises.reduce(0) { $0 + $1.doneCount }) { old, new in
+                say(MascotReactions.sets(old: old, new: new))
             }
+            .task(id: "\(day)|\(finance.state.records.count)") {
+                guard limitCheckedDay != day else { return }
+                let yesterday = PlanDomain.addDays(dateStr: day, days: -1)
+                // Without limits there is nothing to decide yet; the data may still be loading.
+                guard FinanceSummaries.canSpendToday(finance.state, on: yesterday) != nil else { return }
+                limitCheckedDay = day
+                say(MascotReactions.limitKept(finance.state, yesterday: yesterday))
+            }
+    }
+
+    private func say(_ event: MascotEvent?) {
+        guard let event, let line = MascotReactions.line(for: event, after: lastLine) else { return }
+        lastLine = line
+        MascotCenter.shared.react(line, cheerful: true)
     }
 }

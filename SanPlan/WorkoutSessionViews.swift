@@ -675,6 +675,7 @@ struct ExerciseSetsCard: View {
                 let tap: SensoryFeedback = isDone ? .impact(weight: .light, intensity: 0.8) : .selection
                 return tap
             }
+            .speedLines(on: entry.done)
             .accessibilityLabel(entry.done ? "Подход \(set + 1) сделан, снять отметку" : "Отметить подход \(set + 1)")
 
             Button {

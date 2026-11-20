@@ -235,10 +235,7 @@ final class MascotTourTests: XCTestCase {
     func testPlanReactionOnlyForOneMoreDone() {
         let before = PlanDaySummary(done: 1, total: 3, open: [PlanOpenItem(id: "a", title: "Хлеб"), PlanOpenItem(id: "b", title: "Почта")])
         let after = PlanDaySummary(done: 2, total: 3, open: [PlanOpenItem(id: "b", title: "Почта")])
-        XCTAssertEqual(MascotReactions.plan(old: before, new: after), "Готово: «Хлеб». Осталось 1 план.")
-
-        let last = PlanDaySummary(done: 3, total: 3, open: [])
-        XCTAssertEqual(MascotReactions.plan(old: after, new: last), "Готово: «Почта». На сегодня всё.")
+        XCTAssertEqual(MascotReactions.plan(old: before, new: after), .planDone)
 
         let added = PlanDaySummary(done: 2, total: 4, open: [])
         XCTAssertNil(MascotReactions.plan(old: before, new: added), "a new plan or a reload is not an event")
@@ -246,25 +243,51 @@ final class MascotTourTests: XCTestCase {
     }
 
     func testWorkoutReactionOnlyWhenARunningWorkoutCompletes() {
-        XCTAssertNotNil(MascotReactions.workout(old: .working, new: .complete))
+        XCTAssertEqual(MascotReactions.workout(old: .working, new: .complete), .workoutDone)
         XCTAssertNil(MascotReactions.workout(old: nil, new: .complete), "a restored finished workout is not an event")
         XCTAssertNil(MascotReactions.workout(old: .complete, new: .complete))
         XCTAssertNil(MascotReactions.workout(old: .working, new: nil))
     }
 
-    func testExpenseReactionOnlyForOneHandEnteredExpense() {
-        let old = [FinanceRecord(id: "a", kind: "expense", title: "Кофе", amountMinor: 1_200_00)]
-        let coffee = FinanceRecord(id: "b", kind: "expense", title: "Обед", amountMinor: 3_500_00)
-        let line = MascotReactions.expense(old: old, new: old + [coffee])
-        XCTAssertNotNil(line)
-        XCTAssertTrue(line?.hasPrefix("Трата записана: «Обед»") == true)
+    func testSetReactionOnlyForOneMoreDoneSet() {
+        XCTAssertEqual(MascotReactions.sets(old: 2, new: 3), .setDone)
+        XCTAssertNil(MascotReactions.sets(old: nil, new: 3), "a restored session is not an event")
+        XCTAssertNil(MascotReactions.sets(old: 3, new: 2), "an undone set is not cheered")
+        XCTAssertNil(MascotReactions.sets(old: 3, new: nil))
+    }
 
-        let income = FinanceRecord(id: "c", kind: "income", title: "Зарплата", amountMinor: 1)
-        XCTAssertNil(MascotReactions.expense(old: old, new: old + [income]))
+    func testEveryEventHasShortLines() {
+        for event in MascotEvent.allCases {
+            XCTAssertGreaterThanOrEqual(event.lines.count, 5)
+            XCTAssertEqual(Set(event.lines).count, event.lines.count)
+            XCTAssertTrue(event.lines.allSatisfy { !$0.isEmpty && $0.count <= 40 })
+        }
+    }
 
-        var imported = coffee
-        imported.importId = "statement-1"
-        XCTAssertNil(MascotReactions.expense(old: old, new: old + [imported]))
-        XCTAssertNil(MascotReactions.expense(old: [], new: old + [coffee]), "a statement or a sync adds many at once")
+    func testLineNeverRepeatsTheLastOne() {
+        for event in MascotEvent.allCases {
+            var last: String?
+            for _ in 0..<50 {
+                let line = MascotReactions.line(for: event, after: last, enabled: true)
+                XCTAssertNotNil(line)
+                XCTAssertNotEqual(line, last)
+                XCTAssertTrue(event.lines.contains(line ?? ""))
+                last = line
+            }
+        }
+    }
+
+    func testSwitchedOffLinesSayNothing() {
+        for event in MascotEvent.allCases {
+            XCTAssertNil(MascotReactions.line(for: event, after: nil, enabled: false))
+        }
+    }
+
+    func testMascotLinesDefaultOn() {
+        let defaults = UserDefaults(suiteName: "mascot-lines-test")!
+        defaults.removePersistentDomain(forName: "mascot-lines-test")
+        XCTAssertTrue(SectionPrefs.mascotLines(in: defaults))
+        defaults.set(false, forKey: SectionPrefs.Key.mascotLines)
+        XCTAssertFalse(SectionPrefs.mascotLines(in: defaults))
     }
 }
