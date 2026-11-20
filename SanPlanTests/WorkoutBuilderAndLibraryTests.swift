@@ -136,6 +136,7 @@ final class WorkoutBuilderAndLibraryTests: XCTestCase {
         var live = try XCTUnwrap(WorkoutLiveState.content(for: s))
         XCTAssertEqual(live.phase, .resting)
         XCTAssertEqual(live.countdownEnd, Date(timeIntervalSince1970: 120))
+        XCTAssertEqual(live.countdownStart, Date(timeIntervalSince1970: 60), "The ring drains over the planned rest")
         XCTAssertNil(live.stopwatchStart, "Only a set shows the stopwatch")
         XCTAssertNil(live.pausedRemainingSeconds)
 
@@ -176,7 +177,7 @@ final class WorkoutBuilderAndLibraryTests: XCTestCase {
         XCTAssertEqual(live.setNumber, 3)
         XCTAssertEqual(live.setTotal, 3)
         XCTAssertTrue(live.isLastSet)
-        XCTAssertEqual(live.progress, 0.8, accuracy: 0.0001)
+        XCTAssertNil(live.countdownStart, "No rest ring during a set")
         XCTAssertEqual(live.setLabel, "Подход 3 из 3")
     }
 
@@ -226,10 +227,10 @@ final class WorkoutBuilderAndLibraryTests: XCTestCase {
             setTotal: 4,
             phase: .paused,
             countdownEnd: Date(timeIntervalSince1970: 1_000),
+            countdownStart: Date(timeIntervalSince1970: 940),
             stopwatchStart: nil,
             pausedRemainingSeconds: 42,
-            isLastSet: false,
-            progress: 0.25
+            isLastSet: false
         )
         let decoded = try JSONDecoder().decode(
             WorkoutActivityAttributes.ContentState.self,

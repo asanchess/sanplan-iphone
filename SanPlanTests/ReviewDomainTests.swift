@@ -163,6 +163,9 @@ final class ReviewDomainTests: XCTestCase {
         XCTAssertEqual(trigger?.repeats, true)
         XCTAssertEqual(request.identifier, ReviewReminder.identifier)
         XCTAssertFalse(request.content.body.contains("₸"))
+        XCTAssertEqual(request.content.title, "Итоги дня")
+        XCTAssertEqual(request.content.body, "Отметьте настроение и запишите одну строку.")
+        XCTAssertFalse(request.content.title.contains("ARNA") || request.content.body.contains("ARNA"))
     }
 
     // MARK: Format

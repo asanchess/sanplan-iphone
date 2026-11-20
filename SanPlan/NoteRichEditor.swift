@@ -8,6 +8,7 @@ final class NoteRichController: ObservableObject {
 
     func apply(_ tool: NoteListTool) { coordinator?.apply(tool) }
     func focus() { coordinator?.textView?.becomeFirstResponder() }
+    func insertPhoto(_ id: String) { coordinator?.insertPhoto(id) }
     /// The note text as stored (plain text with list markers).
     var currentText: String? { coordinator?.storage }
 }
@@ -17,6 +18,27 @@ extension NSAttributedString.Key {
     static let noteCheck = NSAttributedString.Key("asan.noteCheck")
     /// On every character of a heading line.
     static let noteHeading = NSAttributedString.Key("asan.noteHeading")
+    /// On the frame (U+FFFC) of a photo line: the photo id.
+    static let notePhoto = NSAttributedString.Key("asan.notePhoto")
+}
+
+/// A photo frame as wide as the line it sits on (the width is known only at layout).
+final class NotePhotoAttachment: NSTextAttachment {
+    var photo: UIImage?
+    var border: UIColor = .separator
+    private var drawn: UIImage?
+
+    override func attachmentBounds(for textContainer: NSTextContainer?, proposedLineFragment lineFrag: CGRect,
+                                   glyphPosition position: CGPoint, characterIndex charIndex: Int) -> CGRect {
+        CGRect(x: 0, y: 0, width: max(lineFrag.width - 2, 40), height: 120)
+    }
+
+    override func image(forBounds imageBounds: CGRect, textContainer: NSTextContainer?, characterIndex charIndex: Int) -> UIImage? {
+        if drawn?.size.width != imageBounds.width {
+            drawn = NotePhotos.frame(photo, width: imageBounds.width, border: border)
+        }
+        return drawn
+    }
 }
 
 /// The note text the iPhone way: circles that tick with a tap, dots and numbers, a big heading, and Return
@@ -26,6 +48,9 @@ struct NoteRichEditor: UIViewRepresentable {
     let accent: Color
     let controller: NoteRichController
     var onFocusChange: (Bool) -> Void = { _ in }
+    /// The decrypted picture for a photo id (nil draws an empty frame).
+    var photo: (String) -> UIImage? = { _ in nil }
+    var onOpenPhoto: (String) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -68,6 +93,8 @@ struct NoteRichEditor: UIViewRepresentable {
         private var isApplying = false
         /// The circle under the finger when the current touch began.
         private var touchedCheck: Int?
+        /// The photo frame under the finger when the current touch began.
+        private var touchedPhoto: String?
         private var touchedAt = Date.distantPast
 
         init(_ parent: NoteRichEditor) { self.parent = parent }
@@ -111,6 +138,15 @@ struct NoteRichEditor: UIViewRepresentable {
             return circle
         }
 
+        private func photoFrame(_ id: String) -> NSAttributedString {
+            let attachment = NotePhotoAttachment()
+            attachment.photo = parent.photo(id)
+            attachment.border = UIColor(DS.Colors.textMuted).withAlphaComponent(0.3)
+            let frame = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+            frame.addAttributes([.notePhoto: id, .font: bodyFont], range: NSRange(location: 0, length: frame.length))
+            return frame
+        }
+
         // MARK: Text ↔ screen
 
         private func attributed(_ lines: [NoteLine]) -> NSAttributedString {
@@ -123,6 +159,8 @@ struct NoteRichEditor: UIViewRepresentable {
                     out.append(NSAttributedString(string: " " + line.body, attributes: baseAttributes))
                 case .heading:
                     out.append(NSAttributedString(string: line.body, attributes: headingAttributes))
+                case .plain where NotePhotos.id(in: line.body) != nil:
+                    out.append(photoFrame(NotePhotos.id(in: line.body) ?? ""))
                 default:
                     out.append(NSAttributedString(string: NoteLists.marker(line.style) + line.body, attributes: baseAttributes))
                 }
@@ -165,6 +203,10 @@ struct NoteRichEditor: UIViewRepresentable {
             let text = string.substring(with: range)
             if range.length > 0, string.character(at: range.location) == 0xFFFC {
                 let rest = (text as NSString).substring(from: 1)
+                if let id = storage.attribute(.notePhoto, at: range.location, effectiveRange: nil) as? String {
+                    // Text typed right after a frame keeps the token visible rather than losing the text.
+                    return ScreenLine(line: NoteLine(.plain, NotePhotos.token(id) + rest), range: range, prefix: 0)
+                }
                 if let done = storage.attribute(.noteCheck, at: range.location, effectiveRange: nil) as? Bool {
                     if rest.hasPrefix(" ") {
                         return ScreenLine(line: NoteLine(.check(done), String(rest.dropFirst())), range: range, prefix: 2)
@@ -199,7 +241,7 @@ struct NoteRichEditor: UIViewRepresentable {
             var location = 0
             for (index, line) in lines.enumerated() {
                 let prefix = Self.displayPrefix(line.style)
-                let body = (line.body as NSString).length
+                let body = NotePhotos.id(in: line.body) != nil && line.style == .plain ? 1 : (line.body as NSString).length
                 if index == cursor.line { return location + prefix + min(max(cursor.column, 0), body) }
                 location += prefix + body + 1
             }
@@ -295,6 +337,25 @@ struct NoteRichEditor: UIViewRepresentable {
             UISelectionFeedbackGenerator().selectionChanged()
         }
 
+        /// Puts the photo on its own line: on the cursor line when it is empty, else right after it.
+        func insertPhoto(_ id: String) {
+            guard let view = textView else { return }
+            let screen = screenLines()
+            var lines = screen.map(\.line)
+            let at = cursor(at: view.selectedRange.location, in: screen)
+            let photo = NoteLine(.plain, NotePhotos.token(id))
+            var index = min(at.line, max(lines.count - 1, 0))
+            if lines.indices.contains(index), lines[index].body.isEmpty, lines[index].style == .plain {
+                lines[index] = photo
+            } else {
+                index += 1
+                lines.insert(photo, at: min(index, lines.count))
+            }
+            if index + 1 >= lines.count { lines.append(NoteLine(.plain, "")) }
+            render(lines, cursor: NoteCursor(line: index + 1, column: 0))
+            publish(lines)
+        }
+
         // MARK: UITextViewDelegate
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -356,7 +417,7 @@ struct NoteRichEditor: UIViewRepresentable {
 
         func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
             // A tap on a circle ticks it without opening the keyboard.
-            touchedCheck == nil || Date().timeIntervalSince(touchedAt) > 1
+            (touchedCheck == nil && touchedPhoto == nil) || Date().timeIntervalSince(touchedAt) > 1
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) { parent.onFocusChange(true) }
@@ -364,7 +425,7 @@ struct NoteRichEditor: UIViewRepresentable {
 
         // MARK: Ticking circles
 
-        private func checkIndex(at point: CGPoint) -> Int? {
+        private func checkIndex(at point: CGPoint, key: NSAttributedString.Key = .noteCheck) -> Int? {
             guard let view = textView, view.textStorage.length > 0 else { return nil }
             let manager = view.layoutManager
             let container = view.textContainer
@@ -374,7 +435,7 @@ struct NoteRichEditor: UIViewRepresentable {
             let string = view.textStorage.string as NSString
             for candidate in [character, character - 1] where candidate >= 0 && candidate < string.length {
                 guard string.character(at: candidate) == 0xFFFC,
-                      view.textStorage.attribute(.noteCheck, at: candidate, effectiveRange: nil) != nil else { continue }
+                      view.textStorage.attribute(key, at: candidate, effectiveRange: nil) != nil else { continue }
                 let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: candidate, length: 1), actualCharacterRange: nil)
                 let rect = manager.boundingRect(forGlyphRange: glyphs, in: container).insetBy(dx: -12, dy: -8)
                 if rect.contains(inner) { return candidate }
@@ -383,6 +444,10 @@ struct NoteRichEditor: UIViewRepresentable {
         }
 
         @objc func tapped(_ gesture: UITapGestureRecognizer) {
+            if gesture.state == .ended, let id = touchedPhoto {
+                parent.onOpenPhoto(id)
+                return
+            }
             guard gesture.state == .ended, let index = touchedCheck, let view = textView else { return }
             let screen = screenLines()
             guard let line = screen.firstIndex(where: { NSLocationInRange(index, $0.range) }) else { return }
@@ -396,12 +461,17 @@ struct NoteRichEditor: UIViewRepresentable {
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             touchedCheck = textView.flatMap { checkIndex(at: touch.location(in: $0)) }
+            touchedPhoto = textView.flatMap { view in
+                checkIndex(at: touch.location(in: view), key: .notePhoto).flatMap {
+                    view.textStorage.attribute(.notePhoto, at: $0, effectiveRange: nil) as? String
+                }
+            }
             touchedAt = Date()
             return true
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            touchedCheck != nil
+            touchedCheck != nil || touchedPhoto != nil
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

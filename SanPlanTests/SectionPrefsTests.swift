@@ -74,8 +74,5 @@ final class SectionPrefsTests: XCTestCase {
         XCTAssertTrue(marks[0].done)
         XCTAssertFalse(marks[2].done)
         XCTAssertEqual(DayTimeline.spoken(marks), "Лента дня: 2 плана, 1 тренировка")
-        XCTAssertEqual(DayTimeline.position(minute: 0), 0)
-        XCTAssertEqual(DayTimeline.position(minute: 15 * 60), 0.5)
-        XCTAssertEqual(DayTimeline.position(minute: 2000), 1)
     }
 }

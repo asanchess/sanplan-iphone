@@ -98,6 +98,32 @@ public final class NotesStore: ObservableObject {
         syncAgain = false
     }
 
+    // MARK: Photos (this phone only, encrypted with the vault key; never synced)
+
+    private static let photoCollection = "note-photos"
+
+    private func photoURL(_ id: String) -> URL? {
+        fileURL?.deletingLastPathComponent().appendingPathComponent("note_photos", isDirectory: true)
+            .appendingPathComponent(id + ".sealed")
+    }
+
+    /// Seals the JPEG and returns its id for the note token, or nil when the vault is closed.
+    public func savePhoto(_ jpeg: Data) -> String? {
+        let id = Note.newID()
+        guard let key, let url = photoURL(id),
+              let sealed = try? VaultCrypto.seal(jpeg, key: key, collection: Self.photoCollection, id: id) else { return nil }
+        try? fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            try Data(sealed.utf8).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        } catch { return nil }
+        return id
+    }
+
+    public func photo(_ id: String) -> Data? {
+        guard let key, let url = photoURL(id), let data = try? Data(contentsOf: url) else { return nil }
+        return try? VaultCrypto.open(String(decoding: data, as: UTF8.self), key: key, collection: Self.photoCollection, id: id)
+    }
+
     // MARK: Editing
 
     @discardableResult

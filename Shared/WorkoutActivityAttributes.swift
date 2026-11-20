@@ -14,13 +14,13 @@ public struct WorkoutActivityAttributes: ActivityAttributes {
         public var phase: Phase
         /// Counts down to this moment during the warm-up and rest.
         public var countdownEnd: Date?
+        /// When the rest started, so the ring can drain from here to `countdownEnd`.
+        public var countdownStart: Date?
         /// Counts up from this moment during a set.
         public var stopwatchStart: Date?
         /// Frozen rest time while paused.
         public var pausedRemainingSeconds: Int?
         public var isLastSet: Bool
-        /// Share of the session done, 0…1, for the ARNA mark.
-        public var progress: Double
 
         public init(
             exerciseName: String,
@@ -28,20 +28,20 @@ public struct WorkoutActivityAttributes: ActivityAttributes {
             setTotal: Int,
             phase: Phase,
             countdownEnd: Date? = nil,
+            countdownStart: Date? = nil,
             stopwatchStart: Date? = nil,
             pausedRemainingSeconds: Int? = nil,
-            isLastSet: Bool = false,
-            progress: Double = 0
+            isLastSet: Bool = false
         ) {
             self.exerciseName = exerciseName
             self.setNumber = setNumber
             self.setTotal = setTotal
             self.phase = phase
             self.countdownEnd = countdownEnd
+            self.countdownStart = countdownStart
             self.stopwatchStart = stopwatchStart
             self.pausedRemainingSeconds = pausedRemainingSeconds
             self.isLastSet = isLastSet
-            self.progress = progress
         }
 
         public var setLabel: String { "Подход \(setNumber) из \(setTotal)" }

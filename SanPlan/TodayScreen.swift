@@ -295,12 +295,19 @@ public struct TodayScreen: View {
 
     private var nextSection: some View {
         let items = todayItems
-        let shown = Array(items.prefix(3))
         let later = items.isEmpty ? Array(plans.upcomingAgenda.filter { $0.displayDate != reviewDay }.prefix(3)) : []
         let saved = Set(plans.plans.map(\.id))
         let zone = TimeZone(identifier: plans.timeZone) ?? .current
-        let marks = DayTimeline.marks(agenda: items, day: reviewDay,
-                                      workouts: sections.isOn(.workout) ? workouts.records : [], timeZone: zone)
+        let now = Self.minuteNow(in: zone)
+        let workoutRows = DayTimeline.marks(agenda: [], day: reviewDay,
+                                            workouts: sections.isOn(.workout) ? workouts.records : [], timeZone: zone)
+            .map { DayTimelineRow(id: $0.id, minute: $0.minute, title: $0.title, done: true, agenda: nil) }
+        let planRows = items.map {
+            DayTimelineRow(id: "plan-\($0.id)", minute: $0.item.allDay == true ? nil : $0.startMin,
+                           title: $0.item.title, done: $0.item.completed == true, agenda: $0)
+        }
+        let rows = (planRows + workoutRows).sorted { ($0.minute ?? Int.max) < ($1.minute ?? Int.max) }
+        let nowIndex = rows.firstIndex { ($0.minute ?? Int.max) > now } ?? rows.count
         return VStack(alignment: .leading, spacing: 10) {
             TodaySectionTitle(
                 title: items.isEmpty && !later.isEmpty ? "Дальше" : "Дальше сегодня",
@@ -308,38 +315,66 @@ public struct TodayScreen: View {
                 linkAction: { open(.plansAll) },
                 icon: (name: "alarm", label: "Будильники", action: { open(.alarms) })
             )
-            if !marks.isEmpty {
-                DayTimelineView(marks: marks, nowMinute: Self.minuteNow(in: zone)) { open(.plansAll) }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index == nowIndex { nowLine(now) }
+                timeRow(row, past: (row.minute ?? Int.max) < now, saved: saved)
             }
-            ForEach(shown) { agenda in
-                let checkable = agenda.item.kind == "task" && saved.contains(agenda.id)
-                let done = agenda.item.completed == true
-                TodayCheckRow(
-                    title: agenda.item.title,
-                    trailing: agenda.startMin.map(TodayFormat.clock) ?? agenda.displayTime,
-                    done: done,
-                    checkable: checkable,
-                    busy: plans.pendingTaskIds.contains(agenda.id)
-                ) {
-                    if checkable {
-                        Task { await plans.toggleTaskCompletion(id: agenda.id, completed: !done) }
-                    } else {
-                        open(.plansAll)
-                    }
-                }
-            }
-            TodayMoreLine(count: items.count - shown.count)
+            if !rows.isEmpty && nowIndex == rows.count { nowLine(now) }
             ForEach(later) { agenda in
                 TodayCheckRow(title: agenda.item.title, trailing: Self.when(agenda), done: false, checkable: false) {
                     open(.plansAll)
                 }
             }
-            if items.isEmpty && later.isEmpty {
+            if rows.isEmpty && later.isEmpty {
                 TodayInfoRow(title: "Ближайших планов нет", caption: "Добавить план — в разделе «Планы»", icon: "plus",
                              iconColor: DS.Colors.plans, hint: "Открыть планы") { open(.plansAll) }
                     .accessibilityLabel("Добавить план")
             }
         }
+    }
+
+    /// «09:00  Тренировка»: time column, then the row; past rows are dimmed. Saved tasks stay checkable.
+    private func timeRow(_ row: DayTimelineRow, past: Bool, saved: Set<String>) -> some View {
+        let agenda = row.agenda
+        let checkable = agenda.map { $0.item.kind == "task" && saved.contains($0.id) } ?? false
+        let time = row.minute.map(TodayFormat.clock) ?? ""
+        return HStack(spacing: 10) {
+            Text(time)
+                .font(DS.Fonts.text(15, .bold, relativeTo: .subheadline))
+                .monospacedDigit()
+                .foregroundColor(past ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                .frame(width: 52, alignment: .leading)
+                .accessibilityHidden(true)
+            TodayCheckRow(
+                title: row.title,
+                trailing: "",
+                done: agenda != nil && row.done,
+                checkable: checkable,
+                busy: agenda.map { plans.pendingTaskIds.contains($0.id) } ?? false
+            ) {
+                if checkable, let agenda {
+                    Task { await plans.toggleTaskCompletion(id: agenda.id, completed: !row.done) }
+                } else {
+                    open(.plansAll)
+                }
+            }
+            .opacity(past ? 0.6 : 1)
+            .accessibilityLabel(time.isEmpty ? row.title : "\(time), \(row.title)")
+        }
+    }
+
+    /// Thin accent line with the current time between the past and the next item.
+    private func nowLine(_ minute: Int) -> some View {
+        HStack(spacing: 10) {
+            Text(TodayFormat.clock(minute))
+                .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
+                .monospacedDigit()
+                .foregroundColor(DS.Colors.accent)
+                .frame(width: 52, alignment: .leading)
+            Rectangle().fill(DS.Colors.accent).frame(height: 2)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Сейчас \(TodayFormat.clock(minute))")
     }
 
     // MARK: Привычки · цели · заметки (phone-5, в стиле холста)

@@ -22,6 +22,10 @@ public enum WorkoutLiveState {
         } else {
             countdownEnd = nil
         }
+        // Rest began `rests[setIndex]` before the deadline; after «+30» the ring simply refills by that much.
+        let countdownStart: Date? = session.phase == .resting && exercise.rests.indices.contains(session.setIndex)
+            ? countdownEnd.map { $0.addingTimeInterval(-Double(exercise.rests[session.setIndex])) }
+            : nil
         let stopwatchStart = session.phase == .working
             ? session.workStartedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) }
             : nil
@@ -34,10 +38,10 @@ public enum WorkoutLiveState {
             setTotal: exercise.rests.count,
             phase: phase,
             countdownEnd: countdownEnd,
+            countdownStart: countdownStart,
             stopwatchStart: stopwatchStart,
             pausedRemainingSeconds: paused,
-            isLastSet: WorkoutDomain.isLastSet(session),
-            progress: WorkoutProgress.setsFraction(session)
+            isLastSet: WorkoutDomain.isLastSet(session)
         )
     }
 

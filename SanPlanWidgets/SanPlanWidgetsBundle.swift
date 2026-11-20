@@ -55,16 +55,16 @@ struct WorkoutLiveActivityWidget: Widget {
                         .padding(.top, 4)
                 }
             } compactLeading: {
-                ARNAProgressMark(progress: state.progress, tint: WidgetPalette.coral, track: .white.opacity(0.25), lineWidth: 2.5)
-                    .frame(width: 18, height: 15)
+                WorkoutRing(state: state)
+                    .frame(width: 18, height: 18)
             } compactTrailing: {
                 WorkoutTimerText(state: state)
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(WidgetPalette.coral)
                     .frame(maxWidth: 52)
             } minimal: {
-                ARNAProgressMark(progress: state.progress, tint: WidgetPalette.coral, track: .white.opacity(0.25), lineWidth: 2.5)
-                    .frame(width: 16, height: 14)
+                WorkoutRing(state: state)
+                    .frame(width: 16, height: 16)
             }
             .keylineTint(WidgetPalette.coral)
         }
@@ -112,6 +112,22 @@ struct WorkoutLockScreenView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+}
+
+/// During rest the ring drains with the rest timer on its own; otherwise it is an empty neutral ring
+/// (the set time is the stopwatch next to it).
+struct WorkoutRing: View {
+    let state: WorkoutActivityAttributes.ContentState
+
+    var body: some View {
+        if state.phase == .resting, let start = state.countdownStart, let end = state.countdownEnd, start < end {
+            ProgressView(timerInterval: start...end, countsDown: true) { EmptyView() } currentValueLabel: { EmptyView() }
+                .progressViewStyle(.circular)
+                .tint(WidgetPalette.coral)
+        } else {
+            Circle().stroke(Color.white.opacity(0.25), lineWidth: 2.5)
+        }
     }
 }
 

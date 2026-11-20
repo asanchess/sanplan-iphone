@@ -835,6 +835,9 @@ struct EnvelopeSheet: View {
     let onClose: () -> Void
 
     @State private var movingEnvelope: EnvelopeMove? = nil
+    @State private var renaming = false
+    @State private var newTitle = ""
+    @State private var editingItems = false
     @Environment(\.sectionAccent) private var accent
 
     var body: some View {
@@ -856,6 +859,18 @@ struct EnvelopeSheet: View {
                         }
                     }
                 )
+                EnvelopeItemsList(goal: g, onEdit: { editingItems = true }) { item in
+                    apply("«\(item.title)» куплено, списано из конверта.") {
+                        try FinanceBudgeting.markItemBought($0, goalId: g.id, itemId: item.id)
+                    }
+                }
+                Button("Переименовать конверт") {
+                    newTitle = g.title
+                    renaming = true
+                }
+                .font(.subheadline)
+                .foregroundColor(accent)
+                .frame(minHeight: DS.Metrics.minHitTarget)
                 Text("Деньги остаются на картах, но не входят в «Чистыми».")
                     .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
                     .foregroundColor(DS.Colors.textSecondary)
@@ -869,6 +884,180 @@ struct EnvelopeSheet: View {
         .sheet(item: $movingEnvelope) { move in
             EnvelopeMoveSheet(move: move, apply: apply) { movingEnvelope = nil }
                 .environment(\.sectionAccent, accent)
+        }
+        .sheet(isPresented: $editingItems) {
+            if let g = FinanceEnvelopes.goals(store.state).first(where: { $0.id == goalId }) {
+                EnvelopeItemsEditSheet(goal: g, apply: apply) { editingItems = false }
+                    .environment(\.sectionAccent, accent)
+            }
+        }
+        .alert("Название конверта", isPresented: $renaming) {
+            TextField("Название", text: $newTitle)
+            Button("Сохранить") {
+                let name = newTitle
+                apply("Конверт переименован.") { try FinanceBudgeting.renameEnvelope($0, goalId: goalId, title: name) }
+            }
+            Button("Отмена", role: .cancel) {}
+        }
+    }
+}
+
+/// What the envelope saves for: each item filled in order, «Хватает» when covered, «Куплено» on demand.
+struct EnvelopeItemsList: View {
+    @Environment(\.sectionAccent) private var accent
+    let goal: FinanceRecord
+    let onEdit: () -> Void
+    let onBought: (EnvelopeItem) -> Void
+
+    var body: some View {
+        let fills = FinanceBudgeting.itemFills(goal)
+        VStack(alignment: .leading, spacing: DS.Metrics.spacing8) {
+            HStack {
+                SectionHeader("На что копим")
+                Spacer()
+                Button(fills.isEmpty ? "Добавить" : "Изменить", action: onEdit)
+                    .font(.subheadline)
+                    .foregroundColor(accent)
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+            }
+            ForEach(fills) { fill in
+                itemRow(fill)
+            }
+        }
+    }
+
+    private func itemRow(_ fill: EnvelopeItemFill) -> some View {
+        let bought = fill.item.bought == true
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: DS.Metrics.spacing8) {
+                Text(fill.item.title)
+                    .font(.subheadline)
+                    .strikethrough(bought)
+                    .foregroundColor(bought ? DS.Colors.textSecondary : DS.Colors.textPrimary)
+                if fill.isEnough {
+                    Text("Хватает")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(DS.Colors.positive)
+                }
+                Spacer()
+                Text(bought ? "куплено · \(FinanceText.money(fill.item.amountMinor))"
+                            : "\(FinanceText.money(fill.filledMinor)) из \(FinanceText.money(fill.item.amountMinor))")
+                    .font(.caption.monospacedDigit())
+                    .strikethrough(bought)
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            if !bought {
+                ProgressView(value: Double(fill.filledMinor), total: Double(max(fill.item.amountMinor, 1)))
+                    .tint(accent)
+                Button("Куплено") { onBought(fill.item) }
+                    .font(.caption)
+                    .foregroundColor(accent)
+                    .frame(minHeight: DS.Metrics.minHitTarget)
+                    .accessibilityLabel("Отметить «\(fill.item.title)» купленным")
+            }
+        }
+        .padding(12)
+        .background(DS.Colors.surfaceRaised)
+        .clipShape(RoundedRectangle(cornerRadius: DS.Metrics.innerRadius))
+    }
+}
+
+/// Add, edit, delete and drag to reorder the envelope's items; saved together.
+struct EnvelopeItemsEditSheet: View {
+    let goal: FinanceRecord
+    let apply: FinanceApply
+    let onClose: () -> Void
+
+    @State private var items: [EnvelopeItem]
+    @State private var amounts: [String: String]
+    @State private var newTitle = ""
+    @State private var newAmount = ""
+    @State private var error: String? = nil
+
+    init(goal: FinanceRecord, apply: FinanceApply, onClose: @escaping () -> Void) {
+        self.goal = goal
+        self.apply = apply
+        self.onClose = onClose
+        let list = goal.items ?? []
+        _items = State(initialValue: list)
+        _amounts = State(initialValue: Dictionary(list.map { ($0.id, String($0.amountMinor / 100)) }, uniquingKeysWith: { a, _ in a }))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach($items) { $item in
+                        HStack {
+                            TextField("Название", text: $item.title)
+                                .strikethrough(item.bought == true)
+                            TextField("₸", text: amountBinding(item.id))
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 120)
+                                .disabled(item.bought == true)
+                        }
+                    }
+                    .onMove { items.move(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { items.remove(atOffsets: $0) }
+                } footer: {
+                    Text("Деньги конверта заполняют позиции сверху вниз. Порядок меняется перетаскиванием.")
+                }
+                Section("Новая позиция") {
+                    TextField("Название", text: $newTitle)
+                    TextField("Сумма, ₸", text: $newAmount)
+                        .keyboardType(.numberPad)
+                    Button("Добавить") { add() }
+                        .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty || newAmount.isEmpty)
+                }
+                if let error {
+                    Text(error).font(.caption).foregroundColor(DS.Colors.destructive)
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Позиции «\(goal.title)»")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена", action: onClose) }
+                ToolbarItem(placement: .confirmationAction) { Button("Сохранить") { save() } }
+            }
+        }
+    }
+
+    private func amountBinding(_ id: String) -> Binding<String> {
+        Binding(get: { amounts[id] ?? "" }, set: { amounts[id] = $0 })
+    }
+
+    private func add() {
+        guard let tenge = FinanceText.tenge(newAmount), tenge > 0 else {
+            error = "Введи сумму в тенге."
+            return
+        }
+        let id = "item-" + UUID().uuidString.lowercased()
+        items.append(EnvelopeItem(id: id, title: newTitle.trimmingCharacters(in: .whitespacesAndNewlines), amountMinor: tenge * 100))
+        amounts[id] = String(tenge)
+        newTitle = ""
+        newAmount = ""
+        error = nil
+    }
+
+    private func save() {
+        var out: [EnvelopeItem] = []
+        for var item in items {
+            guard let tenge = FinanceText.tenge(amounts[item.id] ?? ""), tenge > 0,
+                  !item.title.trimmingCharacters(in: .whitespaces).isEmpty else {
+                error = "У каждой позиции нужны название и сумма."
+                return
+            }
+            if item.bought != true { item.amountMinor = tenge * 100 }
+            out.append(item)
+        }
+        let goalId = goal.id
+        let list = out
+        if let failure = apply("Позиции сохранены.", { try FinanceBudgeting.setEnvelopeItems($0, goalId: goalId, items: list) }) {
+            error = failure
+        } else {
+            onClose()
         }
     }
 }

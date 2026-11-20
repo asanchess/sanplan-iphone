@@ -195,6 +195,7 @@ public enum NoteLists {
 
     /// The note's first meaningful line without any marker, for lists and titles.
     public static func plainLine(_ line: String) -> String {
+        if NotePhotos.id(in: line) != nil { return "Фото" }
         let parsed = parseLine(line.trimmingCharacters(in: .whitespaces))
         switch parsed.style {
         case .plain: return parsed.body

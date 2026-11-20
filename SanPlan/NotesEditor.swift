@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 /// One note, drawn in the canvas style of «Заметки». One live editor, like the iPhone: circles tick with a tap
 /// (no keyboard), the keyboard bar adds lists and a heading, its «Готово» saves and puts the keyboard away.
@@ -15,6 +16,9 @@ struct NoteEditorView: View {
     @State private var loaded = false
     @State private var barTools: KeyboardBarTools?
     @StateObject private var editor = NoteRichController()
+    @State private var pickingPhoto = false
+    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var openPhoto: OpenPhoto?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.sectionAccent) private var accent
     @Environment(\.keyboardBarChannel) private var keyboardBar
@@ -31,7 +35,11 @@ struct NoteEditorView: View {
                     NoteChecklistProgress(done: progress.done, total: progress.total)
                 }
                 if loaded {
-                    NoteRichEditor(text: $text, accent: accent, controller: editor) { focused = $0 }
+                    NoteRichEditor(text: $text, accent: accent, controller: editor, onFocusChange: { focused = $0 },
+                                   photo: { id in store.photo(id).flatMap(UIImage.init(data:)) },
+                                   onOpenPhoto: { id in
+                                       if let image = store.photo(id).flatMap(UIImage.init(data:)) { openPhoto = OpenPhoto(id: id, image: image) }
+                                   })
                         .background(DS.Colors.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -53,6 +61,19 @@ struct NoteEditorView: View {
         }
         .tint(accent)
         .safeAreaInset(edge: .bottom) { suggestions }
+        .photosPicker(isPresented: $pickingPhoto, selection: $pickedPhoto, matching: .images)
+        .onChange(of: pickedPhoto) { _, item in
+            guard let item else { return }
+            pickedPhoto = nil
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let jpeg = NotePhotos.jpeg(from: data),
+                      let id = store.savePhoto(jpeg) else { return }
+                editor.insertPhoto(id)
+                if let text = editor.currentText { store.update(noteID, text: text) }
+            }
+        }
+        .fullScreenCover(item: $openPhoto) { NotePhotoViewer(image: $0.image) }
         .onAppear {
             text = note?.text ?? ""
             loaded = true
@@ -86,12 +107,13 @@ struct NoteEditorView: View {
 
     /// Lists and heading on the keyboard bar; «Готово» saves.
     private func makeBarTools() -> KeyboardBarTools {
-        let editor = editor, store = store, noteID = noteID
+        let editor = editor, store = store, noteID = noteID, pickingPhoto = $pickingPhoto
         return KeyboardBarTools(items: [
             .init(id: "check", icon: "checklist", label: "Список с галочками") { editor.apply(.check) },
             .init(id: "number", icon: "list.number", label: "Нумерованный список") { editor.apply(.number) },
             .init(id: "bullet", icon: "list.bullet", label: "Список с точками") { editor.apply(.bullet) },
-            .init(id: "heading", icon: "textformat.size", label: "Заголовок") { editor.apply(.heading) }
+            .init(id: "heading", icon: "textformat.size", label: "Заголовок") { editor.apply(.heading) },
+            .init(id: "photo", icon: "photo", label: "Фото") { pickingPhoto.wrappedValue = true }
         ], onDone: {
             if let text = editor.currentText { store.update(noteID, text: text) }
         })
@@ -162,4 +184,9 @@ struct NoteEditorView: View {
             }
         }
     }
+}
+
+private struct OpenPhoto: Identifiable {
+    let id: String
+    let image: UIImage
 }

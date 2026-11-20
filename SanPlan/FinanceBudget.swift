@@ -120,6 +120,31 @@ public struct FinanceBudget: Codable, Equatable {
     }
 }
 
+/// One thing an envelope saves for, e.g. «Видеокарта 400 000 ₸» inside «Компьютер».
+public struct EnvelopeItem: Codable, Equatable, Identifiable {
+    public var id: String
+    public var title: String
+    public var amountMinor: Int64
+    /// Marked bought by the owner: shown struck through and left out of the fill.
+    public var bought: Bool?
+
+    public init(id: String, title: String, amountMinor: Int64, bought: Bool? = nil) {
+        self.id = id
+        self.title = title
+        self.amountMinor = amountMinor
+        self.bought = bought
+    }
+}
+
+/// How much of the envelope's money reaches one item.
+public struct EnvelopeItemFill: Equatable, Identifiable {
+    public var id: String { item.id }
+    public let item: EnvelopeItem
+    public let filledMinor: Int64
+    /// The fill fully covers the item («Хватает»); never set on a bought one.
+    public var isEnough: Bool { item.bought != true && filledMinor >= item.amountMinor }
+}
+
 /// One line of an envelope's history: money set aside (positive) or taken out (negative).
 public struct EnvelopeLogEntry: Codable, Equatable, Identifiable {
     public var id: String
@@ -641,6 +666,60 @@ public enum FinanceBudgeting {
         f.timeZone = TimeZone(identifier: "Asia/Qyzylorda") ?? TimeZone(secondsFromGMT: 5 * 3600)!
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
+    }
+
+    /// The saved money fills the items in order: the first fully, then the next. Bought items take nothing.
+    public static func itemFills(_ goal: FinanceRecord) -> [EnvelopeItemFill] {
+        var left = goal.savedMinor ?? 0
+        return (goal.items ?? []).map { item in
+            guard item.bought != true else { return EnvelopeItemFill(item: item, filledMinor: 0) }
+            let fill = min(left, item.amountMinor)
+            left -= fill
+            return EnvelopeItemFill(item: item, filledMinor: fill)
+        }
+    }
+
+    public static func renameEnvelope(_ state: FinanceState, goalId: String, title: String) throws -> FinanceState {
+        var next = try validateFinance(state)
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= FinanceConstants.maxTitleLen,
+              let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
+            throw FinanceError.invalidState("Нужно название")
+        }
+        next.records[i].title = name
+        return try validateFinance(next)
+    }
+
+    /// Replaces the envelope's items (added, edited, deleted or reordered on one sheet).
+    public static func setEnvelopeItems(_ state: FinanceState, goalId: String, items: [EnvelopeItem]) throws -> FinanceState {
+        var next = try validateFinance(state)
+        guard let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }) else {
+            throw FinanceError.invalidState("Конверта больше нет")
+        }
+        next.records[i].items = items.isEmpty ? nil : items
+        return try validateFinance(next)
+    }
+
+    /// «Куплено»: what the envelope held for the item leaves it as a withdrawal (accounts part first), the target
+    /// shrinks by the item, and the item stays in the list struck through.
+    public static func markItemBought(_ state: FinanceState, goalId: String, itemId: String,
+                                      date: String? = nil) throws -> FinanceState {
+        var next = try validateFinance(state)
+        guard let i = next.records.firstIndex(where: { $0.id == goalId && $0.kind == "goal" }),
+              let fill = itemFills(next.records[i]).first(where: { $0.item.id == itemId }), fill.item.bought != true else {
+            throw FinanceError.invalidState("Этой позиции уже нет")
+        }
+        let outside = next.records[i].outsideMinor ?? 0
+        let fromAccounts = min(fill.filledMinor, (next.records[i].savedMinor ?? 0) - outside)
+        let fromOutside = fill.filledMinor - fromAccounts
+        if fromAccounts > 0 { next = try withdraw(next, amountMinor: fromAccounts, goalId: goalId, date: date) }
+        if fromOutside > 0 { next = try withdraw(next, amountMinor: fromOutside, goalId: goalId, outsideAccounts: true, date: date) }
+        let saved = next.records[i].savedMinor ?? 0
+        next.records[i].amountMinor = max((next.records[i].amountMinor ?? 0) - fill.item.amountMinor, saved, 1)
+        var items = next.records[i].items ?? []
+        if let k = items.firstIndex(where: { $0.id == itemId }) { items[k].bought = true }
+        next.records[i].items = items
+        return try validateFinance(next)
     }
 
     /// The history of one envelope, newest first.

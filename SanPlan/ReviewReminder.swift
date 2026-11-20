@@ -16,7 +16,7 @@ public enum ReviewReminder {
     public static func request(for settings: ReviewReminderSettings) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = "Итоги дня"
-        content.body = "Меньше минуты: настроение и одна строка."
+        content.body = "Отметьте настроение и запишите одну строку."
         content.sound = .default
         content.threadIdentifier = identifier
         return UNNotificationRequest(identifier: identifier, content: content, trigger: trigger(for: settings))

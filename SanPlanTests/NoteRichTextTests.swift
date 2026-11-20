@@ -71,4 +71,14 @@ final class NoteRichTextTests: XCTestCase {
         XCTAssertEqual(Note(text: "# Покупки\n• хлеб", createdAt: 1).preview, "хлеб")
         XCTAssertEqual(Note(text: "- [ ] позвонить", createdAt: 1).title, "позвонить")
     }
+
+    func testPhotoTokenParsing() {
+        let id = "0f8fad5b-d9cb-469f-a165-70867728950e"
+        XCTAssertEqual(NotePhotos.id(in: NotePhotos.token(id)), id)
+        XCTAssertEqual(NotePhotos.id(in: "  [[photo:\(id)]] "), id)
+        XCTAssertNil(NotePhotos.id(in: "смотри [[photo:\(id)]]"))
+        XCTAssertNil(NotePhotos.id(in: "[[photo:]]"))
+        XCTAssertNil(NotePhotos.id(in: "[[photo:../x]]"))
+        XCTAssertEqual(NoteLists.plainLine(NotePhotos.token(id)), "Фото")
+    }
 }

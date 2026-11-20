@@ -76,6 +76,8 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     /// The other side of a transfer between the owner's statements, set only on a side that the pairing took out
     /// of the totals, so deleting the other statement puts it back.
     public var pairedWith: String?
+    /// Envelopes only: what the money is for, filled top to bottom by `savedMinor`.
+    public var items: [EnvelopeItem]?
 
     public init(
         id: String,
@@ -474,6 +476,16 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
             } else {
                 clean.dueDate = nil
             }
+            // A malformed item is dropped rather than blocking the envelope.
+            var itemIds = Set<String>()
+            let items = (rec.items ?? []).compactMap { it -> EnvelopeItem? in
+                let t = it.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !it.id.isEmpty, it.id.count <= FinanceConstants.maxIdLen, itemIds.insert(it.id).inserted,
+                      !t.isEmpty, isValidMoney(it.amountMinor) else { return nil }
+                return EnvelopeItem(id: it.id, title: String(t.prefix(FinanceConstants.maxTitleLen)),
+                                    amountMinor: it.amountMinor, bought: it.bought == true ? true : nil)
+            }
+            clean.items = items.isEmpty ? nil : Array(items.prefix(50))
             if let d = rec.date {
                 guard isValidDateString(d) else {
                     throw FinanceError.invalidState("Invalid goal date")
