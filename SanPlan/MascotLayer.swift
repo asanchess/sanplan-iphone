@@ -99,7 +99,7 @@ struct PetLayer: View {
     @Environment(\.scenePhase) private var scenePhase
 
     private let size = CGSize(width: 64, height: 84)
-    private let peek: CGFloat = 56
+    private let peek: CGFloat = 72
     private static let space = "mascot-layer"
     /// UI tests tap buttons near the bottom: the walking hero would be in the way there.
     private static let offForTests = ProcessInfo.processInfo.arguments.contains("--no-pet")
@@ -345,7 +345,7 @@ struct PetLayer: View {
                         .frame(width: peek, height: peek, alignment: alignment(edge))
                 }
             }
-            .frame(width: peek, height: peek)
+            .frame(width: peek, height: peek, alignment: alignment(edge))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle())
@@ -391,6 +391,7 @@ struct PetLayer: View {
                     bubble = nil
                     pending = nil
                     onLane = false
+                    hiddenRaw = "" // grabbing mid-hide takes it back out
                     offset = CGSize(width: value.startLocation.x - now.x, height: value.startLocation.y - now.y)
                     grab = offset
                 }
@@ -512,6 +513,7 @@ struct PetLayer: View {
     }
 
     private func returnToLane() {
+        guard hiddenEdge == nil else { return }
         let from = position(at: Date())
         go(to: CGPoint(x: laneX(from.x), y: laneY), duration: 0.55, walking: false, lane: true) {
             pose = night ? .rest : .think
