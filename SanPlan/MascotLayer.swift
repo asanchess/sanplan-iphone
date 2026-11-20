@@ -33,7 +33,6 @@ enum MascotEdge: String {
     static func pick(predicted: CGPoint, bounds: CGRect) -> MascotEdge? {
         let over: [(MascotEdge, CGFloat)] = [
             (.left, bounds.minX - predicted.x), (.right, predicted.x - bounds.maxX),
-            (.top, bounds.minY - predicted.y), (.bottom, predicted.y - bounds.maxY),
         ]
         guard let best = over.max(by: { $0.1 < $1.1 }), best.1 > 0 else { return nil }
         return best.0
@@ -141,7 +140,7 @@ struct PetLayer: View {
 
     // MARK: Geometry
 
-    private var hiddenEdge: MascotEdge? { MascotEdge(rawValue: hiddenRaw) }
+    private var hiddenEdge: MascotEdge? { MascotEdge(rawValue: hiddenRaw).map { $0.vertical ? $0 : .left } }
     private var width: CGFloat { liveArea.width > 0 ? liveArea.width : area.width }
     private var height: CGFloat { liveArea.height > 0 ? liveArea.height : area.height }
     private var topY: CGFloat { max(safeTop, 0) }
@@ -416,7 +415,7 @@ struct PetLayer: View {
                 if let edge = MascotEdge.pick(predicted: predicted, bounds: bounds) {
                     hide(edge)
                 } else {
-                    later(0.6, generation) { returnToLane() }
+                    later(0.2, generation) { returnToLane() }
                 }
             }
     }
@@ -432,7 +431,7 @@ struct PetLayer: View {
         hiddenAlong = min(max(hiddenAlong, 0), 1)
         hiddenRaw = edge.rawValue
         onLane = false
-        go(to: offscreen(edge), duration: 0.22, walking: false, lane: false) { pose = .rest }
+        go(to: offscreen(edge), duration: 0.32, walking: false, lane: false) { pose = .rest }
     }
 
     private func recall() {
@@ -514,7 +513,7 @@ struct PetLayer: View {
 
     private func returnToLane() {
         let from = position(at: Date())
-        go(to: CGPoint(x: laneX(from.x), y: laneY), duration: 0.8, walking: false, lane: true) {
+        go(to: CGPoint(x: laneX(from.x), y: laneY), duration: 0.55, walking: false, lane: true) {
             pose = night ? .rest : .think
         }
     }

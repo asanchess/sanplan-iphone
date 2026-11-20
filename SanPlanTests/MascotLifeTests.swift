@@ -60,10 +60,7 @@ final class MascotLifeTests: XCTestCase {
         XCTAssertNil(MascotEdge.pick(predicted: CGPoint(x: 150, y: 300), bounds: bounds))
         XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: -100, y: 300), bounds: bounds), .left)
         XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: 500, y: 300), bounds: bounds), .right)
-        XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: 150, y: -40), bounds: bounds), .top)
-        XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: 150, y: 900), bounds: bounds), .bottom)
-        // Diagonal: the edge it goes furthest past wins.
-        XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: -20, y: 900), bounds: bounds), .bottom)
+        XCTAssertEqual(MascotEdge.pick(predicted: CGPoint(x: 150, y: 900), bounds: bounds), nil)
     }
 
     func testNightHours() {
