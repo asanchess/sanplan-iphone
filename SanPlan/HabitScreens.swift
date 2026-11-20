@@ -102,8 +102,9 @@ struct HabitsSection: View {
             count: count,
             goal: goal,
             note: parts.joined(separator: " · "),
-            streak: HabitText.streak(habits.streak(for: habit, today: today)),
-            isAuto: auto
+            streak: habits.streak(for: habit, today: today),
+            isAuto: auto,
+            streakToday: done
         )
     }
 
@@ -213,17 +214,22 @@ struct HabitsSection: View {
             }
         }
         if demo != nil {
-            streakLine(days: 12, rest: 2)
+            streakLine(days: 12, rest: 2, extendedToday: true)
         } else if !streakSources.isEmpty {
             let streak = habits.appStreak(today: today, sources: streakSources)
-            streakLine(days: streak.days, rest: streak.restDaysLeft)
+            let activeToday = !habits.activityDays(from: today, to: today).isEmpty
+                || streakSources.contains { !$0(today, today).isEmpty }
+            streakLine(days: streak.days, rest: streak.restDaysLeft, extendedToday: activeToday)
         }
     }
 
-    private func streakLine(days: Int, rest: Int) -> some View {
-        Text("Серия \(days) дн. · дней отдыха в месяце: \(rest)")
-            .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
-            .foregroundColor(DS.Colors.textSecondary)
+    private func streakLine(days: Int, rest: Int, extendedToday: Bool) -> some View {
+        HStack(spacing: 10) {
+            StreakBadge(count: days, extendedToday: extendedToday, size: 24)
+            Text("дней отдыха в месяце: \(rest)")
+                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
+                .foregroundColor(DS.Colors.textSecondary)
+        }
     }
 }
 
@@ -276,7 +282,6 @@ struct HabitRowView: View {
         if habit.schedule.kind == .timesPerWeek || habit.schedule.weekdays.count != 7 {
             parts.append(HabitText.schedule(habit.schedule))
         }
-        if let s = HabitText.streak(habits.streak(for: habit, today: today)) { parts.append(s) }
         return parts.joined(separator: " · ")
     }
 
@@ -316,6 +321,11 @@ struct HabitRowView: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Открывает настройки привычки")
+
+            let streak = habits.streak(for: habit, today: today)
+            if streak.count > 0 {
+                StreakBadge(count: streak.count, unit: streak.unit, extendedToday: done)
+            }
         }
         .padding(.horizontal, DS.Metrics.spacing8)
         .background(DS.Colors.surface)

@@ -181,6 +181,11 @@ public struct PlanScreen: View {
                     if store.draftPlans.isEmpty {
                         EmptyState(title: "Сохранено", message: "Изменения записаны.", icon: "checkmark.circle")
                     } else {
+                        // The screen's banner sits under this sheet; without this a refused save looks like a dead tap.
+                        if let err = store.errorMessage {
+                            ErrorBanner(message: err) { store.errorMessage = nil }
+                                .padding(.top, DS.Metrics.spacing16)
+                        }
                         draftsSection
                             .padding(.vertical, DS.Metrics.spacing16)
                     }
@@ -694,7 +699,7 @@ public struct PlanScreen: View {
                 "Сохранить планы",
                 icon: "checkmark",
                 style: .primary,
-                isLoading: store.isLoading
+                isLoading: store.isSaving
             ) {
                 saveDrafts(keepConflicts: false)
             }

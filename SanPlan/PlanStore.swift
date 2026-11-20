@@ -17,6 +17,8 @@ public final class PlanStore: ObservableObject {
     }
     @Published public var editingPlanId: String? = nil
     @Published public var isLoading: Bool = false
+    /// Only a save in flight blocks «Сохранить планы»; a background reload must not.
+    @Published public var isSaving: Bool = false
     /// True once the account's saved plans have been read at least once; before that an empty list means «unknown», not «none».
     public private(set) var hasLoadedPlans = false
     @Published public var isParsing: Bool = false
@@ -93,7 +95,7 @@ public final class PlanStore: ObservableObject {
     }
 
     public func setDraftPlans(_ drafts: [PlanItem]) {
-        self.draftPlans = drafts.map { PlanDomain.withDefaultReminders($0) }
+        self.draftPlans = drafts.map { Self.withDefaultDuration(PlanDomain.withDefaultReminders($0)) }
         self.editingPlanId = self.draftPlans.first?.id
         self.conflictedDraftIds = []
     }
@@ -109,7 +111,7 @@ public final class PlanStore: ObservableObject {
     /// Opens a saved plan for editing: a draft with the same id, which «Сохранить планы» writes over the saved one.
     public func beginEdit(_ item: PlanItem) {
         if !draftPlans.contains(where: { $0.id == item.id }) {
-            draftPlans.insert(PlanDomain.withDefaultReminders(item), at: 0)
+            draftPlans.insert(Self.withDefaultDuration(PlanDomain.withDefaultReminders(item)), at: 0)
         }
         editingPlanId = item.id
     }
@@ -150,6 +152,7 @@ public final class PlanStore: ObservableObject {
         pendingTaskIds = []
         googlePendingId = nil
         isLoading = false
+        isSaving = false
         isParsing = false
         clearAllDrafts()
     }
@@ -306,6 +309,10 @@ public final class PlanStore: ObservableObject {
     @discardableResult
     public func saveDrafts(keepConflicts: Bool = false) async -> Bool {
         guard !draftPlans.isEmpty else { return true }
+        guard !isSaving else { return false }
+        // A task switched to an event, or a draft from the server, may still lack the 60 min the editor shows.
+        let filled = draftPlans.map(Self.withDefaultDuration)
+        if filled != draftPlans { draftPlans = filled }
         for draft in draftPlans {
             let validationErrors = PlanDomain.validatePlan(draft)
             if !validationErrors.isEmpty {
@@ -315,9 +322,9 @@ public final class PlanStore: ObservableObject {
         }
 
         let started = generation
-        isLoading = true
+        isSaving = true
         errorMessage = nil
-        defer { if started == generation { isLoading = false } }
+        defer { if started == generation { isSaving = false } }
 
         do {
             let response = try await PlanAPI.savePlans(
@@ -463,14 +470,14 @@ public final class PlanStore: ObservableObject {
         var changed = false
         var next: [PlanItem] = []
         for draft in draftPlans {
-            guard let saved = stored[draft.id] else { next.append(draft); continue }
+            // An open edit of a saved plan (it carries savedAt) leaves only on a confirmed save; a reload
+            // landing while the editor is open must not drop it as «unchanged» or the sheet closes under the user.
+            guard let saved = stored[draft.id], draft.savedAt == nil else { next.append(draft); continue }
             changed = true
             if Self.sameContent(saved, draft) {
                 conflictedDraftIds.remove(draft.id)
                 continue
             }
-            // A draft copied from a saved plan (it carries savedAt) is an edit of that plan: keep its id so saving replaces it.
-            if draft.savedAt != nil { next.append(draft); continue }
             var renamed = draft
             renamed.id = UUID().uuidString
             if editingPlanId == draft.id { editingPlanId = renamed.id }
@@ -482,6 +489,14 @@ public final class PlanStore: ObservableObject {
         if let editing = editingPlanId, !next.contains(where: { $0.id == editing }) {
             editingPlanId = next.first?.id
         }
+    }
+
+    /// The editor shows 60 min for an event without a duration; the saved plan must carry the same value.
+    static func withDefaultDuration(_ plan: PlanItem) -> PlanItem {
+        guard plan.kind == "event", plan.durationMinutes == nil else { return plan }
+        var filled = plan
+        filled.durationMinutes = 60
+        return filled
     }
 
     /// Mirrors the server's sameness check for the fields a person can edit.

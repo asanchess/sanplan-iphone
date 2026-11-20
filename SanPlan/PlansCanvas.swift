@@ -333,9 +333,11 @@ struct PlansHabitTileModel: Identifiable, Equatable {
     let count: Int
     let goal: Int
     let note: String
-    let streak: String?
+    let streak: HabitStreak?
     /// Marked by a rule (training, no spending): the tile cannot be ticked by hand.
     let isAuto: Bool
+    /// Done today, so the streak just grew.
+    var streakToday = false
 
     var isFull: Bool { count >= goal }
     var fraction: Double { goal > 0 ? Double(count) / Double(goal) : 0 }
@@ -370,11 +372,9 @@ struct PlansHabitTile: View {
                     .opacity(0.8)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                if let streak = model.streak {
-                    Text(streak)
-                        .font(DS.Fonts.text(13, .bold, relativeTo: .caption))
-                        .opacity(0.65)
-                        .padding(.top, 2)
+                if let streak = model.streak, streak.count > 0 {
+                    StreakBadge(count: streak.count, unit: streak.unit, extendedToday: model.streakToday, size: 18)
+                        .padding(.top, 4)
                 }
             }
             .foregroundColor(DS.Colors.textPrimary)

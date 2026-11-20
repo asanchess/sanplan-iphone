@@ -69,10 +69,10 @@ public final class PlanDraftSync {
             }
             defaults.set(true, forKey: mergedKey)
         } else if let remote, let rec = record {
+            lastSynced = remote
             if remote != local {
                 if editedAt > 0, editedAt >= rec.updatedAt { push(local) } else { setDrafts(remote) }
             }
-            lastSynced = remote
         } else if !local.isEmpty {
             push(local)
         }
@@ -90,8 +90,10 @@ public final class PlanDraftSync {
 
     /// Вызывать при каждом изменении локальных черновиков.
     public func localChanged(_ drafts: [PlanItem]) {
-        guard ready, !stopped, drafts != lastSynced else { return }
+        guard !stopped, drafts != lastSynced else { return }
+        // An edit made before the first sync finishes must still beat the older cloud copy in start().
         editedAt = now()
+        guard ready else { return }
         pushTask?.cancel()
         pushTask = Task { [weak self, debounce] in
             try? await Task.sleep(for: debounce)

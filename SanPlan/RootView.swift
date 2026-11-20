@@ -246,16 +246,16 @@ public struct RootView: View {
             openProgress: { showProgress = true },
             openHelp: { tour.start(.section(TourSection(tab: selectedTab))) }
         ))
-        .background(MascotEventWatcher(plans: model.plans, finance: model.finance, workouts: model.workouts))
+        .background(MascotEventWatcher(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes))
         .overlay {
             GeometryReader { proxy in
-                PetLayer(area: proxy.size, tab: selectedTab) {
-                    MascotReminders.lines(
-                        MascotReminders.input(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes),
-                        focus: selectedTab,
-                        hidden: sections.hidden
-                    )
-                }
+                PetLayer(area: proxy.size, tab: selectedTab, reminders: {
+                    let input = MascotReminders.input(plans: model.plans, finance: model.finance, workouts: model.workouts, notes: model.notes)
+                    return [MascotReminders.summary(input, tab: selectedTab)].compactMap { $0 }
+                        + MascotReminders.lines(input, focus: selectedTab, hidden: sections.hidden)
+                }, selfTalk: {
+                    MascotSelfTalk.line(MascotSelfTalk.input(plans: model.plans, finance: model.finance, habits: HabitStore.shared))
+                })
             }
         }
         .overlay(alignment: .bottom) {

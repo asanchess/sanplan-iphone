@@ -118,7 +118,7 @@ enum SectionPrefs {
 
     // MARK: Маскот
 
-    /// Off: the mascot says nothing after plans, sets, workouts and the day limit; tap reminders stay.
+    /// Off: the mascot says nothing on events and never speaks on its own; tap summaries stay.
     static func mascotLines(in defaults: UserDefaults = defaults) -> Bool {
         defaults.object(forKey: Key.mascotLines) as? Bool ?? true
     }

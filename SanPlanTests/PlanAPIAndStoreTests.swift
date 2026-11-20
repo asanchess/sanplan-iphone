@@ -641,4 +641,95 @@ final class PlanStoreBehaviourTests: XCTestCase {
         longer.durationMinutes = 90
         XCTAssertFalse(PlanStore.sameContent(base, longer))
     }
+
+    // MARK: Owner bugs 20.11: default duration, edit of a saved plan, move
+
+    func testEventWithoutDurationSavesTheShownSixtyMinutes() async throws {
+        let store = makeStore()
+        var parsed = event("a")
+        parsed.durationMinutes = nil
+        var task = event("b", "Позвонить")
+        task.kind = "task"
+        task.durationMinutes = nil
+        store.setDraftPlans([parsed, task])
+        XCTAssertEqual(store.draftPlans.map(\.durationMinutes), [60, nil], "Only events get the shown default")
+
+        // The editor's type picker turns the task into an event without touching the duration.
+        store.draftPlans[1].kind = "event"
+        PlanStubURLProtocol.stub("POST", "/api/plans/save", .json(200, #"{"results":[{"id":"a","status":"saved"},{"id":"b","status":"saved"}]}"#))
+        PlanStubURLProtocol.stub("GET", "/api/calendar", .json(200, #"{"events":[]}"#))
+
+        let saved = await store.saveDrafts()
+
+        XCTAssertTrue(saved, store.errorMessage ?? "")
+        let body = try XCTUnwrap(PlanStubURLProtocol.calls(to: "/api/plans/save").first).json
+        let sent = try XCTUnwrap(body["plans"] as? [[String: Any]])
+        XCTAssertEqual(sent.compactMap { $0["durationMinutes"] as? Int }, [60, 60])
+    }
+
+    func testEditOfSavedPlanSurvivesReloadAndPersistsTitleDateTime() async throws {
+        let probe = Probe()
+        let store = makeStore(probe)
+        var original = event("p1")
+        original.savedAt = "2026-11-01T00:00:00Z"
+        store.plans = [original]
+
+        store.beginEdit(original)
+        XCTAssertEqual(store.editingPlanId, "p1")
+        store.plans = [original] // a reload lands while the sheet is open, before any change
+        XCTAssertEqual(store.draftPlans.map(\.id), ["p1"], "An open edit is not dropped as unchanged")
+
+        store.draftPlans[0].title = "Созвон"
+        store.draftPlans[0].date = "2026-12-03"
+        store.draftPlans[0].time = "15:30"
+        store.plans = [original] // and another one after the change
+        XCTAssertEqual(store.draftPlans.map(\.id), ["p1"], "The edit keeps the saved id so saving replaces the plan")
+
+        let updated = #"{"id":"p1","kind":"event","title":"Созвон","date":"2026-12-03","time":"15:30","durationMinutes":60,"reminderOffsets":[60],"savedAt":"2026-11-20T00:00:00Z"}"#
+        PlanStubURLProtocol.stub("POST", "/api/plans/save", .json(200, #"{"results":[{"id":"p1","status":"saved"}],"plans":[\#(updated)]}"#))
+        PlanStubURLProtocol.stub("GET", "/api/calendar", .json(200, #"{"events":[]}"#))
+
+        let saved = await store.saveDrafts()
+
+        XCTAssertTrue(saved, store.errorMessage ?? "")
+        let sent = try XCTUnwrap((PlanStubURLProtocol.calls(to: "/api/plans/save").first?.json["plans"] as? [[String: Any]])?.first)
+        XCTAssertEqual(sent["id"] as? String, "p1")
+        XCTAssertEqual(sent["title"] as? String, "Созвон")
+        XCTAssertEqual(sent["date"] as? String, "2026-12-03")
+        XCTAssertEqual(sent["time"] as? String, "15:30")
+        XCTAssertTrue(store.draftPlans.isEmpty)
+        XCTAssertEqual(store.plans.first?.title, "Созвон")
+        XCTAssertEqual(store.plans.first?.date, "2026-12-03")
+        XCTAssertFalse(store.isSaving)
+    }
+
+    func testSaveButtonIsNotBlockedByABackgroundReload() async {
+        let store = makeStore()
+        store.isLoading = true // a reload in flight
+        store.setDraftPlans([event("a")])
+        PlanStubURLProtocol.stub("POST", "/api/plans/save", .json(200, #"{"results":[{"id":"a","status":"saved"}]}"#))
+        PlanStubURLProtocol.stub("GET", "/api/calendar", .json(200, #"{"events":[]}"#))
+
+        let saved = await store.saveDrafts()
+
+        XCTAssertTrue(saved)
+        XCTAssertFalse(store.isSaving)
+        XCTAssertTrue(store.draftPlans.isEmpty)
+    }
+
+    func testMoveOpenTaskToTheNextDay() async throws {
+        let store = makeStore()
+        var task = event("t1", "Отчёт")
+        task.kind = "task"
+        task.savedAt = "2026-11-01T00:00:00Z"
+        store.plans = [task]
+        PlanStubURLProtocol.stub("POST", "/api/plans/save", .json(200, #"{"results":[{"id":"t1","status":"saved"}]}"#))
+
+        let moved = await store.moveOpenToTomorrow(["t1"])
+
+        XCTAssertTrue(moved)
+        let sent = try XCTUnwrap((PlanStubURLProtocol.calls(to: "/api/plans/save").first?.json["plans"] as? [[String: Any]])?.first)
+        XCTAssertEqual(sent["date"] as? String, "2026-12-02")
+        XCTAssertEqual(sent["time"] as? String, "10:00")
+    }
 }

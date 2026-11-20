@@ -37,9 +37,9 @@ enum PlansDemo {
     }
 
     static let habits: [PlansHabitTileModel] = [
-        PlansHabitTileModel(id: "demo-water", title: "Вода", count: 5, goal: 8, note: "Ещё 3 стакана", streak: "серия 9 дн.", isAuto: false),
-        PlansHabitTileModel(id: "demo-read", title: "Чтение", count: 20, goal: 20, note: "страниц", streak: "серия 14 дн.", isAuto: false),
-        PlansHabitTileModel(id: "demo-steps", title: "Без сладкого", count: 0, goal: 1, note: "Не отмечено", streak: "серия 3 дн.", isAuto: false),
+        PlansHabitTileModel(id: "demo-water", title: "Вода", count: 5, goal: 8, note: "Ещё 3 стакана", streak: HabitStreak(count: 9, unit: .days), isAuto: false),
+        PlansHabitTileModel(id: "demo-read", title: "Чтение", count: 20, goal: 20, note: "страниц", streak: HabitStreak(count: 14, unit: .days), isAuto: false),
+        PlansHabitTileModel(id: "demo-steps", title: "Без сладкого", count: 0, goal: 1, note: "Не отмечено", streak: HabitStreak(count: 3, unit: .days), isAuto: false),
     ]
 
     static let goals: [PlansGoalCardModel] = [
