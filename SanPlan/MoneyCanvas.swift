@@ -5,7 +5,7 @@ import SwiftUI
 
 enum MoneyStyle {
     /// Empty part of a bar and a day without spending (#33295A on the canvas).
-    static let track = DS.Colors.hex(0x33295A)
+    static let track = DS.Colors.dyn(0xE9E2F6, 0x33295A)
     /// Dark text on the section colour (#10241C on the canvas buttons).
     static let onAccent = DS.Colors.hex(0x10241C)
     /// Gap between the blocks of the screen.

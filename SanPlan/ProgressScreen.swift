@@ -363,7 +363,7 @@ struct ProgressScreen: View {
 
 private enum ProgressPalette {
     /// Canvas «#33295A»: the soft main button of «Может, забыли?».
-    static let softButton = DS.Colors.hex(0x33295A)
+    static let softButton = DS.Colors.dyn(0xE9E2F6, 0x33295A)
 }
 
 /// A thin bar in the section colour, for goal progress.

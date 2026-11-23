@@ -11,11 +11,11 @@ enum TrainingPalette {
     /// Text on the workout colour.
     static let onAccent = DS.Colors.hex(0x2A0F0B)
     /// Number badge behind the exercise index.
-    static let badge = DS.Colors.hex(0x3A2A3F)
+    static let badge = DS.Colors.dyn(0xF3E3E0, 0x3A2A3F)
     /// Empty part of a timer or chart.
-    static let track = DS.Colors.hex(0x33295A)
+    static let track = DS.Colors.dyn(0xE9E2F6, 0x33295A)
     /// Dashed outline of a rest day in the week row.
-    static let restDay = DS.Colors.hex(0x5A4A8A)
+    static let restDay = DS.Colors.dyn(0xCFC3EA, 0x5A4A8A)
     /// Bars that are not highlighted in a chart.
     static let quietBar = DS.Colors.hex(0x82544D)
 }

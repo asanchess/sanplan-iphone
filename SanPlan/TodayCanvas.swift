@@ -8,8 +8,8 @@ enum TodayPalette {
     static let heroStart = DS.Colors.hex(0x6A48D7)
     static let heroEnd = DS.Colors.hex(0x8B6CF0)
     static let heroButtonText = DS.Colors.hex(0x4A2BB0)
-    static let ringTrack = DS.Colors.hex(0x33295A)
-    static let boxBorder = DS.Colors.hex(0x5A4A8A)
+    static let ringTrack = DS.Colors.dyn(0xE9E2F6, 0x33295A)
+    static let boxBorder = DS.Colors.dyn(0xCFC3EA, 0x5A4A8A)
 }
 
 enum TodayFormat {

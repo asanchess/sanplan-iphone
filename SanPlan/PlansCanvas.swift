@@ -6,11 +6,11 @@ import SwiftUI
 /// Canvas colours used only in «Планы».
 enum PlansStyle {
     /// Border of an empty check box and of an open timeline dot (#5A4A8A).
-    static let boxBorder = DS.Colors.hex(0x5A4A8A)
+    static let boxBorder = DS.Colors.dyn(0xCFC3EA, 0x5A4A8A)
     /// A habit tile whose norm for the day is reached (#2C3F6B).
-    static let doneTile = DS.Colors.hex(0x2C3F6B)
+    static let doneTile = DS.Colors.dyn(0xDCE7FB, 0x2C3F6B)
     /// Track of a goal bar (#33295A).
-    static let goalTrack = DS.Colors.hex(0x33295A)
+    static let goalTrack = DS.Colors.dyn(0xE9E2F6, 0x33295A)
 }
 
 // MARK: - Backdrop
