@@ -52,6 +52,8 @@ struct StreakBadge: View {
     var size: CGFloat = 22
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Hidden tabs stay mounted: the endless pulse would keep redrawing them, so it rests until the tab is shown.
+    @Environment(\.tabIsActive) private var tabIsActive
     @State private var pulse = false
 
     private var tier: StreakTier { StreakTier.of(count) }
@@ -71,11 +73,19 @@ struct StreakBadge: View {
                 .foregroundColor(tier.color)
         }
         .scaleEffect(pulse ? 1.06 : 1)
-        .onAppear {
-            guard extendedToday, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
-        }
+        .onAppear { startPulse() }
+        .onChange(of: tabIsActive) { _, _ in startPulse() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(unit == .days ? "Серия \(count) дней" : "Серия \(count) недель")
+    }
+
+    private func startPulse() {
+        guard extendedToday, !reduceMotion, tabIsActive else {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { pulse = false }
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
     }
 }

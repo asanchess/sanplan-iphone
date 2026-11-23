@@ -168,12 +168,8 @@ public enum PlanDomain {
 
     /// The current day in the owner's time zone.
     public static func today(now: Date = Date(), timeZone: String = defaultTimeZone) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: timeZone) ?? .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: now)
+        FormatterCache.date("yyyy-MM-dd", locale: "en_US_POSIX", timeZone: TimeZone(identifier: timeZone) ?? .current, gregorian: true)
+            .string(from: now)
     }
 
     /// The fields the server stores for a set of reminder offsets.
@@ -203,12 +199,7 @@ public enum PlanDomain {
         guard timeStr.range(of: #"^([01]\d|2[0-3]):[0-5]\d$"#, options: .regularExpression) != nil else { return nil }
         guard let tz = TimeZone(identifier: timeZone) else { return nil }
 
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = tz
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        formatter.isLenient = false
+        let formatter = FormatterCache.date("yyyy-MM-dd HH:mm:ss", locale: "en_US_POSIX", timeZone: tz, gregorian: true, lenient: false)
 
         guard let parsed = formatter.date(from: "\(dateStr) \(timeStr):00") else { return nil }
         return Int64(parsed.timeIntervalSince1970 * 1000)
@@ -216,11 +207,7 @@ public enum PlanDomain {
 
     public static func addDays(dateStr: String, days: Int) -> String {
         guard let tz = TimeZone(secondsFromGMT: 0) else { return dateStr }
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = tz
-        formatter.dateFormat = "yyyy-MM-dd"
+        let formatter = FormatterCache.date("yyyy-MM-dd", locale: "en_US_POSIX", timeZone: tz, gregorian: true)
         guard let parsed = formatter.date(from: dateStr) else { return dateStr }
         guard let shifted = Calendar(identifier: .gregorian).date(byAdding: .day, value: days, to: parsed) else { return dateStr }
         return formatter.string(from: shifted)

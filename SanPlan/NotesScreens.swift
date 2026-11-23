@@ -183,18 +183,17 @@ enum NoteDates {
     static func short(_ ms: Int64, now: Date = Date()) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
         let calendar = Calendar.current
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        let format: String
         if calendar.isDateInToday(date) {
-            formatter.dateFormat = "HH:mm"
+            format = "HH:mm"
         } else if calendar.isDateInYesterday(date) {
-            formatter.dateFormat = "'вчера', HH:mm"
+            format = "'вчера', HH:mm"
         } else if calendar.isDate(date, equalTo: now, toGranularity: .year) {
-            formatter.dateFormat = "d MMMM"
+            format = "d MMMM"
         } else {
-            formatter.dateFormat = "d MMMM yyyy"
+            format = "d MMMM yyyy"
         }
-        return formatter.string(from: date)
+        return FormatterCache.date(format, locale: "ru_RU", timeZone: .current).string(from: date)
     }
 
     /// The card line from the canvas: «Сегодня, 09:12», «Вчера», «12 ноября».
@@ -202,15 +201,14 @@ enum NoteDates {
         let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
         let calendar = Calendar.current
         if calendar.isDateInYesterday(date) { return "Вчера" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        let format: String
         if calendar.isDateInToday(date) {
-            formatter.dateFormat = "'Сегодня', HH:mm"
+            format = "'Сегодня', HH:mm"
         } else if calendar.isDate(date, equalTo: now, toGranularity: .year) {
-            formatter.dateFormat = "d MMMM"
+            format = "d MMMM"
         } else {
-            formatter.dateFormat = "d MMMM yyyy"
+            format = "d MMMM yyyy"
         }
-        return formatter.string(from: date)
+        return FormatterCache.date(format, locale: "ru_RU", timeZone: .current).string(from: date)
     }
 }

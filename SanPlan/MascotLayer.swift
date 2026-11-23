@@ -178,6 +178,8 @@ struct PetLayer: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if heroShown {
+                // Read once per body, not on every animation frame.
+                let isNight = night
                 if hiddenEdge == nil || move != nil {
                     TimelineView(.animation(minimumInterval: nil, paused: move == nil && effect == nil)) { context in
                         let p = position(at: context.date)
@@ -186,7 +188,7 @@ struct PetLayer: View {
                                 .offset(x: p.x, y: p.y)
                             if let bubble {
                                 bubbleView(bubble, hero: p)
-                            } else if night && hiddenEdge == nil {
+                            } else if isNight && hiddenEdge == nil {
                                 Text("z")
                                     .font(DS.Fonts.text(16, .bold, relativeTo: .subheadline))
                                     .foregroundColor(DS.Colors.textPrimary)
