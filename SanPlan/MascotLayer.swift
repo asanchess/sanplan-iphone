@@ -167,7 +167,7 @@ struct PetLayer: View {
     private func position(at date: Date) -> CGPoint {
         if let move {
             let t = move.duration > 0 ? min(max(date.timeIntervalSince(move.start) / move.duration, 0), 1) : 1
-            let e = move.walking ? t : 1 - pow(1 - t, 3)
+            let e = move.walking ? t * t * (3 - 2 * t) : 1 - pow(1 - t, 3)
             return CGPoint(x: move.from.x + (move.to.x - move.from.x) * e, y: move.from.y + (move.to.y - move.from.y) * e)
         }
         return CGPoint(x: spot.x, y: onLane ? laneY : spot.y)
@@ -237,6 +237,9 @@ struct PetLayer: View {
             .offset(y: -abs(phase) * 3 - fx.lift)
             .scaleEffect(x: facingLeft ? -1 : 1, y: 1)
             .shadow(color: .black.opacity(0.45), radius: 4, y: 4)
+            .padding(10)
+            .drawingGroup()
+            .padding(-10)
             .contentShape(Rectangle())
             .gesture(drag)
             .onTapGesture { tapped() }
@@ -416,7 +419,7 @@ struct PetLayer: View {
                 if let edge = MascotEdge.pick(predicted: predicted, bounds: bounds) {
                     hide(edge)
                 } else {
-                    later(0.2, generation) { returnToLane() }
+                    returnToLane()
                 }
             }
     }
@@ -526,8 +529,8 @@ struct PetLayer: View {
     private func wander() {
         guard heroShown, move == nil, grab == nil, hiddenEdge == nil, bubble == nil else { return }
         if !onLane { returnToLane(); return }
-        if !night, SectionPrefs.mascotLines(), Date().timeIntervalSince(lastTalk) >= MascotSelfTalk.gap,
-           let line = selfTalk() {
+        if !night, SectionPrefs.mascotLines(), Date().timeIntervalSince(lastTalk) >= 90,
+           let line = selfTalk() ?? reminders().randomElement() {
             lastTalk = Date()
             say(line, pose: .point)
             return

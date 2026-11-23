@@ -213,23 +213,6 @@ struct HabitsSection: View {
                     .accessibilityLabel("Выполнено \(done) из \(total)")
             }
         }
-        if demo != nil {
-            streakLine(days: 12, rest: 2, extendedToday: true)
-        } else if !streakSources.isEmpty {
-            let streak = habits.appStreak(today: today, sources: streakSources)
-            let activeToday = !habits.activityDays(from: today, to: today).isEmpty
-                || streakSources.contains { !$0(today, today).isEmpty }
-            streakLine(days: streak.days, rest: streak.restDaysLeft, extendedToday: activeToday)
-        }
-    }
-
-    private func streakLine(days: Int, rest: Int, extendedToday: Bool) -> some View {
-        HStack(spacing: 10) {
-            StreakBadge(count: days, extendedToday: extendedToday, size: 24)
-            Text("дней отдыха в месяце: \(rest)")
-                .font(DS.Fonts.text(14, .semibold, relativeTo: .footnote))
-                .foregroundColor(DS.Colors.textSecondary)
-        }
     }
 }
 
