@@ -692,8 +692,8 @@ public struct ArnaSegmented<Value: Hashable>: View {
                                     .fill(accent)
                                     .background(
                                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .fill(DS.Colors.ink)
-                                            .offset(x: 3, y: 3)
+                                            .fill(DS.Colors.drop)
+                                            .offset(y: 2)
                                     )
                                     .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.087, d: 1, tx: 2, ty: 0))
                             }

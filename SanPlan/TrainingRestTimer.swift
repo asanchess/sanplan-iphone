@@ -27,8 +27,8 @@ struct TrainingLetterTimer: View {
         let evenOdd = FillStyle(eoFill: true)
         ZStack {
             TrainingLetterA()
-                .fill(DS.Colors.ink, style: evenOdd)
-                .offset(x: 4, y: 4)
+                .fill(DS.Colors.drop, style: evenOdd)
+                .offset(y: 2)
             TrainingLetterA()
                 .fill(TrainingPalette.track, style: evenOdd)
             GeometryReader { geometry in

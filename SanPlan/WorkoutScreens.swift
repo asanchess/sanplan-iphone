@@ -263,7 +263,7 @@ public struct WorkoutScreen: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, minHeight: 60)
                     .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Colors.canvas))
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(TrainingPalette.inkShade).offset(x: 4, y: 4))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(DS.Colors.drop).offset(y: 2))
                     .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(PressScaleStyle())

@@ -93,7 +93,7 @@ struct TrainingMainButton: View {
             .frame(maxWidth: .infinity, minHeight: 64)
             .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(accent))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.edge, lineWidth: 1))
-            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(TrainingPalette.inkShade).offset(x: 4, y: 4))
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Colors.drop).offset(y: 2))
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
         .buttonStyle(PressScaleStyle())
