@@ -130,7 +130,7 @@ public struct SettingsView: View {
                     .accessibilityLabel("Арка «\(arc.title)»")
                 Text(displayName)
                     .font(DS.Fonts.display(20, relativeTo: .title3))
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 if wardrobe.isCounted {

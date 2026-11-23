@@ -118,7 +118,7 @@ struct SummaryScreen: View {
                 Text("Итоги")
                     .font(DS.Fonts.display(28, relativeTo: .largeTitle))
                     .foregroundColor(DS.Colors.textPrimary)
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .accessibilityAddTraits(.isHeader)
             }
             Spacer(minLength: 0)
@@ -386,7 +386,7 @@ struct SummaryScreen: View {
         Button(action: save) {
             Text(mode == .day ? "Сохранить итоги" : "Сохранить итоги недели")
                 .font(DS.Fonts.text(18, .heavy))
-                .foregroundColor(DS.Colors.canvas)
+                .foregroundColor(DS.Colors.ink)
                 .frame(maxWidth: .infinity)
                 .frame(height: 60)
                 .background(accent, in: RoundedRectangle(cornerRadius: 20, style: .continuous))

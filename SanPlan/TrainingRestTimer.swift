@@ -40,7 +40,7 @@ struct TrainingLetterTimer: View {
             .mask(TrainingLetterA().fill(style: evenOdd))
             .animation(reduceMotion ? nil : .linear(duration: 0.5), value: clamped)
             TrainingLetterA()
-                .stroke(DS.Colors.ink, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+                .stroke(DS.Colors.edge, style: StrokeStyle(lineWidth: 1, lineJoin: .round))
         }
         .accessibilityHidden(true)
     }
@@ -94,7 +94,7 @@ struct WorkoutTimerCard: View {
                             .foregroundColor(DS.Colors.textPrimary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                            .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                            .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                             .contentTransition(.numericText(countsDown: elapsed == nil))
                             .animation(.snappy, value: elapsed ?? remaining)
                         Text(setHeader(exercise))

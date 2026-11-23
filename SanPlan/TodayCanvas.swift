@@ -94,7 +94,7 @@ struct TodayHeroCard: View {
                     .lineLimit(1)
                 Text(hero.title)
                     .font(DS.Fonts.display(24, relativeTo: .title2))
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,8 +137,8 @@ struct TodayHeroCard: View {
             .padding(.horizontal, 18)
             .frame(height: 44)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(DS.Colors.ink, lineWidth: 2))
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(DS.Colors.ink).offset(x: 3, y: 3))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(DS.Colors.edge, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(DS.Colors.drop).offset(y: 2))
             .transformEffect(TodayFormat.skew(8, height: 44))
     }
 
@@ -270,7 +270,7 @@ struct TodayCheckRow: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous).fill(accent)
                     Image(systemName: "checkmark")
                         .font(.system(size: 14, weight: .heavy))
-                        .foregroundColor(DS.Colors.canvas)
+                        .foregroundColor(DS.Colors.ink)
                         .transition(.scale.combined(with: .opacity))
                 } else {
                     RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(TodayPalette.boxBorder, lineWidth: 2)

@@ -106,7 +106,7 @@ struct ProgressScreen: View {
                 Text("Прогресс")
                     .font(DS.Fonts.title)
                     .foregroundColor(DS.Colors.textPrimary)
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .accessibilityAddTraits(.isHeader)
             }
             Spacer(minLength: 0)

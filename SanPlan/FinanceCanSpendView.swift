@@ -43,7 +43,7 @@ struct CanSpendTodayCard: View {
                     Text(FinanceText.money(result.amount * 100))
                         .font(DS.Fonts.display(44, relativeTo: .largeTitle))
                         .foregroundColor(accent)
-                        .shadow(color: DS.Colors.ink, radius: 0, x: 4, y: 4)
+                        .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                     if let limit = result.dayLimit, limit > 0 {

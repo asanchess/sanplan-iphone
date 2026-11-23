@@ -60,7 +60,7 @@ struct NotesVaultGateView: View {
                     .foregroundColor(DS.Colors.ink)
                     .frame(width: 40, height: 40)
                     .background(accent, in: Circle())
-                    .overlay(Circle().stroke(DS.Colors.ink, lineWidth: 2))
+                    .overlay(Circle().stroke(DS.Colors.edge, lineWidth: 1))
                     .accessibilityHidden(true)
                 Text("Перенос данных в аккаунт")
                     .font(DS.Fonts.text(19, .heavy, relativeTo: .headline))

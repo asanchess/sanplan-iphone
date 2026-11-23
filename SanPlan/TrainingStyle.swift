@@ -92,7 +92,7 @@ struct TrainingMainButton: View {
             .foregroundColor(TrainingPalette.onAccent)
             .frame(maxWidth: .infinity, minHeight: 64)
             .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(accent))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.ink, lineWidth: 2))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.edge, lineWidth: 1))
             .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(TrainingPalette.inkShade).offset(x: 4, y: 4))
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }

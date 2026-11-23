@@ -292,8 +292,8 @@ public struct WorkoutScreen: View {
         }
         .clipShape(shape)
         .contentShape(shape)
-        .overlay(shape.stroke(DS.Colors.ink, lineWidth: 2))
-        .background(shape.fill(DS.Colors.ink).offset(x: 6, y: 6))
+        .overlay(shape.stroke(DS.Colors.edge, lineWidth: 1))
+        .background(shape.fill(DS.Colors.drop).offset(y: 2))
         .padding(.trailing, 6)
     }
 

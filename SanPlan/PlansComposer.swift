@@ -67,7 +67,7 @@ struct PlansComposerBar: View {
                     }
                 }
                 .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
-                .foregroundColor(DS.Colors.canvas)
+                .foregroundColor(DS.Colors.ink)
                 .padding(.horizontal, 18)
                 .frame(height: 56)
                 .background(accent, in: Capsule())

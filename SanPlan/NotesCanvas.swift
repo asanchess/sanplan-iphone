@@ -174,8 +174,8 @@ struct NotePinnedCard: View {
                 .padding(.top, 8)
                 .padding(.trailing, 8)
         }
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.ink, lineWidth: 2))
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Colors.ink).offset(x: 6, y: 6))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.edge, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Colors.drop).offset(y: 2))
         .rotationEffect(.degrees(-1))
         .padding(.leading, 2)
         .padding(.trailing, 8)
@@ -265,8 +265,8 @@ private struct NotesCaptureButton: ViewModifier {
                             .foregroundColor(DS.Colors.ink)
                             .frame(width: 58, height: 58)
                             .background(accent, in: Circle())
-                            .overlay(Circle().stroke(DS.Colors.ink, lineWidth: 2))
-                            .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
+                            .overlay(Circle().stroke(DS.Colors.edge, lineWidth: 1))
+                            .background(Circle().fill(DS.Colors.drop).offset(y: 2))
                     }
                     .buttonStyle(PressScaleStyle())
                     .tourTarget("notes.capture")
@@ -310,8 +310,8 @@ struct NoteActionChip: View {
             .padding(.horizontal, 14)
             .frame(minHeight: 44)
             .background(DS.Colors.surfaceRaised, in: Capsule())
-            .overlay(Capsule().stroke(DS.Colors.ink, lineWidth: 2))
-            .background(Capsule().fill(DS.Colors.ink).offset(x: 3, y: 3))
+            .overlay(Capsule().stroke(DS.Colors.edge, lineWidth: 1))
+            .background(Capsule().fill(DS.Colors.drop).offset(y: 2))
         }
         .buttonStyle(PressScaleStyle())
     }
@@ -335,7 +335,7 @@ struct NoteCheckBox: View {
             }
         }
         .frame(width: 26, height: 26)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(done ? DS.Colors.ink : Color.clear).offset(x: 2, y: 2))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(done ? DS.Colors.drop : Color.clear).offset(y: 2))
         .accessibilityHidden(true)
     }
 }

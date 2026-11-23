@@ -17,8 +17,6 @@
         <string>DelaGothicOne-Regular.ttf</string>
         <string>GolosText-Variable.ttf</string>
     </array>
-    <key>UIUserInterfaceStyle</key>
-    <string>Dark</string>
     <key>CFBundleName</key>
     <string>A-san</string>
     <key>CFBundlePackageType</key>

@@ -61,7 +61,7 @@ struct PlansBackdrop: View {
 struct PlansBar: View {
     let fraction: Double
     var height: CGFloat = 8
-    var track: Color = Color.white.opacity(0.14)
+    var track: Color = DS.Colors.hairline
     @Environment(\.sectionAccent) private var accent
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -106,7 +106,7 @@ struct PlansFilterChips<Value: Hashable>: View {
                             if isOn {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(accent)
-                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Colors.ink).offset(x: 3, y: 3))
+                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Colors.drop).offset(y: 2))
                                     .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.087, d: 1, tx: 1.5, ty: 0))
                             } else {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(DS.Colors.surface)
@@ -265,7 +265,7 @@ struct PlansCheckBox: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).fill(accent)
                 Image(systemName: "checkmark")
                     .font(.system(size: 13, weight: .heavy))
-                    .foregroundColor(DS.Colors.canvas)
+                    .foregroundColor(DS.Colors.ink)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
             } else {
                 RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(PlansStyle.boxBorder, lineWidth: 2)

@@ -7,14 +7,26 @@ public enum DS {
         static func hex(_ v: UInt32, _ a: Double = 1) -> Color {
             Color(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255, opacity: a)
         }
-        public static let canvas = hex(0x17122A)
-        public static let surface = hex(0x211A3A)
-        public static let surfaceRaised = hex(0x2A2148)
-        public static let hairline = hex(0x3A2F5E)
-        public static let navBar = hex(0x1C1533)
-        public static let textPrimary = hex(0xF1ECFF)
-        public static let textSecondary = hex(0xB8AFD4)
-        public static let textMuted = hex(0x8E84AE)
+        /// Light «Повседневность» pastel by day, the round-5 plum at night: follows the iPhone appearance.
+        static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+            func ui(_ v: UInt32) -> UIColor {
+                UIColor(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+            }
+            return Color(UIColor { $0.userInterfaceStyle == .dark ? ui(dark) : ui(light) })
+        }
+        /// Soft card shadow and thin edge that replace the hard ink frame.
+        public static let drop = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor.black.withAlphaComponent(0.35) : UIColor(red: 0.35, green: 0.25, blue: 0.6, alpha: 0.12) })
+        public static let edge = dyn(0xE4DBF3, 0x3A2F5E)
+        /// Evening sky at the top of every screen.
+        public static let backdrop = LinearGradient(colors: [dyn(0xE6DCFA, 0x241A44), dyn(0xF6F1FD, 0x17122A)], startPoint: .top, endPoint: .center)
+        public static let canvas = dyn(0xF6F1FD, 0x17122A)
+        public static let surface = dyn(0xFFFFFF, 0x211A3A)
+        public static let surfaceRaised = dyn(0xF1EBFA, 0x2A2148)
+        public static let hairline = dyn(0xE4DBF3, 0x3A2F5E)
+        public static let navBar = dyn(0xFFFFFF, 0x1C1533)
+        public static let textPrimary = dyn(0x2B2242, 0xF1ECFF)
+        public static let textSecondary = dyn(0x5F567A, 0xB8AFD4)
+        public static let textMuted = dyn(0x8C83A6, 0x8E84AE)
         /// The hard «ink» used for the round-5 border and offset shadow.
         public static let ink = hex(0x0B0816)
         public static let accent = hex(0x8B6CF0)
@@ -24,17 +36,17 @@ public enum DS {
         public static let controlTint = hex(0x8B6CF0)
         public static let accentGradientStart = hex(0x8B6CF0)
         public static let accentGradientEnd = hex(0x6A48D7)
-        public static let positive = hex(0x6FD6B0)
-        public static let warning = hex(0xF2C879)
-        public static let destructive = hex(0xFF8A7A)
+        public static let positive = dyn(0x2FA57E, 0x6FD6B0)
+        public static let warning = dyn(0xC98A1E, 0xF2C879)
+        public static let destructive = dyn(0xE0533F, 0xFF8A7A)
 
         /// Section accents from the canvas.
-        public static let today = hex(0xB9A4FF)
-        public static let plans = hex(0x7FB2FF)
-        public static let notes = hex(0xF2C879)
-        public static let money = hex(0x6FD6B0)
+        public static let today = dyn(0xA58CFA, 0xB9A4FF)
+        public static let plans = dyn(0x5E98F2, 0x7FB2FF)
+        public static let notes = dyn(0xE8B04A, 0xF2C879)
+        public static let money = dyn(0x3DBE92, 0x6FD6B0)
         /// Softened coral (owner 18.11): dark ink text stays readable on it.
-        public static let workout = hex(0xEE9A8C)
+        public static let workout = dyn(0xEE9A8C, 0xEE9A8C)
 
         public static let accentGradient = LinearGradient(
             colors: [accentGradientStart, accentGradientEnd],
@@ -133,8 +145,8 @@ public struct PillButton: View {
             )
             .background(
                 RoundedRectangle(cornerRadius: DS.Metrics.pillHeight / 2)
-                    .fill(style == .primary ? DS.Colors.ink : .clear)
-                    .offset(x: 4, y: 4)
+                    .fill(style == .primary ? DS.Colors.drop : .clear)
+                    .offset(y: 2)
             )
         }
         .buttonStyle(PressScaleStyle())
@@ -167,7 +179,7 @@ public struct PillButton: View {
     private var borderColor: Color {
         switch style {
         case .primary:
-            return DS.Colors.ink
+            return Color.clear
         case .secondary:
             return Color.clear
         case .destructive:
@@ -279,7 +291,7 @@ public struct ScreenHeader<Actions: View>: View {
                 Text(title)
                     .font(DS.Fonts.title)
                     .foregroundColor(DS.Colors.textPrimary)
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
@@ -315,13 +327,13 @@ public struct SkewTag: View {
         Text(text.uppercased())
             .font(DS.Fonts.text(12, .heavy, relativeTo: .caption))
             .tracking(0.5)
-            .foregroundColor(DS.Colors.canvas)
+            .foregroundColor(DS.Colors.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
             .background(color)
-            .background(DS.Colors.ink.offset(x: 3, y: 3))
+            .background(DS.Colors.drop.offset(y: 2))
             .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.176, d: 1, tx: 3, ty: 0))
             .padding(.leading, 3)
     }
@@ -344,7 +356,7 @@ public struct ProfileAvatarButton: View {
                 .background(DS.Colors.surfaceRaised)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(accent, lineWidth: 2))
-                .background(Circle().fill(DS.Colors.ink).offset(x: 3, y: 3))
+                .background(Circle().fill(DS.Colors.drop).offset(y: 2))
                 .frame(width: 46, height: 46)
         }
         .buttonStyle(PressScaleStyle())
@@ -386,11 +398,11 @@ public struct PressScaleStyle: ButtonStyle {
 }
 
 public extension View {
-    /// The hard «ink» frame for the screen's main card and main buttons.
+    /// The soft frame (was the hard «ink» one) for the screen's main card and main buttons.
     func inked(cornerRadius: CGFloat = DS.Metrics.cardRadius, shadow: CGFloat = 6) -> some View {
         self
-            .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(DS.Colors.ink, lineWidth: 2))
-            .background(RoundedRectangle(cornerRadius: cornerRadius).fill(DS.Colors.ink).offset(x: shadow, y: shadow))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius).stroke(DS.Colors.edge, lineWidth: 1))
+            .shadow(color: DS.Colors.drop, radius: shadow * 2, y: shadow / 2)
     }
 }
 

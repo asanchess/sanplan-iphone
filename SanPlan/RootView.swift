@@ -512,8 +512,8 @@ private struct CaptureButton: ViewModifier {
                             .foregroundColor(DS.Colors.ink)
                             .frame(width: 56, height: 56)
                             .background(accent, in: Circle())
-                            .overlay(Circle().stroke(DS.Colors.ink, lineWidth: 2))
-                            .background(Circle().fill(DS.Colors.ink).offset(x: 4, y: 4))
+                            .overlay(Circle().stroke(DS.Colors.edge, lineWidth: 1))
+                            .background(Circle().fill(DS.Colors.drop).offset(y: 2))
                     }
                     .buttonStyle(PressScaleStyle())
                     .tourTarget("shell.capture")

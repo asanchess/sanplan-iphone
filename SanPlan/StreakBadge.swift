@@ -59,9 +59,9 @@ struct StreakBadge: View {
     var body: some View {
         HStack(spacing: 4) {
             ZStack {
-                StreakSpark().fill(DS.Colors.ink).offset(x: 2, y: 2)
+                StreakSpark().fill(DS.Colors.drop).offset(y: 2)
                 StreakSpark().fill(tier.color)
-                StreakSpark().stroke(DS.Colors.ink, lineWidth: 1.5)
+                StreakSpark().stroke(DS.Colors.edge, lineWidth: 1)
             }
             .frame(width: size * 0.8, height: size)
             .shadow(color: tier == .gold ? tier.color.opacity(0.8) : .clear, radius: 6)

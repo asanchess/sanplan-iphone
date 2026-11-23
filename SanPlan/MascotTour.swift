@@ -538,7 +538,7 @@ struct MascotTourOverlay: View {
                 .fill(Color.black.opacity(hole == nil ? 0.45 : 0.6), style: FillStyle(eoFill: true))
             if hole != nil {
                 ZStack {
-                    shape.stroke(DS.Colors.ink, lineWidth: 6)
+                    shape.stroke(DS.Colors.edge, lineWidth: 1)
                     shape.stroke(accent, lineWidth: 3)
                 }
                 .frame(width: rect.width, height: rect.height)
@@ -638,7 +638,7 @@ struct MascotTourOverlay: View {
                             .padding(.horizontal, 16)
                             .frame(minHeight: DS.Metrics.minHitTarget)
                             .background(accent, in: Capsule())
-                            .overlay(Capsule().stroke(DS.Colors.ink, lineWidth: 2))
+                            .overlay(Capsule().stroke(DS.Colors.edge, lineWidth: 1))
                     }
                     .buttonStyle(PressScaleStyle())
                     .accessibilityIdentifier("tour-next")
@@ -647,7 +647,7 @@ struct MascotTourOverlay: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(DS.Colors.textPrimary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.Colors.ink, lineWidth: 2))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DS.Colors.edge, lineWidth: 1))
             .shadow(color: .black.opacity(0.4), radius: 10, y: 8)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: step.id)
     }

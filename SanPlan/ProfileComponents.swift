@@ -27,7 +27,7 @@ struct ProfileHeader: View {
                 Text(title)
                     .font(DS.Fonts.title)
                     .foregroundColor(DS.Colors.textPrimary)
-                    .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                    .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
@@ -139,7 +139,7 @@ struct ProfileNavRow: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(marker)
                         .frame(width: 12, height: 12)
-                        .background(RoundedRectangle(cornerRadius: 3).fill(DS.Colors.ink).offset(x: 2, y: 2))
+                        .background(RoundedRectangle(cornerRadius: 3).fill(DS.Colors.drop).offset(y: 2))
                         .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.18, d: 1, tx: 2, ty: 0))
                         .padding(.leading, 16)
                         .accessibilityHidden(true)
@@ -224,7 +224,7 @@ private struct ArnaSwitchBody: View {
                         .padding(3)
                 }
                 .frame(width: 52, height: 32)
-                .overlay(Capsule().stroke(DS.Colors.ink, lineWidth: 2))
+                .overlay(Capsule().stroke(DS.Colors.edge, lineWidth: 1))
                 .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
@@ -254,7 +254,7 @@ struct ProfileChip: View {
                     if selected {
                         RoundedRectangle(cornerRadius: 14)
                             .fill(color)
-                            .background(RoundedRectangle(cornerRadius: 14).fill(DS.Colors.ink).offset(x: 3, y: 3))
+                            .background(RoundedRectangle(cornerRadius: 14).fill(DS.Colors.drop).offset(y: 2))
                             .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.087, d: 1, tx: 2, ty: 0))
                     } else {
                         RoundedRectangle(cornerRadius: 14).fill(DS.Colors.surface)

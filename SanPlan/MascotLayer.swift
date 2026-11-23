@@ -288,7 +288,7 @@ struct PetLayer: View {
             .padding(.vertical, 10)
             .frame(width: bubbleWidth, alignment: .leading)
             .background(DS.Colors.textPrimary, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.Colors.ink, lineWidth: 2))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(DS.Colors.edge, lineWidth: 1))
             .shadow(color: .black.opacity(0.4), radius: 10, y: 8)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { bubbleSize = $0 }
             .offset(x: origin.x, y: origin.y)

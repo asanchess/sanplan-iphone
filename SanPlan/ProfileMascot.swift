@@ -97,7 +97,7 @@ private struct SkinTile: View {
                 if worn { RoundedRectangle(cornerRadius: 16).strokeBorder(DS.Colors.today, lineWidth: 2) }
             }
             .background {
-                if worn { RoundedRectangle(cornerRadius: 16).fill(DS.Colors.ink).offset(x: 3, y: 3) }
+                if worn { RoundedRectangle(cornerRadius: 16).fill(DS.Colors.drop).offset(y: 2) }
             }
             .contentShape(Rectangle())
         }

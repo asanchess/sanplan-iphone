@@ -54,7 +54,7 @@ struct ArnaTabBar: View {
                                     RoundedRectangle(cornerRadius: 9)
                                         .fill(tab.accent.opacity(0.2))
                                         .overlay(RoundedRectangle(cornerRadius: 9).stroke(tab.accent, lineWidth: 2))
-                                        .background(RoundedRectangle(cornerRadius: 9).fill(DS.Colors.ink).offset(x: 3, y: 3))
+                                        .background(RoundedRectangle(cornerRadius: 9).fill(DS.Colors.drop).offset(y: 2))
                                         .transformEffect(CGAffineTransform(a: 1, b: 0, c: -0.14, d: 1, tx: 2, ty: 0))
                                 }
                             }
@@ -203,7 +203,7 @@ struct UndoToast: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button("Отменить") { center.performUndo() }
                     .font(DS.Fonts.text(15, .heavy, relativeTo: .subheadline))
-                    .foregroundColor(DS.Colors.canvas)
+                    .foregroundColor(DS.Colors.ink)
                     .padding(.horizontal, 14)
                     .frame(minHeight: 36)
                     .background(DS.Colors.today, in: Capsule())
@@ -353,7 +353,7 @@ struct RecentlyDeletedScreen: View {
             .padding(.top, 18)
             .padding(.bottom, 24)
         }
-        .background(DS.Colors.canvas.ignoresSafeArea())
+        .background(DS.Colors.backdrop.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         // `presenting:` hands the request to the buttons even after the binding has been reset by the dismissal.
         .alert(purgeTitle, isPresented: Binding(get: { purgeRequest != nil }, set: { if !$0 { purgeRequest = nil } }),

@@ -882,7 +882,7 @@ struct WorkoutSummaryView: View {
                     Text("Тренировка завершена")
                         .font(DS.Fonts.display(26, relativeTo: .title))
                         .foregroundColor(DS.Colors.textPrimary)
-                        .shadow(color: DS.Colors.ink, radius: 0, x: 3, y: 3)
+                        .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                         .multilineTextAlignment(.center)
                     Text(done == planned ? "Все подходы сделаны." : "\(done) из \(planned) подходов.")
                         .font(.subheadline)

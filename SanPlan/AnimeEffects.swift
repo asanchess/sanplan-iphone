@@ -64,7 +64,7 @@ private struct AnimeBurst: ViewModifier {
                 .font(DS.Fonts.display(64, relativeTo: .largeTitle))
                 .foregroundColor(DS.Colors.accent)
                 .shadow(color: DS.Colors.textPrimary, radius: 0, x: -2, y: -2)
-                .shadow(color: DS.Colors.ink, radius: 0, x: 4, y: 4)
+                .shadow(color: DS.Colors.drop, radius: 3, y: 2)
                 .rotationEffect(.degrees(-12))
                 .fixedSize()
         } else {
@@ -106,7 +106,7 @@ private struct MangaPanel: ViewModifier {
                 }
             }
             .overlay(Rectangle().stroke(DS.Colors.textPrimary, lineWidth: 3))
-            .background(Rectangle().fill(DS.Colors.ink).offset(x: 4, y: 4))
+            .background(Rectangle().fill(DS.Colors.drop).offset(y: 2))
     }
 }
 
@@ -122,7 +122,7 @@ struct MangaCaption: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(DS.Colors.textPrimary)
-            .overlay(Rectangle().stroke(DS.Colors.ink, lineWidth: 2))
+            .overlay(Rectangle().stroke(DS.Colors.edge, lineWidth: 1))
             .rotationEffect(.degrees(-2))
     }
 }
