@@ -288,10 +288,7 @@ enum MascotSelfTalk {
 
     static func start(_ plan: PlanItem) -> Date? {
         guard let day = plan.date, let time = plan.time else { return nil }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: plan.timeZone) ?? .current
-        f.dateFormat = "yyyy-MM-dd HH:mm"
+        let f = FormatterCache.date("yyyy-MM-dd HH:mm", locale: "en_US_POSIX", timeZone: TimeZone(identifier: plan.timeZone) ?? .current)
         return f.date(from: "\(day) \(time.prefix(5))")
     }
 
