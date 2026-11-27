@@ -29,19 +29,27 @@ public struct FinanceInsights: Equatable {
         }
         let expenses = counted.filter { $0.kind == "expense" && ($0.date ?? "").hasPrefix(month) && ($0.date ?? "") <= today }
 
-        let byCategory = Dictionary(grouping: expenses, by: { $0.category ?? "Без категории" })
-            .map { Slice(name: $0.key, amountMinor: $0.value.reduce(0) { $0 + ($1.amountMinor ?? 0) }) }
-            .filter { $0.amountMinor > 0 }
-            .sorted { $0.amountMinor != $1.amountMinor ? $0.amountMinor > $1.amountMinor : $0.name < $1.name }
+        // Typed steps: as one chain the compiler gives up on type-checking these.
+        func ranked(_ groups: [String: [FinanceRecord]], name: (String, [FinanceRecord]) -> String) -> [Slice] {
+            var slices: [Slice] = []
+            for (key, records) in groups {
+                let sum = records.reduce(Int64(0)) { $0 + ($1.amountMinor ?? 0) }
+                if sum > 0 { slices.append(Slice(name: name(key, records), amountMinor: sum)) }
+            }
+            return slices.sorted { (a: Slice, b: Slice) -> Bool in
+                if a.amountMinor != b.amountMinor { return a.amountMinor > b.amountMinor }
+                return a.name < b.name
+            }
+        }
+        let categoryGroups = Dictionary(grouping: expenses) { (r: FinanceRecord) -> String in r.category ?? "Без категории" }
+        let byCategory = ranked(categoryGroups) { key, _ in key }
         let categories = byCategory.count > 6
             ? Array(byCategory.prefix(5)) + [Slice(name: "Остальное", amountMinor: byCategory.dropFirst(5).reduce(0) { $0 + $1.amountMinor })]
             : byCategory
 
         // «MAGNUM» and «Magnum» are one merchant; the name shown is the one seen first.
-        let byMerchant = Dictionary(grouping: expenses, by: { MerchantCategories.key($0.merchant ?? $0.title) })
-            .map { Slice(name: $0.value[0].merchant ?? $0.value[0].title, amountMinor: $0.value.reduce(0) { $0 + ($1.amountMinor ?? 0) }) }
-            .filter { $0.amountMinor > 0 }
-            .sorted { $0.amountMinor != $1.amountMinor ? $0.amountMinor > $1.amountMinor : $0.name < $1.name }
+        let merchantGroups = Dictionary(grouping: expenses) { (r: FinanceRecord) -> String in MerchantCategories.key(r.merchant ?? r.title) }
+        let byMerchant = ranked(merchantGroups) { _, records in records[0].merchant ?? records[0].title }
 
         let expense = total("expense", month)
         var forecast: Int64?

@@ -430,9 +430,8 @@ public enum BankStatementParser {
         if let m = match(regex(#"(?:Expenses amount|Сумма расходов) ?(?:(?:Income amount|Сумма доходов) ?)?"# + sum
                                + #"\D{0,5}?(?:(?:Income amount|Сумма доходов) ?)?"# + sum), flatText),
            let expenses = wholeOrMinor(m[1]), let income = wholeOrMinor(m[2]) {
-            // The header adds kopecks the rows round to whole tenge: at most one tenge a row apart.
-            let slack = Int64(max(100, starts.count)) * 100
-            guard abs(expenses - spent) <= slack, abs(income - received) <= slack else {
+            // The header adds kopecks the rows round away: allow 2 ₸ or 0.01 % of the total, whichever is more.
+            guard abs(expenses - spent) <= max(200, expenses / 10_000), abs(income - received) <= max(200, income / 10_000) else {
                 throw StatementError.mismatch("суммы строк не сходятся с итогами в шапке отчёта")
             }
         }
