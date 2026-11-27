@@ -47,19 +47,16 @@ struct StatementsSection: View {
     let today: String
     @Binding var errorMessage: String?
     @Binding var statusMessage: String?
-    /// The PDF the owner picked in the Money screen's file importer.
-    @Binding var pickedFile: URL?
+    /// Reading and the offers to merge live in `StatementImportFlow`.
+    let isReading: Bool
+    @Binding var suggestions: [StatementImport.MergeSuggestion]
     let onPick: () -> Void
 
-    @State private var isReading = false
-    @State private var pending: PendingStatement?
-    /// More accounts from the same file, shown one after another.
-    @State private var queued: [PendingStatement] = []
-    @ObservedObject private var inbox = StatementInbox.shared
-    @State private var suggestions: [StatementImport.MergeSuggestion] = []
     @State private var importToDelete: FinanceImport?
     /// «История загрузок» starts folded; not kept between launches.
     @State private var showsImports = false
+    @State private var showsAccounts = false
+    @State private var showsReview = false
 
     @Environment(\.sectionAccent) private var accent
 
@@ -78,6 +75,18 @@ struct StatementsSection: View {
                 .font(DS.Fonts.text(13, .medium, relativeTo: .caption))
                 .foregroundColor(DS.Colors.textSecondary)
 
+            let review = store.state.records.filter { $0.status == "review" }.count
+            if review > 0 {
+                MoneyOutlineButton("Проверь · \(review)", icon: "questionmark.circle", isLoading: false) {
+                    showsReview = true
+                }
+            }
+            if !(store.state.ledger?.accounts ?? []).isEmpty {
+                MoneyOutlineButton("Счета и остатки", icon: "creditcard", isLoading: false) {
+                    showsAccounts = true
+                }
+            }
+
             ForEach(suggestions) { suggestion in
                 mergeRow(suggestion)
             }
@@ -95,15 +104,11 @@ struct StatementsSection: View {
                 }
             }
         }
-        .onChange(of: pickedFile) { _, url in
-            guard let url else { return }
-            pickedFile = nil
-            read(url)
+        .sheet(isPresented: $showsAccounts) {
+            AccountsSheet(store: store, today: today) { showsAccounts = false }
         }
-        // A PDF shared from the bank app («Поделиться → A-san») waits in the inbox until this section is on screen.
-        .onReceive(inbox.$files) { _ in takeShared() }
-        .sheet(item: $pending, onDismiss: showNext) { pending in
-            StatementPreviewSheet(pending: pending, onImport: { confirm(pending) }, onCancel: { self.pending = nil })
+        .sheet(isPresented: $showsReview) {
+            AccountReviewSheet(store: store, today: today) { showsReview = false }
         }
         .confirmationDialog(
             "Удалить выписку и все её операции?",
@@ -166,72 +171,6 @@ struct StatementsSection: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-    private func read(_ url: URL) {
-        isReading = true
-        errorMessage = nil
-        let rules = store.state.merchantCategories
-        Task {
-            let outcome: Result<[PendingStatement], Error> = await Task.detached(priority: .userInitiated) {
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let text = try BankStatementParser.text(ofPDFAt: url)
-                    // One file can hold several accounts; each becomes its own import.
-                    return .success(try BankStatementParser.parseAll(text).map { statement in
-                        let importId = "imp-" + UUID().uuidString.prefix(8).lowercased()
-                        let preview = StatementImport.preview(statement, importId: importId, rules: rules)
-                        return PendingStatement(id: importId, fileName: url.lastPathComponent, preview: preview)
-                    })
-                } catch {
-                    return .failure(error)
-                }
-            }.value
-            isReading = false
-            inbox.discard(url)
-            switch outcome {
-            case .success(let statements):
-                queued.append(contentsOf: statements)
-                if pending == nil { showNext() }
-            case .failure(let error):
-                errorMessage = error.localizedDescription
-                takeShared()
-            }
-        }
-    }
-
-    /// The next account of the file, or else the next shared file.
-    private func showNext() {
-        if !queued.isEmpty {
-            pending = queued.removeFirst()
-        } else {
-            takeShared()
-        }
-    }
-
-    private func takeShared() {
-        guard !isReading, pending == nil, queued.isEmpty, let url = inbox.next() else { return }
-        read(url)
-    }
-
-    private func confirm(_ pending: PendingStatement) {
-        do {
-            let next = try StatementImport.apply(pending.preview, to: store.state, importId: pending.id, fileName: pending.fileName, today: today)
-            let added = next.records.filter { $0.importId == pending.id }.count
-            let importId = pending.id
-            try store.replaceState(with: next, today: today)
-            suggestions = StatementImport.mergeSuggestions(in: store.state, importId: pending.id)
-            UndoCenter.shared.show("Выписка загружена: \(MoneyFormat.operations(added))") { [store, today] in
-                try? store.replaceState(with: StatementImport.deleteImport(importId, from: store.state), today: today)
-            }
-            let skipped = pending.preview.records.count - added
-            statusMessage = "Добавлено: \(MoneyFormat.operations(added))."
-                + (skipped > 0 ? " Уже были загружены раньше: \(skipped)." : "")
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        self.pending = nil
-    }
-
     private func merge(_ suggestion: StatementImport.MergeSuggestion) {
         do {
             try store.replaceState(with: StatementImport.merge(suggestion, in: store.state), today: today)
@@ -250,6 +189,112 @@ struct StatementsSection: View {
             errorMessage = error.localizedDescription
         }
         importToDelete = nil
+    }
+}
+
+/// Statements picked or shared: one preview after another, then the report. It sits on the root of the Money
+/// screen, which stays when the first import swaps the empty screen for the tabs.
+struct StatementImportFlow: ViewModifier {
+    @ObservedObject var store: FinanceStore
+    let today: String
+    @Binding var pickedFiles: [URL]
+    @Binding var isReading: Bool
+    @Binding var suggestions: [StatementImport.MergeSuggestion]
+    @Binding var errorMessage: String?
+
+    @State private var pending: PendingStatement?
+    /// More statements of the picked files, shown one after another.
+    @State private var queued: [PendingStatement] = []
+    @State private var batch = ImportBatch()
+    @State private var report: ImportBatch?
+    @ObservedObject private var inbox = StatementInbox.shared
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: pickedFiles) { _, urls in
+                guard !urls.isEmpty else { return }
+                pickedFiles = []
+                read(urls)
+            }
+            // A PDF shared from the bank app («Поделиться → A-san») waits in the inbox until this screen is shown.
+            .onReceive(inbox.$files) { _ in showNext() }
+            .sheet(item: $pending, onDismiss: showNext) { pending in
+                StatementPreviewSheet(pending: pending, onImport: { confirm(pending) }, onCancel: { self.pending = nil })
+            }
+            .sheet(item: $report, onDismiss: showNext) { batch in
+                ImportReportSheet(store: store, today: today, batch: batch) { report = nil }
+            }
+    }
+
+    private func read(_ urls: [URL]) {
+        isReading = true
+        errorMessage = nil
+        let rules = store.state.merchantCategories
+        Task {
+            let outcomes = await Task.detached(priority: .userInitiated) { () -> [(URL, Result<[PendingStatement], Error>)] in
+                urls.map { url -> (URL, Result<[PendingStatement], Error>) in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    return (url, Result<[PendingStatement], Error> {
+                        let text = try BankStatementParser.text(ofPDFAt: url)
+                        // One file can hold several accounts; each becomes its own import.
+                        return try BankStatementParser.parseAll(text).map { statement in
+                            let importId = "imp-" + UUID().uuidString.prefix(8).lowercased()
+                            let preview = StatementImport.preview(statement, importId: importId, rules: rules)
+                            return PendingStatement(id: importId, fileName: url.lastPathComponent, preview: preview)
+                        }
+                    })
+                }
+            }.value
+            var failures: [String] = []
+            for (url, outcome) in outcomes {
+                inbox.discard(url)
+                switch outcome {
+                case .success(let statements): queued.append(contentsOf: statements)
+                case .failure(let error):
+                    failures.append(urls.count > 1 ? "\(url.lastPathComponent): \(error.localizedDescription)" : error.localizedDescription)
+                }
+            }
+            if !failures.isEmpty { errorMessage = failures.joined(separator: "\n") }
+            isReading = false
+            showNext()
+        }
+    }
+
+    /// The next statement of the picked files, then the next shared file, then what all of them brought.
+    private func showNext() {
+        guard !isReading, pending == nil, report == nil else { return }
+        if !queued.isEmpty {
+            pending = queued.removeFirst()
+        } else if let url = inbox.next() {
+            read([url])
+        } else if !batch.isEmpty {
+            report = batch
+            batch = ImportBatch()
+        }
+    }
+
+    private func confirm(_ pending: PendingStatement) {
+        let before = FinanceLedger.operationCount(store.state.records)
+        let lines = FinanceLedger.operationCount(pending.preview.records)
+        do {
+            let next = try StatementImport.apply(pending.preview, to: store.state, importId: pending.id, fileName: pending.fileName, today: today)
+            let importId = pending.id
+            try store.replaceState(with: next, today: today)
+            let added = max(0, FinanceLedger.operationCount(store.state.records) - before)
+            batch.importIds.insert(importId)
+            batch.added += added
+            batch.already += max(0, lines - added)
+            suggestions += StatementImport.mergeSuggestions(in: store.state, importId: importId)
+            UndoCenter.shared.show("Выписка загружена: \(MoneyFormat.operations(added))") { [store, today] in
+                try? store.replaceState(with: StatementImport.deleteImport(importId, from: store.state), today: today)
+            }
+        } catch StatementError.alreadyImported {
+            batch.already += lines
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        self.pending = nil
     }
 }
 

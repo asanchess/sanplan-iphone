@@ -52,7 +52,10 @@ public struct FinanceScreen: View {
     @State private var showImportSheet: Bool = false
     /// What the single file importer is open for; SwiftUI presents only one importer per screen.
     @State private var importsStatement = false
-    @State private var pickedStatement: URL?
+    @State private var pickedStatements: [URL] = []
+    @State private var readsStatement = false
+    @State private var mergeSuggestions: [StatementImport.MergeSuggestion] = []
+    @State private var confirmsClear = false
     /// Only for opening an older backup protected by a password.
     @State private var vaultPasswordPrompt: String = ""
     @State private var isExporting: Bool = false
@@ -233,18 +236,23 @@ public struct FinanceScreen: View {
         .fileImporter(
             isPresented: $showImportSheet,
             allowedContentTypes: importsStatement ? [.pdf] : [.json],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: importsStatement
         ) { result in
             if importsStatement {
                 importsStatement = false
                 switch result {
-                case .success(let urls): pickedStatement = urls.first
+                case .success(let urls): pickedStatements = urls
                 case .failure(let error): errorMessage = error.localizedDescription
                 }
             } else {
                 handleImportResult(result)
             }
         }
+        .modifier(StatementImportFlow(
+            store: store, today: todayString, pickedFiles: $pickedStatements, isReading: $readsStatement,
+            suggestions: $mergeSuggestions, errorMessage: $errorMessage
+        ))
+        .modifier(ClearFinancesFlow(isAsking: $confirmsClear, clear: clearFinances, pick: pickStatements))
         .alert("Удалить запись?", isPresented: Binding(
             get: { recordToDelete != nil },
             set: { if !$0 { recordToDelete = nil } }
@@ -389,7 +397,10 @@ public struct FinanceScreen: View {
                 onCategory: { recordToCategorize = $0 }
             )
             ManualEntriesCard(state: store.state) { recordToEdit = $0 }
-            ReconcileCard(snapshot: snapshot) { showReconcile = true }
+            // With account balances the total comes from the accounts («Счета и остатки»).
+            if !(store.state.ledger?.accounts ?? []).contains(where: { $0.anchorDate != nil }) {
+                ReconcileCard(snapshot: snapshot) { showReconcile = true }
+            }
             vaultActionsSection
         }
     }
@@ -423,12 +434,27 @@ public struct FinanceScreen: View {
             today: todayString,
             errorMessage: $errorMessage,
             statusMessage: $statusMessage,
-            pickedFile: $pickedStatement,
-            onPick: {
-                importsStatement = true
-                showImportSheet = true
-            }
+            isReading: readsStatement,
+            suggestions: $mergeSuggestions,
+            onPick: pickStatements
         )
+    }
+
+    private func pickStatements() {
+        importsStatement = true
+        showImportSheet = true
+    }
+
+    private func clearFinances() -> Bool {
+        do {
+            try store.clearFinances(today: todayString)
+            mergeSuggestions = []
+            tab = .operations
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
     }
 
     /// Every budget change goes through here: one pure function on the state, then the encrypted save.
@@ -813,6 +839,10 @@ public struct FinanceScreen: View {
                     PillButton("Восстановить из копии", style: .secondary) {
                         importsStatement = false
                         showImportSheet = true
+                    }
+
+                    if !store.state.records.isEmpty || store.state.ledger != nil {
+                        PillButton("Очистить финансы", style: .destructive) { confirmsClear = true }
                     }
                 }
 

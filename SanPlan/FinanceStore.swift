@@ -127,6 +127,10 @@ public final class FinanceStore: ObservableObject {
             state = clean
             refreshSummary(today: FinanceText.today())
         }
+        // The website saves a record without its account fields; the statement gives them back.
+        if collection.hasSynced, let restored = FinanceLedger.upkeep(state) {
+            try? updateState(restored, today: FinanceText.today())
+        }
         takeInBankFeed(today: FinanceText.today())
         Task { await takeInStatements(today: FinanceText.today()) }
     }
@@ -365,7 +369,7 @@ public final class FinanceStore: ObservableObject {
     }
 
     private func isEmpty(_ s: FinanceState) -> Bool {
-        s.records.isEmpty && (s.imports ?? []).isEmpty && s.budget == nil && (s.merchantCategories ?? [:]).isEmpty
+        s.records.isEmpty && (s.imports ?? []).isEmpty && s.budget == nil && (s.merchantCategories ?? [:]).isEmpty && s.ledger == nil
     }
 
     /// Writes the difference between the collection and `next`.
@@ -405,6 +409,12 @@ public final class FinanceStore: ObservableObject {
     public func replaceState(with newState: FinanceState, today: String) throws {
         let clean = try validateFinance(newState)
         try updateState(clean, today: today)
+    }
+
+    /// «Очистить финансы»: only envelopes and category rules stay; waiting payments and statements go too.
+    public func clearFinances(today: String) throws {
+        try updateState(try FinanceLedger.cleared(state), today: today)
+        discardBankFeed()
     }
 
     public func reset() {
@@ -485,7 +495,7 @@ public final class FinanceStore: ObservableObject {
         do {
             let decoded = try JSONDecoder().decode(FinanceState.self, from: data)
             let clean = try validateFinance(decoded)
-            self.state = clean
+            self.state = FinanceLedger.upkeep(clean) ?? clean
             self.notice = nil
         } catch {
             preserveCorruptFile()

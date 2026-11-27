@@ -1,0 +1,1490 @@
+The report includes data for the following products:
+Card accounts:
+400000******0001
+400000******0002
+400000******0003
+KZ*0004
+KZ*0005
+Date
+Operation
+type
+Product
+Account
+Category
+MCC
+Code
+Operation name
+Amount
+Description
+2026-11-
+24
+Expense
+Card
+account
+400000******0002
+Supermarkets
+5411
+MERCHANT 023
+-3 040 
+₸
+MERCHANT 023
+2026-11-
+24
+Expense
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+106 000 
+₸
+Transfer between own cards
+2026-11-
+24
+Income
+Card
+account
+400000******0001
+Transfers between own
+accounts
+-
+Transfer between own cards
+106 000 
+₸
+Transfer between own cards
+2026-11-
+24
+Expense
+Card
+account
+400000******0002
+Cafes and restaurants
+5814
+MERCHANT 005
+-8 400 
+₸
+MERCHANT 005
+2026-11-
+24
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-11-
+24
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-22 000 
+₸
+Outgoing transfer
+2026-11-
+24
+Expense
+Card
+account
+400000******0002
+Cafes and restaurants
+5814
+MERCHANT 285
+-1 600 
+₸
+MERCHANT 285
+2026-11-
+24
+Expense
+Card
+account
+400000******0002
+Supermarkets
+5411
+MERCHANT 023
+-1 360 
+₸
+MERCHANT 023
+2026-11-
+24
+Income
+Card
+account
+KZ*0005
+Salary
+-
+АО "Работодатель"
++104 744 
+₸
+АО "Работодатель"
+2026-11-
+21
+Income
+Card
+account
+400000******0003
+Refill
+-
+MERCHANT 279
++712 
+₸
+MERCHANT 279
+2026-11-
+21
+Income
+Card
+account
+400000******0003
+Refill
+-
+MERCHANT 279
++712 
+₸
+MERCHANT 279
+2026-11-
+19
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+164 000 
+₸
+Transfer between own cards
+2026-11-
+19
+Income
+Card
+account
+400000******0001
+Transfers between own
+accounts
+-
+Transfer between own cards
+164 000 
+₸
+Transfer between own cards
+2026-11-
+19
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Transfer by phone number : Olga Ivanovna
+Sidorova
+-67 000 
+₸
+Transfer by phone number : Olga
+Ivanovna Sidorova
+2026-11-
+15
+Expense
+Card
+account
+400000******0002
+Clothing, Shoes,
+Accessories
+5651
+MERCHANT 276
+-12 040 
+₸
+MERCHANT 276
+2026-11-
+14
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Dana Petrova
++2 100 
+₸
+Credit to account : Dana
+Petrova
+2026-11-
+13
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+10 000 
+₸
+Transfer between own cards
+2026-11-
+13
+Income
+Card
+account
+400000******0001
+Transfers between own
+accounts
+-
+Transfer between own cards
+10 000 
+₸
+Transfer between own cards
+2026-11-
+13
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++100 000 
+₸
+Credit to account : Aigul Testova
+2026-11-
+13
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-26 742 
+₸
+Outgoing transfer
+2026-11-
+13
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-11-
+13
+Expense
+Card
+account
+400000******0002
+Supermarkets
+5411
+MERCHANT 278
+-15 316 
+₸
+MERCHANT 278
+2026-11-
+12
+Expense
+Card
+account
+400000******0003
+Entertainment
+5734
+MERCHANT 279
+-19 980 
+₸
+MERCHANT 279
+This analytical report has been prepared solely for informational purposes based on data on the movement of funds on client products. The report is not an official document, is not intended for submission to government authorities and has no
+legal force.
+Analytical report on the transactions of customer
+TESTOV ARMAN for the period from 27.11.2025 to 27.11.2026
+Expenses amount
+515 506 
+₸
+Income amount
+1 040 386 
+₸
+<<PAGE>>
+2026-11-
+10
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+44 000 
+₸
+Transfer between own cards
+2026-11-
+10
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+44 000 
+₸
+Transfer between own cards
+2026-11-
+10
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+10 000 
+₸
+Transfer between own cards
+2026-11-
+10
+Income
+Card
+account
+400000******0001
+Transfers between own
+accounts
+-
+Transfer between own cards
+10 000 
+₸
+Transfer between own cards
+2026-11-
+10
+Expense
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+157 458 
+₸
+Transfer between own cards
+2026-11-
+10
+Income
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+157 458 
+₸
+Transfer between own cards
+2026-11-
+09
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5814
+MERCHANT 277
+-3 790 
+₸
+MERCHANT 277
+2026-11-
+06
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 009
+-1 000 
+₸
+MERCHANT 009
+2026-11-
+06
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 281
+-19 500 
+₸
+MERCHANT 281
+2026-11-
+05
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 288
+-2 230 
+₸
+MERCHANT 288
+2026-11-
+05
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++100 000 
+₸
+Credit to account : Aigul Testova
+2026-
+10-29
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5814
+MERCHANT 010
+-19 000 
+₸
+MERCHANT 010
+2026-
+10-26
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-40 400 
+₸
+Outgoing transfer
+2026-
+10-26
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-
+10-25
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++80 000 
+₸
+Credit to account : Aigul Testova
+2026-
+10-25
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 282
+-8 882 
+₸
+MERCHANT 282
+2026-
+10-23
+Income
+Card
+account
+KZ*0005
+Salary
+-
+АО "Работодатель"
++209 488 
+₸
+АО "Работодатель"
+2026-
+10-16
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 293
+-2 120 
+₸
+MERCHANT 293
+2026-
+10-15
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++12 000 
+₸
+Credit to account : Aigul Testova
+2026-
+10-13
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-700 
+₸
+MERCHANT 023
+2026-
+10-12
+Expense
+Card
+account
+400000******0003
+Entertainment
+5734
+MERCHANT 279
+-20 692 
+₸
+MERCHANT 279
+2026-
+10-12
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++100 000 
+₸
+Credit to account : Aigul Testova
+2026-
+10-09
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 293
+-630 
+₸
+MERCHANT 293
+2026-
+10-09
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 293
+-600 
+₸
+MERCHANT 293
+2026-
+10-09
+Income
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 280
++600 
+₸
+MERCHANT 280
+2026-
+10-09
+Income
+Bonuses
+Bonuses
+-
+Accrual of bonuses
++6 
+₸
+Accrual of bonuses
+2026-
+10-09
+Expense
+Card
+account
+KZ*0004
+Cafes and restaurants
+5814
+MERCHANT 286
+-1 200 
+₸
+MERCHANT 286
+2026-
+10-09
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 075
+-900 
+₸
+MERCHANT 075
+2026-
+10-08
+Income
+Bonuses
+Bonuses
+-
+Accrual of bonuses
++16 
+₸
+Accrual of bonuses
+2026-
+10-08
+Expense
+Card
+account
+KZ*0004
+Cafes and restaurants
+5814
+MERCHANT 290
+-3 400 
+₸
+MERCHANT 290
+2026-
+10-08
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-1 240 
+₸
+MERCHANT 023
+2026-
+10-08
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5812
+MERCHANT 292
+-3 800 
+₸
+MERCHANT 292
+2026-
+10-07
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+30 000 
+₸
+Transfer between own cards
+Date
+Operation
+type
+Product
+Account
+Category
+MCC
+Code
+Operation name
+Amount
+Description
+This analytical report has been prepared solely for informational purposes based on data on the movement of funds on client products. The report is not an official document, is not intended for submission to government authorities and has no
+legal force.
+<<PAGE>>
+2026-
+10-07
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+30 000 
+₸
+Transfer between own cards
+2026-
+10-07
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5812
+MERCHANT 294
+-1 200 
+₸
+MERCHANT 294
+2026-
+10-07
+Expense
+Card
+account
+KZ*0004
+Transport
+4131
+MERCHANT 274
+-1 000 
+₸
+MERCHANT 274
+2026-
+10-07
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5441
+MERCHANT 031
+-700 
+₸
+MERCHANT 031
+2026-
+10-07
+Expense
+Card
+account
+KZ*0004
+Utilities and
+communications
+4814
+MERCHANT 275
+-600 
+₸
+MERCHANT 275
+2026-
+10-07
+Expense
+Card
+account
+KZ*0004
+Utilities and
+communications
+4814
+MERCHANT 275
+-17 000 
+₸
+MERCHANT 275
+2026-
+10-07
+Expense
+Card
+account
+KZ*0004
+Utilities and
+communications
+4814
+MERCHANT 275
+-200 
+₸
+MERCHANT 275
+2026-
+10-06
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++100 000 
+₸
+Credit to account : Aigul Testova
+2026-
+10-06
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5812
+MERCHANT 289
+-1 800 
+₸
+MERCHANT 289
+2026-
+10-06
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5814
+MERCHANT 286
+-1 200 
+₸
+MERCHANT 286
+2026-
+09-29
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++40 000 
+₸
+Credit to account : Aigul Testova
+2026-
+09-26
+Expense
+Card
+account
+KZ*0005
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-
+09-26
+Expense
+Card
+account
+KZ*0005
+Outgoing transfers
+-
+Outgoing transfer
+-12 000 
+₸
+Outgoing transfer
+2026-
+09-26
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+16 000 
+₸
+Transfer between own cards
+2026-
+09-26
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+16 000 
+₸
+Transfer between own cards
+2026-
+09-25
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-700 
+₸
+MERCHANT 023
+2026-
+09-24
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 291
+-2 200 
+₸
+MERCHANT 291
+2026-
+09-24
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 287
+-1 800 
+₸
+MERCHANT 287
+2026-
+09-23
+Expense
+Card
+account
+KZ*0004
+Furniture
+5200
+MERCHANT 297
+-800 
+₸
+MERCHANT 297
+2026-
+09-23
+Income
+Bonuses
+Bonuses
+-
+Accrual of bonuses
++4 
+₸
+Accrual of bonuses
+2026-
+09-20
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-5 000 
+₸
+Outgoing transfer
+2026-
+09-20
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-
+09-19
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-6 460 
+₸
+MERCHANT 023
+2026-
+09-19
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 302
+-900 
+₸
+MERCHANT 302
+2026-
+09-19
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5441
+MERCHANT 031
+-700 
+₸
+MERCHANT 031
+2026-
+09-18
+Expense
+Card
+account
+400000******0002
+Outgoing transfers
+-
+Transfer by phone number : Boris Petrov
+-1 200 
+₸
+Transfer by phone number : Boris
+Petrov
+2026-
+09-18
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-700 
+₸
+MERCHANT 023
+2026-
+09-17
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-13 000 
+₸
+Outgoing transfer
+2026-
+09-17
+Expense
+Card
+account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-
+09-17
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 075
+-1 100 
+₸
+MERCHANT 075
+2026-
+09-17
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5812
+MERCHANT 298
+-22 814 
+₸
+MERCHANT 298
+2026-
+09-17
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+30 000 
+₸
+Transfer between own cards
+2026-
+09-17
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+30 000 
+₸
+Transfer between own cards
+Date
+Operation
+type
+Product
+Account
+Category
+MCC
+Code
+Operation name
+Amount
+Description
+This analytical report has been prepared solely for informational purposes based on data on the movement of funds on client products. The report is not an official document, is not intended for submission to government authorities and has no
+legal force.
+<<PAGE>>
+This analytical report has been prepared solely for informational purposes based on data on the movement of funds on client products. The report is not an official document, is not intended for submission to government authorities and has no
+legal force.
+2026-
+09-16
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 282
+-4 220 
+₸
+MERCHANT 282
+2026-
+09-14
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5814
+MERCHANT 014
+-6 600 
+₸
+MERCHANT 014
+2026-
+09-13
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 080
+-1 196 
+₸
+MERCHANT 080
+2026-
+09-13
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-4 580 
+₸
+MERCHANT 023
+2026-
+09-12
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 281
+-3 100 
+₸
+MERCHANT 281
+2026-
+09-12
+Expense
+Card
+account
+400000******0003
+Entertainment
+5734
+MERCHANT 279
+-20 692 
+₸
+MERCHANT 279
+2026-
+09-12
+Expense
+Card
+account
+400000******0002
+Outgoing transfers
+-
+Transfer to card 
+*0006
+-20 400 
+₸
+Transfer to card 
+*0006
+2026-
+09-12
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-1 600 
+₸
+MERCHANT 023
+2026-
+09-11
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++88 000 
+₸
+Credit to account : Aigul Testova
+2026-
+09-10
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5814
+MERCHANT 277
+-5 680 
+₸
+MERCHANT 277
+2026-
+09-09
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-1 400 
+₸
+MERCHANT 023
+2026-
+09-09
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 283
+-1 680 
+₸
+MERCHANT 283
+2026-
+09-09
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 023
+-2 320 
+₸
+MERCHANT 023
+2026-
+09-08
+Expense
+Card
+account
+400000******0003
+Cafes and restaurants
+5812
+MERCHANT 295
+-590 
+₸
+MERCHANT 295
+2026-
+09-08
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 296
+-3 674 
+₸
+MERCHANT 296
+2026-
+09-08
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 299
+-900 
+₸
+MERCHANT 299
+2026-
+09-07
+Expense
+Card
+account
+400000******0003
+Utilities and
+communications
+4814
+MERCHANT 300
+-800 
+₸
+MERCHANT 300
+2026-
+09-07
+Expense
+Card
+account
+400000******0003
+Utilities and
+communications
+4814
+MERCHANT 300
+-17 000 
+₸
+MERCHANT 300
+2026-
+09-07
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 301
+-2 100 
+₸
+MERCHANT 301
+2026-
+09-07
+Expense
+Card
+account
+400000******0003
+Supermarkets
+5411
+MERCHANT 284
+-4 566 
+₸
+MERCHANT 284
+2026-
+09-07
+Expense
+Card
+account
+400000******0003
+Health and care
+5912
+MERCHANT 281
+-9 370 
+₸
+MERCHANT 281
+2026-
+09-07
+Expense
+Card
+account
+400000******0002
+Transfers between own
+accounts
+-
+Transfer between own cards
+100 000 
+₸
+Transfer between own cards
+2026-
+09-07
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+100 000 
+₸
+Transfer between own cards
+2026-
+09-07
+Income
+Card
+account
+KZ*0004
+Incoming transfers
+-
+Credit to account : Aigul Testova
++100 000 
+₸
+Credit to account : Aigul Testova
+2026-
+09-01
+Income
+Card
+account
+400000******0003
+Transfers between own
+accounts
+-
+Transfer between own cards
+1 200 
+₸
+Transfer between own cards
+2026-
+09-01
+Expense
+Card
+account
+400000******0001
+Transfers between own
+accounts
+-
+Transfer between own cards
+1 200 
+₸
+Transfer between own cards
+2026-
+08-28
+Income
+Card
+account
+KZ*0005
+Refill
+-
+Card Replenishment via terminal
++2 000 
+₸
+Card Replenishment via terminal
+Date
+Operation
+type
+Product
+Account
+Category
+MCC
+Code
+Operation name
+Amount
+Description

@@ -358,7 +358,7 @@ public enum BankFeed {
         case "expense":
             switch r.category ?? "" {
             case "Наличные": return .cash
-            case "Переводы", "Пополнения": return .transferOut
+            case "Переводы", "Пополнения", "Люди": return .transferOut
             default: return .purchase
             }
         default: return nil
@@ -375,7 +375,7 @@ public enum BankFeed {
     /// A statement line an Apple Pay payment can be: not a transfer, a cash withdrawal or a top-up.
     static func isPurchaseLine(_ r: FinanceRecord) -> Bool {
         r.kind == "expense" && r.excluded != true && r.pairedWith == nil
-            && !["Переводы", "Наличные", "Пополнения"].contains(r.category ?? "")
+            && !["Переводы", "Наличные", "Пополнения", "Люди", "Комиссии"].contains(r.category ?? "")
     }
 
     /// After a statement is applied: each Apple Pay payment of the same bank that the statement also has gives way to

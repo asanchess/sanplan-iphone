@@ -9,7 +9,16 @@ extension FinanceRecord: @unchecked Sendable {}
 extension FinanceImport: @unchecked Sendable {}
 extension FinanceBudget: @unchecked Sendable {}
 
-/// Открытый текст записи коллекции `finance`. `k`: rec | import | budget | rules | batches.
+/// Всё о счетах, что не принадлежит одному счёту или выписке (FinanceLedgerState).
+public struct FinanceLedgerMeta: Codable, Equatable, Sendable {
+    public var removed: [String]
+    public var people: [String: String]
+    public var owners: [String]
+    public var decisions: [String: FinanceDecision]
+}
+
+/// Открытый текст записи коллекции `finance`. `k`: rec | import | budget | rules | batches | account | stmt | ledger.
+/// Последние три сайт не знает и не трогает.
 public struct FinancePayload: Codable, Equatable, Sendable {
     public var k: String
     /// Место записи в списке; дробное, чтобы вставка в середину не переписывала соседей.
@@ -19,13 +28,17 @@ public struct FinancePayload: Codable, Equatable, Sendable {
     public var budget: FinanceBudget?
     public var rules: [String: String]?
     public var batches: [String]?
+    public var account: FinanceAccount?
+    public var statement: FinanceStatementSource?
+    public var ledger: FinanceLedgerMeta?
 
     enum CodingKeys: String, CodingKey {
-        case k, seq, record, importItem = "import", budget, rules, batches
+        case k, seq, record, importItem = "import", budget, rules, batches, account, statement = "stmt", ledger
     }
 
     public init(k: String, seq: Double? = nil, record: FinanceRecord? = nil, importItem: FinanceImport? = nil,
-                budget: FinanceBudget? = nil, rules: [String: String]? = nil, batches: [String]? = nil) {
+                budget: FinanceBudget? = nil, rules: [String: String]? = nil, batches: [String]? = nil,
+                account: FinanceAccount? = nil, statement: FinanceStatementSource? = nil, ledger: FinanceLedgerMeta? = nil) {
         self.k = k
         self.seq = seq
         self.record = record
@@ -33,6 +46,9 @@ public struct FinancePayload: Codable, Equatable, Sendable {
         self.budget = budget
         self.rules = rules
         self.batches = batches
+        self.account = account
+        self.statement = statement
+        self.ledger = ledger
     }
 }
 
@@ -51,6 +67,7 @@ public enum FinanceCloud {
     public static let budgetID = "f-meta-budget"
     public static let rulesID = "f-meta-rules"
     public static let batchesID = "f-meta-batches"
+    public static let ledgerID = "f-meta-ledger"
 
     /// `f-<localId>`, если id подходит серверу и не совпадает со служебным; иначе `f-x` + 40 hex от SHA-256.
     public static func collectionID(forLocal id: String) -> String {
@@ -89,6 +106,21 @@ public enum FinanceCloud {
         if let budget = state.budget { desired.append((budgetID, FinancePayload(k: "budget", budget: budget))) }
         if let rules = state.merchantCategories, !rules.isEmpty { desired.append((rulesID, FinancePayload(k: "rules", rules: rules))) }
         if !state.committedBatches.isEmpty { desired.append((batchesID, FinancePayload(k: "batches", batches: state.committedBatches))) }
+
+        if let ledger = state.ledger {
+            let accountIDs = ledger.accounts.map { hashedID("account:" + $0.id) }
+            let accountSeqs = assignSeq(ids: accountIDs, existing: existing, kind: "account")
+            for (i, account) in ledger.accounts.enumerated() {
+                desired.append((accountIDs[i], FinancePayload(k: "account", seq: accountSeqs[i], account: account)))
+            }
+            let sourceIDs = ledger.statements.map { hashedID("stmt:" + $0.importId) }
+            let sourceSeqs = assignSeq(ids: sourceIDs, existing: existing, kind: "stmt")
+            for (i, source) in ledger.statements.enumerated() {
+                desired.append((sourceIDs[i], FinancePayload(k: "stmt", seq: sourceSeqs[i], statement: source)))
+            }
+            let meta = FinanceLedgerMeta(removed: ledger.removed, people: ledger.people, owners: ledger.owners, decisions: ledger.decisions)
+            desired.append((ledgerID, FinancePayload(k: "ledger", ledger: meta)))
+        }
 
         let wanted = Set(desired.map(\.id))
         let puts = desired.filter { existing[$0.id] != $0.data }
@@ -134,13 +166,23 @@ public enum FinanceCloud {
         }
         let records = ordered("rec").compactMap(\.p.record)
         let imports = ordered("import").compactMap(\.p.importItem)
+        var ledger = FinanceLedgerState()
+        ledger.accounts = ordered("account").compactMap(\.p.account)
+        ledger.statements = ordered("stmt").compactMap(\.p.statement)
+        if let meta = payloads.first(where: { $0.p.k == "ledger" })?.p.ledger {
+            ledger.removed = meta.removed
+            ledger.people = meta.people
+            ledger.owners = meta.owners
+            ledger.decisions = meta.decisions
+        }
         return FinanceState(
             version: 1,
             records: records,
             committedBatches: payloads.first { $0.p.k == "batches" }?.p.batches ?? [],
             imports: imports.isEmpty ? nil : imports,
             merchantCategories: payloads.first { $0.p.k == "rules" }?.p.rules,
-            budget: payloads.first { $0.p.k == "budget" }?.p.budget
+            budget: payloads.first { $0.p.k == "budget" }?.p.budget,
+            ledger: ledger == FinanceLedgerState() ? nil : ledger
         )
     }
 

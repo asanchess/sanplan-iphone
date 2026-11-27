@@ -348,65 +348,6 @@ final class FinanceBudgetTests: XCTestCase {
 
     // MARK: Review fixes
 
-    /// Kaspi closes on 1 Nov, Halyk on 10 Nov. Halyk's later operations are taken back to 1 Nov, so a hand-entered
-    /// operation and a reconciliation in between still count.
-    func testBalanceStartsFromTheOldestStatementSoLaterRecordsCount() throws {
-        var state = FinanceState(records: [
-            op("h0", "expense", 5_000, "2026-11-01", category: "Продукты", importId: "h"),
-            op("h1", "expense", 30_000, "2026-11-05", category: "Продукты", importId: "h"),
-            op("h2", "income", 10_000, "2026-11-08", category: "Зарплата", importId: "h"),
-            op("m1", "expense", 4_000, "2026-11-06", category: "Кафе и рестораны"),
-        ])
-        state.imports = [
-            FinanceImport(id: "k", bank: "Kaspi", fileName: "k.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-02",
-                          count: 0, closingMinor: 100_000_00, closingDate: "2026-11-01"),
-            FinanceImport(id: "h", bank: "Halyk", fileName: "h.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-10",
-                          count: 3, closingMinor: 200_000_00, closingDate: "2026-11-10"),
-        ]
-        StatementImport.rebuildBalance(&state)
-        let checkpoint = try XCTUnwrap(state.records.first { $0.id == StatementImport.balanceRecordId })
-        XCTAssertEqual(checkpoint.date, "2026-11-01")
-        XCTAssertEqual(checkpoint.amountMinor, 320_000_00)
-
-        var snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
-        XCTAssertEqual(snap.onAccountsMinor, (300_000 - 4_000) * 100, "both closing balances, less the hand-entered spending")
-        XCTAssertEqual(snap.asOf, "2026-11-01", "freshness is the oldest account's")
-
-        // Editing or deleting an imported operation moves the checkpoint with it.
-        var edited = try StatementImport.edit("h1", StatementImport.RecordEdit(
-            title: "Магнум", amountMinor: 30_000_00, date: "2026-11-05", category: "Продукты", note: "", excluded: true,
-            applyCategoryToMerchant: false
-        ), in: state)
-        XCTAssertEqual(try FinanceBudgeting.snapshot(edited, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000) * 100)
-        edited = try removeFinanceRecord(state: state, id: "h2")
-        XCTAssertEqual(try FinanceBudgeting.snapshot(edited, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000) * 100)
-
-        // A hand-entered operation on the checkpoint day still counts after another import.
-        state.records.append(op("m0", "expense", 1_000, "2026-11-01", category: "Наличные"))
-        StatementImport.rebuildBalance(&state)
-        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, (300_000 - 4_000 - 1_000) * 100)
-
-        state = try FinanceBudgeting.reconcile(state, totalMinor: 250_000_00, today: "2026-11-07", id: "r1")
-        snap = try FinanceBudgeting.snapshot(state, today: "2026-11-10")
-        XCTAssertEqual(snap.onAccountsMinor, 260_000_00, "the reconciliation stands, plus Halyk's income after it")
-    }
-
-    /// Kaspi → Halyk on 5 Nov: Kaspi's statement ends on 1 Nov, so only Halyk's incoming side is known.
-    func testLoneTransferFromAnOwnAccountIsNotCountedTwice() throws {
-        var incoming = op("in", "income", 50_000, "2026-11-05", category: "Переводы", importId: "h")
-        incoming.excluded = true
-        incoming.note = StatementImport.ownTransferNote
-        var state = FinanceState(records: [incoming])
-        state.imports = [
-            FinanceImport(id: "k", bank: "Kaspi", fileName: "k.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-02",
-                          count: 0, closingMinor: 100_000_00, closingDate: "2026-11-01"),
-            FinanceImport(id: "h", bank: "Halyk", fileName: "h.pdf", periodStart: nil, periodEnd: nil, importedAt: "2026-11-10",
-                          count: 1, closingMinor: 200_000_00, closingDate: "2026-11-10"),
-        ]
-        StatementImport.rebuildBalance(&state)
-        XCTAssertEqual(try FinanceBudgeting.snapshot(state, today: "2026-11-10").onAccountsMinor, 250_000_00)
-    }
-
     func testRealPaymentReplacesAMarkByHand() throws {
         var state = try FinanceBudgeting.togglePaidByHand(november(), obligationId: "rent", today: "2026-11-03")
         state.records.append(op("pay1", "expense", 120_000, "2026-11-06", merchant: "Иванов А."))

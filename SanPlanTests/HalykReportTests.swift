@@ -215,10 +215,12 @@ final class HalykReportTests: XCTestCase {
         XCTAssertEqual(out.excluded, true)
         XCTAssertEqual(out.pairedWith, inn.id)
         XCTAssertEqual(inn.excluded, true)
-        XCTAssertNil(state.records.first { $0.id == "r-4-0003" }?.excluded, "An outgoing transfer with no own side stays an expense")
+        let lone = state.records.first { $0.id == "r-4-0003" }
+        XCTAssertEqual(lone?.status, "pendingPair", "An outgoing transfer with no own side waits for the other bank")
+        XCTAssertEqual(lone?.excluded, true)
         XCTAssertEqual(StatementImport.account(of: out, in: state), "0004")
         XCTAssertEqual(StatementImport.account(of: inn, in: state), "0003")
-        XCTAssertNil(state.records.first { $0.kind == "balance" }, "No balance in the report, so no checkpoint")
+        XCTAssertNil(state.records.first { $0.kind == "balance" }, "No balance in the report")
     }
 
     func testReportAfterAStatementOfOneAccountAddsOnlyWhatIsNew() throws {
@@ -253,7 +255,8 @@ final class HalykReportTests: XCTestCase {
         XCTAssertEqual(Set(reportLeft), ["2025-11-20", "2025-11-25", "2025-11-26"])
         XCTAssertEqual(state.records.filter { $0.importId == "h" }.count, 6)
         XCTAssertEqual(state.records.filter { $0.kind == "expense" && $0.date == "2025-11-05" }.count, 1)
-        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.count, 1, "The card's closing balance")
+        let card = state.ledger?.accounts.first { $0.identifiers.contains("kz:0002") }
+        XCTAssertEqual(card?.anchorMinor, 19_540_000, "The card's closing balance")
     }
 
     func testTakingOverKeepsTheTransferPartner() throws {

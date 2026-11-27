@@ -26,7 +26,7 @@ final class StatementImportTests: XCTestCase {
     Доступно на 01.11.25
     + 10 000,00 ₸
       Пополнения
-    + 420 000,00 ₸
+    + 370 000,00 ₸
     Дата
     Сумма
     Операция       Детали
@@ -318,13 +318,9 @@ final class StatementImportTests: XCTestCase {
         XCTAssertEqual(state.records.first { $0.id == "h-3" }?.note, "Перевод между своими счетами")
         XCTAssertNil(state.records.first { $0.id == "h-1" }?.excluded, "An incoming transfer with no matching side stays")
 
-        let balances = state.records.filter { $0.kind == "balance" }
-        XCTAssertEqual(balances.count, 1)
-        XCTAssertEqual(balances.first?.amountMinor, 35_754_950 + 19_540_000)
-        XCTAssertEqual(balances.first?.date, "2025-11-30")
-        let checkpoint = try XCTUnwrap(state.records.firstIndex { $0.id == StatementImport.balanceRecordId })
-        let sameDay = state.records.indices.filter { state.records[$0].importId != nil && state.records[$0].date == "2025-11-30" }
-        XCTAssertTrue(sameDay.allSatisfy { $0 < checkpoint }, "Placed after the operations of its day")
+        // Each account keeps its own balance; there is no common checkpoint record.
+        XCTAssertTrue(state.records.allSatisfy { $0.kind != "balance" })
+        XCTAssertEqual(FinanceLedger.total(on: "2025-11-30", in: state), 35_754_950 + 19_540_000)
 
         let summary = try financeSummary(state, today: "2025-11-30")
         XCTAssertEqual(summary.balanceMinor, 35_754_950 + 19_540_000)
@@ -333,12 +329,12 @@ final class StatementImportTests: XCTestCase {
     func testExcludedRecordsNeverCount() throws {
         let state = try importing(Self.kaspiText, id: "k", into: FinanceState())
         let insights = FinanceInsights.compute(state, month: "2025-11", today: "2025-11-15")
-        let expenses: Int64 = 250_000 + 120_000 + 1_500_000 + 2_000_000 + 375_050
+        let expenses: Int64 = 250_000 + 120_000 + 1_500_000 + 375_050
         XCTAssertEqual(insights.incomeMinor, 35_000_000, "Deposit and own-card top-ups are left out")
-        XCTAssertEqual(insights.expenseMinor, expenses, "The deposit transfer is left out")
+        XCTAssertEqual(insights.expenseMinor, expenses, "The deposit transfer and the cash taken out are left out")
         XCTAssertEqual(insights.forecastExpenseMinor, expenses * 30 / 15)
-        XCTAssertEqual(insights.categories.first?.name, "Наличные")
-        XCTAssertEqual(insights.topMerchants.first?.name, "Банкомат Kaspi")
+        XCTAssertEqual(insights.categories.first?.name, "Переводы")
+        XCTAssertEqual(insights.topMerchants.first?.name, "Т. Марина")
         XCTAssertEqual(insights.categories.first { $0.name == "Продукты" }?.amountMinor, 625_050)
         XCTAssertEqual(insights.previousExpenseMinor, 0)
     }
@@ -377,13 +373,13 @@ final class StatementImportTests: XCTestCase {
         state = try StatementImport.edit("k-4", exclude, in: state)
         XCTAssertEqual(state.records.first { $0.id == "k-4" }?.excluded, true)
         XCTAssertEqual(state.records.first { $0.id == "k-4" }?.note, "вернёт")
-        XCTAssertEqual(FinanceInsights.compute(state, month: "2025-11", today: "2025-11-30").expenseMinor, 250_000 + 120_000 + 2_000_000 + 375_050)
+        XCTAssertEqual(FinanceInsights.compute(state, month: "2025-11", today: "2025-11-30").expenseMinor, 250_000 + 120_000 + 375_050)
 
         let bad = StatementImport.RecordEdit(title: " ", amountMinor: 100, date: "2025-11-07", category: "", note: "", excluded: false)
         XCTAssertThrowsError(try StatementImport.edit("k-4", bad, in: state))
     }
 
-    func testDeleteImportRemovesOnlyItsRecordsAndRebuildsBalance() throws {
+    func testDeleteImportRemovesOnlyItsRecordsAndItsBalance() throws {
         let manual = FinanceRecord(id: "m1", kind: "expense", title: "обед", amountMinor: 300_000, date: "2025-11-05", category: "Кафе и рестораны")
         var state = FinanceState(records: [manual])
         state = try importing(Self.kaspiText, id: "k", into: state)
@@ -395,19 +391,19 @@ final class StatementImportTests: XCTestCase {
         XCTAssertTrue(state.records.allSatisfy { $0.importId != "k" })
         XCTAssertNotNil(state.records.first { $0.id == "m1" })
         XCTAssertEqual(state.records.filter { $0.importId == "h" }.count, 6)
-        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.map(\.amountMinor), [19_540_000])
+        XCTAssertEqual(FinanceLedger.total(on: "2025-11-30", in: state), 19_540_000)
     }
 
-    func testNewerStatementOfTheSameAccountReplacesItsBalance() throws {
+    func testNewerStatementOfTheSameAccountShowsADifferenceInsteadOfMovingTheBalance() throws {
         var state = try importing(Self.halykText, id: "h1", into: FinanceState())
         let december = Self.halykText
             .replacingOccurrences(of: "between 01.11.2025 and 30.11.2025", with: "between 01.12.2025 and 31.12.2025")
             .replacingOccurrences(of: "Closing balance: 195 400,00", with: "Closing balance: 100 000,00")
             .replacingOccurrences(of: ".11.2025", with: ".12.2025")
         state = try importing(december, id: "h2", into: state)
-        let balances = state.records.filter { $0.kind == "balance" }
-        XCTAssertEqual(balances.map(\.amountMinor), [10_000_000])
-        XCTAssertEqual(balances.first?.date, "2025-12-31")
+        XCTAssertEqual(FinanceLedger.total(on: "2025-12-31", in: state), 39_080_000)
+        XCTAssertEqual(FinanceLedger.diffs(in: state).map(\.bank), [10_000_000])
+        XCTAssertEqual(FinanceLedger.diffs(in: state).map(\.date), ["2025-12-31"])
     }
 
     func testTheSameStatementAgainIsRejectedAndAnOverlapAddsOnlyNewOperations() throws {
@@ -425,7 +421,7 @@ final class StatementImportTests: XCTestCase {
         state = try importing(longer, id: "k2", into: state)
         XCTAssertEqual(state.records.filter { $0.importId == "k2" }.map(\.date), ["2025-11-12"], "Only the day the first statement did not have")
         XCTAssertEqual(state.imports?.first { $0.id == "k2" }?.count, 1)
-        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.map(\.amountMinor), [35_754_950], "One account counts once")
+        XCTAssertEqual(FinanceLedger.total(on: "2025-11-30", in: state), 35_754_950, "One account counts once")
     }
 
     func testOverdrawnAccountLowersTheCombinedBalance() throws {
@@ -433,18 +429,19 @@ final class StatementImportTests: XCTestCase {
         let overdrawn = Self.halykText.replacingOccurrences(of: "Closing balance: 195 400,00", with: "Closing balance: -5 000,00")
         state = try importing(overdrawn, id: "h", into: state)
         XCTAssertEqual(state.imports?.first { $0.id == "h" }?.closingMinor, -500_000)
-        XCTAssertEqual(state.records.filter { $0.kind == "balance" }.map(\.amountMinor), [35_754_950 - 500_000])
+        XCTAssertEqual(FinanceLedger.total(on: "2025-11-30", in: state), 35_754_950 - 500_000)
     }
 
-    func testDeletingOneSideOfAnOwnTransferCountsTheOtherAgain() throws {
+    func testDeletingOneSideOfAnOwnTransferLeavesTheOtherWaiting() throws {
         var state = try importing(Self.kaspiText, id: "k", into: FinanceState())
         state = try importing(Self.halykText, id: "h", into: state)
         XCTAssertEqual(state.records.first { $0.id == "h-3" }?.pairedWith, "k-8")
-        XCTAssertNil(state.records.first { $0.id == "k-8" }?.pairedWith, "Already the owner's by name, so nothing to undo")
+        XCTAssertEqual(state.records.first { $0.id == "k-8" }?.pairedWith, "h-3")
 
         state = try StatementImport.deleteImport("k", from: state)
         let transfer = try XCTUnwrap(state.records.first { $0.id == "h-3" })
-        XCTAssertNil(transfer.excluded)
+        XCTAssertEqual(transfer.status, "pendingPair", "It waits for the Kaspi statement again")
+        XCTAssertEqual(transfer.excluded, true)
         XCTAssertNil(transfer.note)
         XCTAssertNil(transfer.pairedWith)
 

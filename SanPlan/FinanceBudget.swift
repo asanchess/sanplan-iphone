@@ -326,7 +326,7 @@ public enum FinanceBudgeting {
     /// Money coming in, never a spending category.
     static let incomeCategories: Set<String> = ["Зарплата", "Пополнения"]
     /// Categories whose merchants are people or cash, never named in hints or the export.
-    static let personalCategories: Set<String> = ["Переводы", "Наличные", "Пополнения", "Зарплата"]
+    static let personalCategories: Set<String> = ["Переводы", "Люди", "Наличные", "Пополнения", "Зарплата"]
     /// Money the owner moved in, not earned: no set-aside offer for it.
     static let personalIncomeCategories: Set<String> = ["Пополнения"]
 
@@ -357,7 +357,7 @@ public enum FinanceBudgeting {
         let spentBy = totalsByCategory(flexibleExpenses(state, month: month, upTo: today))
         return limits.map { entry -> LimitStatus in
             let limit = entry.value
-            let spent = spentBy[entry.key] ?? 0
+            let spent = max(0, spentBy[entry.key] ?? 0)
             let projected = days.elapsed > 0 ? spent * Int64(days.total) / Int64(days.elapsed) : spent
             var runsOut: Int?
             // Fewer than five days in, one purchase would set the pace for the whole month.
@@ -397,9 +397,12 @@ public enum FinanceBudgeting {
         let remaining = limits.reduce(Int64(0)) { $0 + $1.remainingMinor }
         let days = dayInfo(month, today: today) ?? (elapsed: 1, total: 30)
         let daysLeft = max(1, days.total - days.elapsed + 1)
-        let asOf = state.records
+        // Accounts with a balance are as fresh as their anchor or the newest statement.
+        let anchored = (state.ledger?.accounts ?? []).compactMap(\.anchorDate)
+        let covered = anchored.isEmpty ? [] : anchored + (state.imports ?? []).compactMap(\.periodEnd)
+        let asOf = (state.records
             .filter { $0.kind == "balance" && $0.excluded != true && ($0.date ?? "") <= today }
-            .compactMap(\.date).max()
+            .compactMap(\.date) + covered.filter { $0 <= today }).max()
         var snap = BudgetSnapshot(
             onAccountsMinor: summary.balanceMinor,
             asOf: asOf,
@@ -556,7 +559,8 @@ public enum FinanceBudgeting {
         let month = String(today.prefix(7))
         let amount = ob.amountMinor ?? 0
         let list = counted(state).filter {
-            $0.kind == "expense" && $0.obligationId == nil && !isOwnTransfer($0) && monthOf($0.date) == month && ($0.date ?? "") <= today
+            $0.kind == "expense" && ($0.amountMinor ?? 0) > 0 && $0.obligationId == nil && !isOwnTransfer($0)
+                && monthOf($0.date) == month && ($0.date ?? "") <= today
         }
         return list.sorted { a, b in
             let da = abs((a.amountMinor ?? 0) - amount)
@@ -796,7 +800,7 @@ public enum FinanceBudgeting {
     // MARK: Operations feed
 
     public static func isOwnTransfer(_ r: FinanceRecord) -> Bool {
-        r.pairedWith != nil || r.note == StatementImport.ownTransferNote
+        r.pairedWith != nil || r.transfer != nil || r.note == StatementImport.ownTransferNote
     }
 
     public static func source(of r: FinanceRecord, imports: [String: FinanceImport]) -> String {
@@ -826,7 +830,7 @@ public enum FinanceBudgeting {
             case .all: break
             case .expense: if r.kind != "expense" || own { continue }
             case .income: if r.kind != "income" || own { continue }
-            case .transfer: if !own && r.category != "Переводы" { continue }
+            case .transfer: if !own && r.category != "Переводы" && r.category != "Люди" { continue }
             }
             if let category = filter.category, (r.category ?? "Без категории") != category { continue }
             if !query.isEmpty {
@@ -923,7 +927,7 @@ public enum FinanceBudgeting {
         let window: Set<String> = [current, previous, FinanceInsights.previousMonth(previous)]
         let learned = Set((state.budget?.obligationMerchants ?? [:]).keys)
         let ops = counted(state).filter {
-            $0.kind == "expense" && $0.obligationId == nil && !isOwnTransfer($0) && !personalCategories.contains($0.category ?? "")
+            $0.kind == "expense" && ($0.amountMinor ?? 0) > 0 && $0.obligationId == nil && !isOwnTransfer($0) && !personalCategories.contains($0.category ?? "")
                 && window.contains(monthOf($0.date)) && ($0.date ?? "") <= today
         }
         var out: [FinanceHint] = []
@@ -945,7 +949,8 @@ public enum FinanceBudgeting {
 
     /// Many small purchases at one place that add up.
     static func smallFrequentHints(_ state: FinanceState, month: String, today: String) -> [FinanceHint] {
-        let ops = flexibleExpenses(state, month: month, upTo: today).filter { !isOwnTransfer($0) && !personalCategories.contains($0.category ?? "") }
+        let ops = flexibleExpenses(state, month: month, upTo: today)
+            .filter { ($0.amountMinor ?? 0) > 0 && !isOwnTransfer($0) && !personalCategories.contains($0.category ?? "") }
         var out: [FinanceHint] = []
         for entry in Dictionary(grouping: ops, by: { MerchantCategories.key($0.merchant ?? $0.title) }) where !entry.key.isEmpty {
             let amounts = entry.value.compactMap(\.amountMinor)
@@ -1062,7 +1067,7 @@ public enum FinanceBudgeting {
             lines.append("")
             lines.append("\(month)\(partial): доходы \(money(income)), расходы \(money(expense)).")
             let byCategory = totalsByCategory(spending).sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            for entry in byCategory.prefix(8) {
+            for entry in byCategory.filter({ $0.value > 0 }).prefix(8) {
                 lines.append("  - \(entry.key): \(money(entry.value))")
             }
             month = nextMonth(month)
@@ -1073,6 +1078,7 @@ public enum FinanceBudgeting {
         for group in Dictionary(grouping: named, by: { MerchantCategories.key($0.merchant ?? $0.title) }).values {
             guard let name = safeName(group[0].merchant ?? group[0].title) else { continue }
             let total = group.reduce(Int64(0)) { $0 + ($1.amountMinor ?? 0) }
+            guard total > 0 else { continue }
             byMerchant.append((name: name, total: total, count: group.count))
         }
         byMerchant.sort { $0.total != $1.total ? $0.total > $1.total : $0.name < $1.name }
@@ -1081,7 +1087,7 @@ public enum FinanceBudgeting {
             lines.append("Больше всего потрачено у:")
             for m in byMerchant.prefix(10) { lines.append("  - \(m.name): \(money(m.total)), \(m.count) раз") }
         }
-        let toPeople = ops.filter { $0.kind == "expense" && $0.category == "Переводы" }.reduce(Int64(0)) { $0 + ($1.amountMinor ?? 0) }
+        let toPeople = ops.filter { $0.kind == "expense" && ["Переводы", "Люди"].contains($0.category ?? "") }.reduce(Int64(0)) { $0 + ($1.amountMinor ?? 0) }
         if toPeople > 0 { lines.append("Переводы людям за период: \(money(toPeople)) (без имён).") }
 
         let obligations = state.records.filter { $0.kind == "obligation" }
@@ -1155,8 +1161,10 @@ public enum FinanceBudgeting {
         return cut
     }
 
+    /// Refunds come as negative spending, so a list of single purchases also asks for an amount above zero.
     static func counted(_ state: FinanceState) -> [FinanceRecord] {
         state.records.filter { $0.excluded != true && ($0.kind == "income" || $0.kind == "expense") && $0.date != nil }
+            .map(FinanceLedger.netted)
     }
 
     /// Everyday spending the limits watch: not the payments of the plan.
@@ -1233,6 +1241,7 @@ extension FinanceBudgeting {
         state.records.filter { r in
             r.importId == nil
                 && r.id != StatementImport.balanceRecordId
+                && !r.id.hasPrefix("adj-")
                 && !(r.kind == "balance" && r.title == reconcileTitle)
         }.reversed()
     }
@@ -1307,7 +1316,7 @@ extension FinanceBudgeting {
             if !excluded { r.pairedWith = nil }
         }
         next.records[index] = r
-        StatementImport.rebuildBalance(&next)
+        if next.ledger != nil { FinanceLedger.link(&next) }
         return try validateFinance(next)
     }
 }

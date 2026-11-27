@@ -78,6 +78,18 @@ public struct FinanceRecord: Codable, Equatable, Identifiable {
     public var pairedWith: String?
     /// Envelopes only: what the money is for, filled top to bottom by `savedMinor`.
     public var items: [EnvelopeItem]?
+    // Account bookkeeping (FinanceAccounts.swift). The website drops these; the phone reads them back from the statement.
+    public var accountId: String?
+    /// «account:date:signed amount:repeat», what the same operation is recognised by in any statement.
+    public var fp: String?
+    /// What kind of money movement the statement's words say it is, e.g. «out» or «card:0006».
+    public var hint: String?
+    public var transfer: FinanceTransfer?
+    /// «review»: waiting for the owner in «Проверь»; «pendingPair»: the other bank's statement is not loaded yet.
+    public var status: String?
+    public var ownerEdited: Bool?
+    /// Money back for a purchase: reduces its spending category instead of counting as income.
+    public var refund: Bool?
 
     public init(
         id: String,
@@ -144,6 +156,8 @@ public struct FinanceState: Codable, Equatable {
     public var merchantCategories: [String: String]?
     /// Monthly plan: category limits, set-aside percent and what the owner already answered (see FinanceBudget.swift).
     public var budget: FinanceBudget?
+    /// Accounts, stored statement texts and the owner's «Проверь» answers.
+    public var ledger: FinanceLedgerState?
 
     public init(
         version: Int = 1,
@@ -151,7 +165,8 @@ public struct FinanceState: Codable, Equatable {
         committedBatches: [String] = [],
         imports: [FinanceImport]? = nil,
         merchantCategories: [String: String]? = nil,
-        budget: FinanceBudget? = nil
+        budget: FinanceBudget? = nil,
+        ledger: FinanceLedgerState? = nil
     ) {
         self.version = version
         self.records = records
@@ -159,6 +174,7 @@ public struct FinanceState: Codable, Equatable {
         self.imports = imports
         self.merchantCategories = merchantCategories
         self.budget = budget
+        self.ledger = ledger
     }
 }
 
@@ -402,6 +418,16 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
         clean.note = rec.note.flatMap { $0.isEmpty ? nil : String($0.prefix(500)) }
         clean.excluded = rec.excluded == true ? true : nil
         clean.pairedWith = rec.pairedWith.flatMap { $0.isEmpty || $0.count > FinanceConstants.maxIdLen ? nil : $0 }
+        if rec.kind == "income" || rec.kind == "expense" {
+            func short(_ text: String?) -> String? { text.flatMap { $0.isEmpty || $0.count > FinanceConstants.maxTitleLen ? nil : $0 } }
+            clean.accountId = short(rec.accountId)
+            clean.fp = short(rec.fp)
+            clean.hint = short(rec.hint)
+            clean.transfer = rec.transfer
+            clean.status = ["review", "pendingPair"].contains(rec.status) ? rec.status : nil
+            clean.ownerEdited = rec.ownerEdited == true ? true : nil
+            clean.refund = rec.refund == true ? true : nil
+        }
 
         switch rec.kind {
         case "balance":
@@ -507,13 +533,21 @@ public func validateFinance(_ value: FinanceState) throws -> FinanceState {
     // `deleteImport` drops a statement on purpose.
     let cleanImports = value.imports?.filter { importIds.contains($0.id) || ($0.closingMinor != nil && $0.closingDate != nil) }
     let cleanRules = value.merchantCategories?.filter { !$0.key.isEmpty && !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
+    var ledger = value.ledger
+    // A statement's text goes with its import.
+    let keptImports = Set((cleanImports ?? []).map(\.id))
+    ledger?.statements.removeAll { !keptImports.contains($0.importId) }
+    if let removed = ledger?.removed, removed.count > FinanceConstants.maxRecords {
+        ledger?.removed = Array(removed.suffix(FinanceConstants.maxRecords))
+    }
     return FinanceState(
         version: 1,
         records: cleanRecords,
         committedBatches: cleanBatches,
         imports: (cleanImports?.isEmpty ?? true) ? nil : cleanImports,
         merchantCategories: (cleanRules?.isEmpty ?? true) ? nil : cleanRules,
-        budget: try value.budget.flatMap { try FinanceBudget.validated($0, records: cleanRecords) }
+        budget: try value.budget.flatMap { try FinanceBudget.validated($0, records: cleanRecords) },
+        ledger: ledger == FinanceLedgerState() ? nil : ledger
     )
 }
 
@@ -790,7 +824,9 @@ public func commitFinance(
         nextBatches = Array(nextBatches.suffix(FinanceConstants.maxBatches))
     }
 
-    let nextState = FinanceState(version: 1, records: nextRecords, committedBatches: nextBatches, imports: cleanState.imports, merchantCategories: cleanState.merchantCategories, budget: cleanState.budget)
+    var nextState = cleanState
+    nextState.records = nextRecords
+    nextState.committedBatches = nextBatches
     return try validateFinance(nextState)
 }
 
@@ -815,23 +851,21 @@ public func removeFinanceRecord(state: FinanceState, id: String) throws -> Finan
         updatedRecords.append(next)
     }
 
-    if wasImported {
-        var rebuilt = FinanceState(
-            version: 1, records: updatedRecords, committedBatches: cleanState.committedBatches, imports: cleanState.imports,
-            merchantCategories: cleanState.merchantCategories, budget: cleanState.budget
-        )
-        StatementImport.rebuildBalance(&rebuilt)
-        updatedRecords = rebuilt.records
+    var next = cleanState
+    next.records = updatedRecords
+    // Loading the statement again must not bring a deleted operation back.
+    if let fp = target.fp {
+        var ledger = next.ledger ?? FinanceLedgerState()
+        ledger.removed.append(fp)
+        next.ledger = ledger
     }
+    // Deleting a «Корректировка» takes back the accepted bank balance it comes from.
+    if target.id.hasPrefix("adj-"), let i = next.ledger?.accounts.firstIndex(where: { $0.id == target.accountId }) {
+        next.ledger?.accounts[i].accepted?.removeAll { $0.date == String(target.id.suffix(10)) }
+    }
+    if wasImported || target.accountId != nil { FinanceLedger.link(&next) }
 
-    return try validateFinance(FinanceState(
-        version: 1,
-        records: updatedRecords,
-        committedBatches: cleanState.committedBatches,
-        imports: cleanState.imports,
-        merchantCategories: cleanState.merchantCategories,
-        budget: cleanState.budget
-    ))
+    return try validateFinance(next)
 }
 
 // MARK: - Date and Calendar Math
@@ -899,7 +933,10 @@ public func financeSummary(
     horizonDays: Int = 30
 ) throws -> FinanceSummary {
     var cleanState = try validateFinance(state)
+    // A transfer moves money between accounts, so the accounts' balances see every record.
+    let accountsTotal = FinanceLedger.total(on: today, in: cleanState)
     cleanState.records.removeAll { $0.excluded == true }
+    cleanState.records = cleanState.records.map(FinanceLedger.netted)
 
     guard isValidDateString(today) else {
         throw FinanceError.invalidDate("Invalid today date")
@@ -953,7 +990,8 @@ public func financeSummary(
         }
     }
 
-    let byCategory = categoryOrder.map { name in
+    // A category refunded as much as it spent is not shown.
+    let byCategory = categoryOrder.filter { (categoryAmounts[$0] ?? 0) > 0 }.map { name in
         FinanceCategoryBreakdown(name: name, amountMinor: categoryAmounts[name] ?? 0)
     }
     let netMinor = incomeMinor - expenseMinor
@@ -978,6 +1016,7 @@ public func financeSummary(
         }
         balanceMinor = bal
     }
+    if let accountsTotal { balanceMinor = accountsTotal }
 
     // 4. Goals reserved
     var reservedGoalMinor: Int64 = 0

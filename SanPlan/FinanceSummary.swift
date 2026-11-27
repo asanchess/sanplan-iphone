@@ -52,7 +52,7 @@ public enum FinanceSummaries {
             sum += amount
             by[name(r), default: 0] += amount
         }
-        return (tenge(sum), by.mapValues(tenge))
+        return (tenge(sum), by.filter { $0.value > 0 }.mapValues(tenge))
     }
 
     public static func day(_ state: FinanceState, _ day: String) -> FinanceDaySummary {
@@ -108,9 +108,9 @@ public enum FinanceSummaries {
             guard limits[cat] != nil else { continue }
             if r.date == today { todaySpent += r.amountMinor ?? 0 } else { before[cat, default: 0] += r.amountMinor ?? 0 }
         }
-        let remaining = limits.reduce(Int64(0)) { $0 + max(0, $1.value - (before[$1.key] ?? 0)) }
+        let remaining = limits.reduce(Int64(0)) { $0 + max(0, $1.value - max(0, before[$1.key] ?? 0)) }
         let share = remaining / Int64(daysLeft)
-        var amount = max(0, share - todaySpent)
+        var amount = max(0, share - max(0, todaySpent))
         var basis: String
         if remaining == 0 {
             basis = "Лимиты месяца исчерпаны"

@@ -1,0 +1,136 @@
+The report includes data for the following products:
+Card accounts:
+400000******0001
+400000******0002
+400000******0003
+KZ*0004
+KZ*0005
+Date
+Operation type
+Product
+Account
+Category
+MCC Code
+Operation name
+Amount
+Description
+This analytical report has been prepared solely for informational purposes based on data on the movement of funds on client products. The report is not an official document, is not intended for submission to government authorities and has no
+legal force.
+2026-11-24
+Expense
+Card account
+400000******0002
+Supermarkets
+5411
+MERCHANT 023
+-3 040 
+₸
+MERCHANT 023
+2026-11-24
+Expense
+Card account
+400000******0003
+Transfers between own accounts
+-
+Transfer between own cards
+106 000 
+₸
+Transfer between own cards
+2026-11-24
+Income
+Card account
+400000******0001
+Transfers between own accounts
+-
+Transfer between own cards
+106 000 
+₸
+Transfer between own cards
+2026-11-24
+Expense
+Card account
+400000******0002
+Cafes and restaurants
+5814
+MERCHANT 005
+-8 400 
+₸
+MERCHANT 005
+2026-11-24
+Expense
+Card account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-22 000 
+₸
+Outgoing transfer
+2026-11-24
+Expense
+Card account
+KZ*0004
+Outgoing transfers
+-
+Outgoing transfer
+-400 
+₸
+Outgoing transfer
+2026-11-24
+Expense
+Card account
+400000******0002
+Cafes and restaurants
+5814
+MERCHANT 285
+-1 600 
+₸
+MERCHANT 285
+2026-11-24
+Expense
+Card account
+400000******0002
+Supermarkets
+5411
+MERCHANT 023
+-1 360 
+₸
+MERCHANT 023
+2026-11-24
+Income
+Card account
+KZ*0005
+Salary
+-
+АО "Работодатель"
++104 744 
+₸
+АО "Работодатель"
+2026-11-21
+Income
+Card account
+400000******0003
+Refill
+-
+MERCHANT 279
++712 
+₸
+MERCHANT 279
+2026-11-21
+Income
+Card account
+400000******0003
+Refill
+-
+MERCHANT 279
++712 
+₸
+MERCHANT 279
+Analytical report on the transactions of customer
+TESTOV ARMAN for the period from 21.11.2026 to 27.11.2026
+Expenses amount
+36 800 
+₸
+Income amount
+106 170 
+₸
